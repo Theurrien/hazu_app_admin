@@ -1,0 +1,31 @@
+{
+  "name": "hazu-start",
+  "version": "1.0.0",
+  "description": "Hazu API Starter Kit - Foundation for building Hazu platform integrations",
+  "main": "index.ts",
+  "scripts": {
+    "start": "npx ts-node index.ts",
+    "example": "npx ts-node examples/basic-usage.ts",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "keywords": [
+    "hazu",
+    "api",
+    "typescript",
+    "starter-kit"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.3.3",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
