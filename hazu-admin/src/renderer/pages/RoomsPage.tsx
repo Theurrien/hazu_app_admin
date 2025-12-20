@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { Room, RoomType } from '../../shared/types';
+import { RoomAssignmentsList } from '../components/AssignmentsList';
 
 const roomTypeLabels: Record<RoomType, string> = {
   state: 'Cantons',
@@ -15,11 +16,21 @@ const roomTypeColors: Record<RoomType, string> = {
   cie: 'bg-orange-100 text-orange-800',
 };
 
+interface PersonAssignment {
+  person_id: string;
+  display_name: string;
+  email: string | null;
+  person_type: string;
+}
+
 function RoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<RoomType | 'all'>('all');
   const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<PersonAssignment[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
 
   useEffect(() => {
     loadRooms();
@@ -35,6 +46,27 @@ function RoomsPage() {
       console.error('Failed to load rooms:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCardClick = async (roomId: string) => {
+    if (expandedId === roomId) {
+      // Collapse if already expanded
+      setExpandedId(null);
+      setAssignments([]);
+    } else {
+      // Expand and load assignments
+      setExpandedId(roomId);
+      setAssignmentsLoading(true);
+      try {
+        const result = await window.electronAPI.getAssignmentsForRoom(roomId);
+        setAssignments(result);
+      } catch (error) {
+        console.error('Failed to load assignments:', error);
+        setAssignments([]);
+      } finally {
+        setAssignmentsLoading(false);
+      }
     }
   };
 
@@ -87,9 +119,16 @@ function RoomsPage() {
           <p className="text-gray-500">No rooms found. Run a sync to fetch data from Hazu.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-3">
           {filteredRooms.map((room) => (
-            <RoomCard key={room.id} room={room} />
+            <RoomCard
+              key={room.id}
+              room={room}
+              isExpanded={expandedId === room.id}
+              assignments={expandedId === room.id ? assignments : []}
+              assignmentsLoading={expandedId === room.id && assignmentsLoading}
+              onClick={() => handleCardClick(room.id)}
+            />
           ))}
         </div>
       )}
@@ -120,28 +159,52 @@ function FilterButton({ active, onClick, label }: FilterButtonProps) {
 
 interface RoomCardProps {
   room: Room;
+  isExpanded: boolean;
+  assignments: PersonAssignment[];
+  assignmentsLoading: boolean;
+  onClick: () => void;
 }
 
-function RoomCard({ room }: RoomCardProps) {
+function RoomCard({ room, isExpanded, assignments, assignmentsLoading, onClick }: RoomCardProps) {
   const cleanTitle = room.title.replace(/<[^>]*>/g, '').trim();
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow cursor-pointer">
-      <div className="flex items-start gap-3">
-        <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg"
-          style={{ backgroundColor: room.color || '#6B7280' }}
-        >
-          {room.icon ? (
-            <i className={`fa ${room.icon}`}></i>
-          ) : (
-            '🏠'
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-gray-900 truncate">{cleanTitle}</h3>
+    <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div
+        className="p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+        onClick={onClick}
+      >
+        <div className="flex items-center gap-3">
+          {/* Expand/collapse indicator */}
+          <div className="text-gray-400 w-4">
+            {isExpanded ? '▼' : '▶'}
+          </div>
+
+          {/* Room icon */}
+          <div
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg flex-shrink-0"
+            style={{ backgroundColor: room.color || '#6B7280' }}
+          >
+            {room.icon ? (
+              <i className={`fa ${room.icon}`}></i>
+            ) : (
+              '🏠'
+            )}
+          </div>
+
+          {/* Room info */}
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium text-gray-900">{cleanTitle}</h3>
+            {room.description && (
+              <p className="text-sm text-gray-500 truncate">
+                {room.description.replace(/<[^>]*>/g, '').trim()}
+              </p>
+            )}
+          </div>
+
+          {/* Room type badge */}
           <span
-            className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded ${
+            className={`px-2 py-1 text-xs font-medium rounded ${
               roomTypeColors[room.room_type as RoomType]
             }`}
           >
@@ -149,6 +212,14 @@ function RoomCard({ room }: RoomCardProps) {
           </span>
         </div>
       </div>
+
+      {/* Expanded content */}
+      {isExpanded && (
+        <RoomAssignmentsList
+          assignments={assignments}
+          loading={assignmentsLoading}
+        />
+      )}
     </div>
   );
 }

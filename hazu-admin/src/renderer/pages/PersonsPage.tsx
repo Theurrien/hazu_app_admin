@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import type { Person, PersonType } from '../../shared/types';
+import type { Person, PersonType, RoomType } from '../../shared/types';
+import { PersonAssignmentsList } from '../components/AssignmentsList';
 
 const personTypeLabels: Record<PersonType, string> = {
   student: 'Students',
@@ -19,11 +20,22 @@ const personTypeColors: Record<PersonType, string> = {
   guardian: 'bg-pink-100 text-pink-800',
 };
 
+interface RoomAssignment {
+  id: string;
+  room_id: string;
+  title: string;
+  room_title: string;
+  room_type: RoomType;
+}
+
 function PersonsPage() {
   const [persons, setPersons] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<PersonType | 'all'>('all');
   const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<RoomAssignment[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
 
   useEffect(() => {
     loadPersons();
@@ -39,6 +51,33 @@ function PersonsPage() {
       console.error('Failed to load persons:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRowClick = async (personId: string) => {
+    if (expandedId === personId) {
+      // Collapse if already expanded
+      setExpandedId(null);
+      setAssignments([]);
+    } else {
+      // Expand and load assignments
+      setExpandedId(personId);
+      setAssignmentsLoading(true);
+      try {
+        const result = await window.electronAPI.getAssignmentsForPerson(personId);
+        // Map the response to include the title field expected by AssignmentsList
+        const mapped = result.map((a: any) => ({
+          ...a,
+          id: a.room_id,
+          title: a.room_title,
+        }));
+        setAssignments(mapped);
+      } catch (error) {
+        console.error('Failed to load assignments:', error);
+        setAssignments([]);
+      } finally {
+        setAssignmentsLoading(false);
+      }
     }
   };
 
@@ -97,6 +136,7 @@ function PersonsPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="w-8 px-3 py-3"></th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Name
                 </th>
@@ -106,33 +146,18 @@ function PersonsPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Type
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role
-                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredPersons.map((person) => (
-                <tr key={person.id} className="hover:bg-gray-50 cursor-pointer">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="font-medium text-gray-900">{person.display_name}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                    {person.email || '-'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`inline-block px-2 py-1 text-xs font-medium rounded ${
-                        personTypeColors[person.person_type as PersonType]
-                      }`}
-                    >
-                      {personTypeLabels[person.person_type as PersonType]}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                    {person.role || '-'}
-                  </td>
-                </tr>
+                <PersonRow
+                  key={person.id}
+                  person={person}
+                  isExpanded={expandedId === person.id}
+                  assignments={expandedId === person.id ? assignments : []}
+                  assignmentsLoading={expandedId === person.id && assignmentsLoading}
+                  onClick={() => handleRowClick(person.id)}
+                />
               ))}
             </tbody>
           </table>
@@ -160,6 +185,54 @@ function FilterButton({ active, onClick, label }: FilterButtonProps) {
     >
       {label}
     </button>
+  );
+}
+
+interface PersonRowProps {
+  person: Person;
+  isExpanded: boolean;
+  assignments: RoomAssignment[];
+  assignmentsLoading: boolean;
+  onClick: () => void;
+}
+
+function PersonRow({ person, isExpanded, assignments, assignmentsLoading, onClick }: PersonRowProps) {
+  return (
+    <>
+      <tr
+        className="hover:bg-gray-50 cursor-pointer"
+        onClick={onClick}
+      >
+        <td className="px-3 py-4 text-gray-400">
+          {isExpanded ? '▼' : '▶'}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap">
+          <div className="font-medium text-gray-900">{person.display_name}</div>
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-gray-500">
+          {person.email || '-'}
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap">
+          <span
+            className={`inline-block px-2 py-1 text-xs font-medium rounded ${
+              personTypeColors[person.person_type as PersonType]
+            }`}
+          >
+            {personTypeLabels[person.person_type as PersonType]}
+          </span>
+        </td>
+      </tr>
+      {isExpanded && (
+        <tr>
+          <td colSpan={4} className="p-0">
+            <PersonAssignmentsList
+              assignments={assignments}
+              loading={assignmentsLoading}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
