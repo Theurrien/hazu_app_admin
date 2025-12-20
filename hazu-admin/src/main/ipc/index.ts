@@ -1,6 +1,8 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
+import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
+import { runFullSync, getSyncProgress } from '../services/sync.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -232,6 +234,82 @@ export function registerIpcHandlers(): void {
       console.error('Get pending changes error:', error);
       throw error;
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_RUN, async () => {
+    try {
+      return await runFullSync();
+    } catch (error) {
+      console.error('Sync run error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_GET_PROGRESS, async () => {
+    return getSyncProgress();
+  });
+
+  // ============================================================================
+  // API CONFIG
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.API_SET_CONFIG, async (_event, config: HazuApiConfig) => {
+    try {
+      setApiConfig(config);
+
+      // Save to database
+      run(
+        `INSERT INTO settings (key, value, updated_at)
+         VALUES ('api_key', ?, strftime('%s', 'now'))
+         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = strftime('%s', 'now')`,
+        [config.apiKey, config.apiKey]
+      );
+      run(
+        `INSERT INTO settings (key, value, updated_at)
+         VALUES ('environment', ?, strftime('%s', 'now'))
+         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = strftime('%s', 'now')`,
+        [config.environment, config.environment]
+      );
+      run(
+        `INSERT INTO settings (key, value, updated_at)
+         VALUES ('root_hazu_id', ?, strftime('%s', 'now'))
+         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = strftime('%s', 'now')`,
+        [config.rootHazuId, config.rootHazuId]
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Set API config error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.API_GET_CONFIG, async () => {
+    try {
+      const apiKey = get<{ value: string }>("SELECT value FROM settings WHERE key = 'api_key'");
+      const environment = get<{ value: string }>("SELECT value FROM settings WHERE key = 'environment'");
+      const rootHazuId = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
+
+      const config: HazuApiConfig = {
+        apiKey: apiKey?.value || '',
+        environment: (environment?.value as 'swiss' | 'io' | 'dev') || 'swiss',
+        rootHazuId: rootHazuId?.value || '',
+      };
+
+      // Load config into memory
+      if (config.apiKey && config.rootHazuId) {
+        setApiConfig(config);
+      }
+
+      return config;
+    } catch (error) {
+      console.error('Get API config error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.API_IS_CONFIGURED, async () => {
+    return isConfigured();
   });
 
   // ============================================================================

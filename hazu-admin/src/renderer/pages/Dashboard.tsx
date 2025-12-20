@@ -8,13 +8,35 @@ interface SyncStatus {
   lastSyncAt: number | null;
 }
 
+interface SyncProgress {
+  status: 'idle' | 'syncing' | 'completed' | 'error';
+  message: string;
+  roomsProcessed: number;
+  personsProcessed: number;
+  assignmentsProcessed: number;
+  errors: string[];
+}
+
 function Dashboard() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncProgress | null>(null);
+  const [isConfigured, setIsConfigured] = useState(false);
 
   useEffect(() => {
     loadStatus();
+    checkConfig();
   }, []);
+
+  const checkConfig = async () => {
+    try {
+      const configured = await window.electronAPI.isApiConfigured();
+      setIsConfigured(configured);
+    } catch (error) {
+      console.error('Failed to check config:', error);
+    }
+  };
 
   const loadStatus = async () => {
     try {
@@ -27,9 +49,32 @@ function Dashboard() {
     }
   };
 
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const result = await window.electronAPI.runSync();
+      setSyncResult(result);
+      // Reload status after sync
+      await loadStatus();
+    } catch (error) {
+      console.error('Sync failed:', error);
+      setSyncResult({
+        status: 'error',
+        message: 'Sync failed: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        roomsProcessed: 0,
+        personsProcessed: 0,
+        assignmentsProcessed: 0,
+        errors: [],
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const formatDate = (timestamp: number | null) => {
     if (!timestamp) return 'Never';
-    return new Date(timestamp * 1000).toLocaleString();
+    return new Date(timestamp).toLocaleString();
   };
 
   if (loading) {
@@ -73,16 +118,46 @@ function Dashboard() {
       {/* Sync Status */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold mb-4">Sync Status</h3>
+
+        {!isConfigured && (
+          <div className="mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-lg">
+            API not configured. Please go to Settings to configure your API key and Root Hazu ID.
+          </div>
+        )}
+
+        {syncResult && (
+          <div className={`mb-4 p-4 rounded-lg ${
+            syncResult.status === 'completed' ? 'bg-green-50 text-green-800' :
+            syncResult.status === 'error' ? 'bg-red-50 text-red-800' :
+            'bg-blue-50 text-blue-800'
+          }`}>
+            <p className="font-medium">{syncResult.message}</p>
+            {syncResult.status === 'completed' && (
+              <p className="text-sm mt-1">
+                Synced {syncResult.roomsProcessed} rooms, {syncResult.personsProcessed} persons, {syncResult.assignmentsProcessed} assignments
+              </p>
+            )}
+            {syncResult.errors.length > 0 && (
+              <ul className="mt-2 text-sm list-disc list-inside">
+                {syncResult.errors.slice(0, 5).map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <div>
             <p className="text-gray-600">Last synchronized:</p>
             <p className="text-lg font-medium">{formatDate(status?.lastSyncAt || null)}</p>
           </div>
           <button
-            onClick={() => {/* TODO: Trigger sync */}}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={handleSync}
+            disabled={syncing || !isConfigured}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Sync Now
+            {syncing ? 'Syncing...' : 'Sync Now'}
           </button>
         </div>
       </div>

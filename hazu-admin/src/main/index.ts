@@ -3,10 +3,6 @@ import path from 'path';
 import { initDatabase } from './database';
 import { registerIpcHandlers } from './ipc';
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling
-if (require('electron-squirrel-startup')) {
-  app.quit();
-}
 
 let mainWindow: BrowserWindow | null = null;
 

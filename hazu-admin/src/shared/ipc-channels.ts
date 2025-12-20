@@ -23,10 +23,16 @@ export const IPC_CHANNELS = {
   ASSIGNMENTS_BULK_CREATE: 'assignments:bulkCreate',
 
   // Sync
-  SYNC_START_FULL: 'sync:startFull',
+  SYNC_RUN: 'sync:run',
   SYNC_GET_STATUS: 'sync:getStatus',
   SYNC_GET_PENDING_CHANGES: 'sync:getPendingChanges',
+  SYNC_GET_PROGRESS: 'sync:getProgress',
   SYNC_MARK_SYNCED: 'sync:markSynced',
+
+  // API Config
+  API_SET_CONFIG: 'api:setConfig',
+  API_GET_CONFIG: 'api:getConfig',
+  API_IS_CONFIGURED: 'api:isConfigured',
 
   // Settings
   SETTINGS_GET: 'settings:get',

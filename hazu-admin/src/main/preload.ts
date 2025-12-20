@@ -37,12 +37,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.ASSIGNMENTS_DELETE, personId, roomId),
 
   // Sync
-  startFullSync: (rootId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SYNC_START_FULL, rootId),
+  runSync: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_RUN),
   getSyncStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SYNC_GET_STATUS),
+  getSyncProgress: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_GET_PROGRESS),
   getPendingChanges: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SYNC_GET_PENDING_CHANGES),
+
+  // API Config
+  setApiConfig: (config: { apiKey: string; environment: string; rootHazuId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.API_SET_CONFIG, config),
+  getApiConfig: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.API_GET_CONFIG),
+  isApiConfigured: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.API_IS_CONFIGURED),
 
   // Settings
   getSetting: (key: string) =>
@@ -74,9 +84,13 @@ declare global {
       getAssignmentsForRoom: (roomId: string) => Promise<any[]>;
       createAssignment: (personId: string, roomId: string, role: string) => Promise<any>;
       deleteAssignment: (personId: string, roomId: string) => Promise<any>;
-      startFullSync: (rootId: string) => Promise<any>;
+      runSync: () => Promise<any>;
       getSyncStatus: () => Promise<any>;
+      getSyncProgress: () => Promise<any>;
       getPendingChanges: () => Promise<any[]>;
+      setApiConfig: (config: { apiKey: string; environment: string; rootHazuId: string }) => Promise<any>;
+      getApiConfig: () => Promise<{ apiKey: string; environment: string; rootHazuId: string }>;
+      isApiConfigured: () => Promise<boolean>;
       getSetting: (key: string) => Promise<string | null>;
       setSetting: (key: string, value: string) => Promise<void>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;

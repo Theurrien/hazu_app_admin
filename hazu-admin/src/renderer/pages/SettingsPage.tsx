@@ -13,14 +13,10 @@ function SettingsPage() {
 
   const loadSettings = async () => {
     try {
-      const [apiKeyVal, envVal, rootIdVal] = await Promise.all([
-        window.electronAPI.getSetting('api_key'),
-        window.electronAPI.getSetting('api_environment'),
-        window.electronAPI.getSetting('root_hazu_id'),
-      ]);
-      if (apiKeyVal) setApiKey(apiKeyVal);
-      if (envVal) setEnvironment(envVal);
-      if (rootIdVal) setRootHazuId(rootIdVal);
+      const config = await window.electronAPI.getApiConfig();
+      if (config.apiKey) setApiKey(config.apiKey);
+      if (config.environment) setEnvironment(config.environment);
+      if (config.rootHazuId) setRootHazuId(config.rootHazuId);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -30,11 +26,11 @@ function SettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      await Promise.all([
-        window.electronAPI.setSetting('api_key', apiKey),
-        window.electronAPI.setSetting('api_environment', environment),
-        window.electronAPI.setSetting('root_hazu_id', rootHazuId),
-      ]);
+      await window.electronAPI.setApiConfig({
+        apiKey,
+        environment,
+        rootHazuId,
+      });
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to save settings.' });
