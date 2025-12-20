@@ -1,5 +1,29 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_CHANNELS } from '../shared/ipc-channels';
+
+// Inline IPC channels to avoid module resolution issues in preload sandbox
+const IPC_CHANNELS = {
+  DB_QUERY: 'db:query',
+  DB_RUN: 'db:run',
+  ROOMS_GET_ALL: 'rooms:getAll',
+  ROOMS_GET_BY_ID: 'rooms:getById',
+  ROOMS_SEARCH: 'rooms:search',
+  PERSONS_GET_ALL: 'persons:getAll',
+  PERSONS_GET_BY_ID: 'persons:getById',
+  PERSONS_SEARCH: 'persons:search',
+  ASSIGNMENTS_GET_FOR_PERSON: 'assignments:getForPerson',
+  ASSIGNMENTS_GET_FOR_ROOM: 'assignments:getForRoom',
+  ASSIGNMENTS_CREATE: 'assignments:create',
+  ASSIGNMENTS_DELETE: 'assignments:delete',
+  SYNC_RUN: 'sync:run',
+  SYNC_GET_STATUS: 'sync:getStatus',
+  SYNC_GET_PROGRESS: 'sync:getProgress',
+  SYNC_GET_PENDING_CHANGES: 'sync:getPendingChanges',
+  API_SET_CONFIG: 'api:setConfig',
+  API_GET_CONFIG: 'api:getConfig',
+  API_IS_CONFIGURED: 'api:isConfigured',
+  SETTINGS_GET: 'settings:get',
+  SETTINGS_SET: 'settings:set',
+} as const;
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object

@@ -18,12 +18,12 @@ const ROOM_TAG_PATTERNS = {
 } as const;
 
 const PERSON_TAG_PATTERNS = {
-  student: "hz-share-student-",
-  companymentor: "hz-share-companymentor-",
-  schoolteacher: "hz-share-schoolteacher-",
-  courseteacher: "hz-share-courseteacher-",
-  stateadvisor: "hz-share-stateadvisor-",
-  guardian: "hz-share-guardian-",
+  student: "hz-config-profile-student",
+  companymentor: "hz-config-profile-companymentor",
+  schoolteacher: "hz-config-profile-schoolteacher",
+  courseteacher: "hz-config-profile-courseteacher",
+  stateadvisor: "hz-config-profile-stateadvisor",
+  guardian: "hz-config-profile-guardian",
 } as const;
 
 type RoomType = keyof typeof ROOM_TAG_PATTERNS;
@@ -52,6 +52,7 @@ export function getSyncProgress(): SyncProgress {
 }
 
 function resetProgress(): void {
+  console.log('[SYNC] Starting sync...');
   syncProgress = {
     status: "syncing",
     message: "Starting sync...",
@@ -60,6 +61,20 @@ function resetProgress(): void {
     assignmentsProcessed: 0,
     errors: [],
   };
+}
+
+function clearOldData(): void {
+  const db = getDb();
+  console.log('[SYNC] Clearing old data before sync...');
+
+  // Clear assignments first (foreign key constraint)
+  db.exec("DELETE FROM person_room_assignments");
+
+  // Clear persons and rooms
+  db.exec("DELETE FROM persons");
+  db.exec("DELETE FROM rooms");
+
+  console.log('[SYNC] Old data cleared');
 }
 
 function identifyRoomType(tags: string[]): RoomType | null {
@@ -72,8 +87,9 @@ function identifyRoomType(tags: string[]): RoomType | null {
 }
 
 function identifyPersonType(tags: string[]): PersonType | null {
-  for (const [type, tagPrefix] of Object.entries(PERSON_TAG_PATTERNS)) {
-    if (tags.some(tag => tag.startsWith(tagPrefix))) {
+  for (const [type, tagPattern] of Object.entries(PERSON_TAG_PATTERNS)) {
+    // Check for exact match or tag starting with pattern
+    if (tags.some(tag => tag === tagPattern || tag.startsWith(tagPattern + "-"))) {
       return type as PersonType;
     }
   }
@@ -84,48 +100,87 @@ async function syncRooms(): Promise<void> {
   const db = getDb();
   const rootId = getRootHazuId();
 
+  console.log('[SYNC] Fetching room categories from root...');
   syncProgress.message = "Fetching rooms from Hazu...";
 
-  // Fetch all children of root
-  const children = await sendApiRequestList(rootId);
-  if (!children) {
+  // Level 1: Fetch direct children of root - these are CATEGORY folders
+  const categories = await sendApiRequestList(rootId);
+  if (!categories) {
     throw new Error("Failed to fetch children from root Hazu");
   }
 
-  // Process each child - look for rooms
-  for (const child of children) {
-    const snapshot = child.snapshot;
-    const tags = snapshot.tags || [];
-    const roomType = identifyRoomType(tags);
+  console.log(`[SYNC] Found ${categories.length} direct children of root`);
+
+  // Find room category folders (hz-config-room-*)
+  for (const category of categories) {
+    const categorySnapshot = category.snapshot;
+    const categoryTags = categorySnapshot.tags || [];
+    const roomType = identifyRoomType(categoryTags);
 
     if (roomType) {
-      // This is a room - save it
-      const stmt = db.prepare(`
-        INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, tags, raw_data, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
+      const categoryTitle = stripHtml(categorySnapshot.title);
+      console.log(`[SYNC] Found room category: ${categoryTitle} (${roomType})`);
 
-      stmt.run(
-        snapshot.key,
-        snapshot.title,
-        snapshot.description || "",
-        snapshot.color || "",
-        snapshot.icon || "",
-        roomType,
-        snapshot.parentId,
-        JSON.stringify(tags),
-        JSON.stringify(snapshot),
-        Date.now()
-      );
+      // Level 2: Fetch children of this category
+      const children = await sendApiRequestList(categorySnapshot.key);
+      if (children) {
+        let roomCount = 0;
 
-      syncProgress.roomsProcessed++;
-    }
+        for (const child of children) {
+          const roomSnapshot = child.snapshot;
+          const roomTags = roomSnapshot.tags || [];
 
-    // Recursively check children for more rooms
-    if (snapshot.type === "hazu") {
-      await syncRoomsRecursive(snapshot.key);
+          // Only save if it has hz-config-class-* tag (actual room)
+          const classId = extractClassId(roomTags);
+          if (!classId) {
+            continue; // Skip non-room Hazus
+          }
+
+          const stmt = db.prepare(`
+            INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, class_id, tags, raw_data, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+
+          stmt.run(
+            roomSnapshot.key,
+            stripHtml(roomSnapshot.title),
+            stripHtml(roomSnapshot.description || ""),
+            roomSnapshot.color || "",
+            roomSnapshot.icon || "",
+            roomType,  // Type comes from parent category
+            categorySnapshot.key,  // Parent is the category folder
+            classId,  // The ID from hz-config-class-ID tag
+            JSON.stringify(roomTags),
+            JSON.stringify(roomSnapshot),
+            Date.now()
+          );
+
+          syncProgress.roomsProcessed++;
+          roomCount++;
+        }
+
+        console.log(`[SYNC] Found ${roomCount} actual rooms in ${categoryTitle} (filtered by hz-config-class-* tag)`);
+      }
     }
   }
+
+  console.log(`[SYNC] Synced ${syncProgress.roomsProcessed} rooms total`);
+}
+
+// Extract class ID from hz-config-class-* tag
+function extractClassId(tags: string[]): string | null {
+  const prefix = "hz-config-class-";
+  for (const tag of tags) {
+    if (tag.startsWith(prefix)) {
+      return tag.substring(prefix.length);
+    }
+  }
+  return null;
+}
+
+// Helper to strip HTML tags from strings
+function stripHtml(str: string): string {
+  return str?.replace(/<[^>]*>/g, '').trim() || "";
 }
 
 async function syncRoomsRecursive(parentId: string): Promise<void> {
@@ -168,71 +223,150 @@ async function syncRoomsRecursive(parentId: string): Promise<void> {
   }
 }
 
-async function syncPersonsFromSharingGroups(): Promise<void> {
+async function syncPersonsFromContainers(): Promise<void> {
   const db = getDb();
   const rootId = getRootHazuId();
 
-  syncProgress.message = "Fetching persons from sharing groups...";
+  console.log('[SYNC] Fetching persons from person containers...');
+  syncProgress.message = "Fetching persons from containers...";
 
-  // Fetch all children and look for sharing group containers
-  const children = await sendApiRequestList(rootId);
-  if (!children) return;
+  // Recursively find person containers and their children
+  await findAndSyncPersonContainers(rootId);
 
-  for (const child of children) {
-    const snapshot = child.snapshot;
-    const tags = snapshot.tags || [];
+  console.log(`[SYNC] Synced ${syncProgress.personsProcessed} persons`);
+  syncProgress.message = `Synced ${syncProgress.personsProcessed} persons...`;
+}
 
-    // Check if this is a sharing group container (has person tags)
-    const personType = identifyPersonType(tags);
+async function findAndSyncPersonContainers(parentId: string): Promise<void> {
+  const db = getDb();
+
+  // Level 1: Fetch direct children of root - these are CATEGORY folders
+  const categories = await sendApiRequestList(parentId);
+  if (!categories) return;
+
+  console.log(`[SYNC] Checking ${categories.length} children for person categories...`);
+
+  for (const category of categories) {
+    const categorySnapshot = category.snapshot;
+    const categoryTags = categorySnapshot.tags || [];
+
+    // Check if this is a person category folder (has hz-config-profile-* tags)
+    const personType = identifyPersonType(categoryTags);
 
     if (personType) {
-      // Fetch ACL info to get persons in this sharing group
-      try {
-        const aclInfo = await sendApiRequestGetAclInfo(snapshot.key);
-        const aclEntries = aclInfo?.data || [];
+      const categoryTitle = stripHtml(categorySnapshot.title);
+      console.log(`[SYNC] Found person category: ${categoryTitle} (${personType})`);
 
-        for (const entry of aclEntries) {
-          if (!entry.isGroup && entry.key) {
-            const stmt = db.prepare(`
-              INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, role, tags, raw_data, synced_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
+      // Level 2: Fetch children of this category
+      const children = await sendApiRequestList(categorySnapshot.key);
+      if (children) {
+        let personCount = 0;
 
-            // Parse name from displayName
-            const displayName = entry.displayName || "";
-            const nameParts = displayName.split(" ");
-            const firstName = nameParts[0] || "";
-            const lastName = nameParts.slice(1).join(" ") || "";
+        for (const child of children) {
+          const personSnapshot = child.snapshot;
+          const personTags = personSnapshot.tags || [];
 
-            stmt.run(
-              entry.authorId || entry.key,
-              entry.description || "", // Email is often in description
-              firstName,
-              lastName,
-              displayName,
-              personType,
-              entry.role || "reader",
-              JSON.stringify(tags),
-              JSON.stringify(entry),
-              Date.now()
-            );
-
-            syncProgress.personsProcessed++;
+          // Only save if it has hz-config-userid-* tag (actual person)
+          const userId = extractUserId(personTags);
+          if (!userId) {
+            continue; // Skip non-person Hazus (e.g., companies)
           }
+
+          // Extract name from title (usually "FirstName LastName")
+          const displayName = stripHtml(personSnapshot.title);
+          const nameParts = displayName.split(" ");
+          const firstName = nameParts[0] || "";
+          const lastName = nameParts.slice(1).join(" ") || "";
+
+          const stmt = db.prepare(`
+            INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, role, tags, raw_data, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+
+          stmt.run(
+            personSnapshot.key,       // Hazu ID
+            userId,                   // Email or user ID from hz-config-userid-* tag
+            firstName,
+            lastName,
+            displayName,              // Title of the Hazu
+            personType,               // Type comes from parent category
+            "reader",
+            JSON.stringify(personTags),
+            JSON.stringify(personSnapshot),
+            Date.now()
+          );
+
+          personCount++;
+          syncProgress.personsProcessed++;
+
+          // Extract room assignments from person's tags
+          syncPersonRoomAssignments(personSnapshot.key, personTags);
         }
-      } catch (error) {
-        console.error(`Error fetching ACL for ${snapshot.key}:`, error);
-        syncProgress.errors.push(`Failed to fetch ACL for ${snapshot.title}`);
+
+        console.log(`[SYNC] Found ${personCount} actual persons in ${categoryTitle} (filtered by hz-config-userid-* tag)`);
       }
     }
+  }
+}
 
-    // Check children for more sharing groups
-    if (snapshot.type === "hazu") {
-      await syncPersonsRecursive(snapshot.key);
+// Extract user ID/email from hz-config-userid-* tag
+function extractUserId(tags: string[]): string | null {
+  const prefix = "hz-config-userid-";
+  for (const tag of tags) {
+    if (tag.startsWith(prefix)) {
+      return tag.substring(prefix.length);
     }
   }
+  return null;
+}
 
-  syncProgress.message = `Synced ${syncProgress.personsProcessed} persons...`;
+// Parse assignment tag: hz-config-class-{CLASS_ID}-{ROLE}
+// Returns classId and role, or null if not a valid assignment tag
+function parseAssignmentTag(tag: string): { classId: string; role: string } | null {
+  const prefix = "hz-config-class-";
+  if (!tag.startsWith(prefix)) return null;
+
+  const remainder = tag.substring(prefix.length);  // "kzlJ3rVjLImfvVnvTDhm-student"
+  const lastHyphen = remainder.lastIndexOf("-");
+  if (lastHyphen === -1) return null;
+
+  const classId = remainder.substring(0, lastHyphen);
+  const role = remainder.substring(lastHyphen + 1);
+
+  // Validate role is a known person type
+  const validRoles = Object.keys(PERSON_TAG_PATTERNS);
+  if (!validRoles.includes(role)) return null;
+
+  return { classId, role };
+}
+
+function syncPersonRoomAssignments(personId: string, tags: string[]): void {
+  const db = getDb();
+
+  // Get all rooms with their class_ids
+  const rooms = db.prepare("SELECT id, class_id FROM rooms WHERE class_id IS NOT NULL").all() as Array<{ id: string; class_id: string }>;
+
+  // Build a map of class_id -> room_id
+  const classIdToRoomId = new Map<string, string>();
+  for (const room of rooms) {
+    classIdToRoomId.set(room.class_id, room.id);
+  }
+
+  // Parse assignment tags and create assignments with correct roles
+  for (const tag of tags) {
+    const parsed = parseAssignmentTag(tag);
+    if (!parsed) continue;
+
+    const roomId = classIdToRoomId.get(parsed.classId);
+    if (!roomId) continue;
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(personId, roomId, parsed.role, Date.now());
+    syncProgress.assignmentsProcessed++;
+  }
 }
 
 async function syncPersonsRecursive(parentId: string): Promise<void> {
@@ -342,14 +476,18 @@ export async function runFullSync(): Promise<SyncProgress> {
   resetProgress();
 
   try {
-    // Step 1: Sync rooms
+    // Clear old data before syncing (full refresh)
+    clearOldData();
+
+    // Step 1: Sync rooms (extracts class_ids from hz-config-class-* tags)
     await syncRooms();
 
-    // Step 2: Sync persons
-    await syncPersonsFromSharingGroups();
+    // Step 2: Sync persons from their containers
+    // (also syncs assignments by matching person tags to room class_ids)
+    await syncPersonsFromContainers();
 
-    // Step 3: Sync assignments
-    await syncAssignments();
+    // Note: Assignments are synced within syncPersonsFromContainers()
+    // by matching person tags against room class_ids
 
     // Update last sync time
     const db = getDb();

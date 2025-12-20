@@ -254,29 +254,26 @@ export function registerIpcHandlers(): void {
   // ============================================================================
 
   ipcMain.handle(IPC_CHANNELS.API_SET_CONFIG, async (_event, config: HazuApiConfig) => {
+    console.log('API_SET_CONFIG called with:', {
+      apiKey: config.apiKey ? '[REDACTED]' : 'empty',
+      environment: config.environment,
+      rootHazuId: config.rootHazuId
+    });
+
     try {
+      console.log('Setting config in memory...');
       setApiConfig(config);
 
-      // Save to database
-      run(
-        `INSERT INTO settings (key, value, updated_at)
-         VALUES ('api_key', ?, strftime('%s', 'now'))
-         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = strftime('%s', 'now')`,
-        [config.apiKey, config.apiKey]
-      );
-      run(
-        `INSERT INTO settings (key, value, updated_at)
-         VALUES ('environment', ?, strftime('%s', 'now'))
-         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = strftime('%s', 'now')`,
-        [config.environment, config.environment]
-      );
-      run(
-        `INSERT INTO settings (key, value, updated_at)
-         VALUES ('root_hazu_id', ?, strftime('%s', 'now'))
-         ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = strftime('%s', 'now')`,
-        [config.rootHazuId, config.rootHazuId]
-      );
+      console.log('Saving api_key to database...');
+      run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['api_key', config.apiKey]);
 
+      console.log('Saving environment to database...');
+      run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['environment', config.environment]);
+
+      console.log('Saving root_hazu_id to database...');
+      run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['root_hazu_id', config.rootHazuId]);
+
+      console.log('All settings saved successfully');
       return { success: true };
     } catch (error) {
       console.error('Set API config error:', error);

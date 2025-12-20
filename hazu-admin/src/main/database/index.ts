@@ -40,6 +40,63 @@ export async function initDatabase(): Promise<void> {
     runInlineSchema();
     console.log('Database schema initialized (inline)');
   }
+
+  // Run migrations
+  runMigrations();
+}
+
+// Database migrations
+function runMigrations(): void {
+  if (!db) return;
+
+  // Migration: Add class_id column to rooms table
+  try {
+    const columns = db.prepare("PRAGMA table_info(rooms)").all() as Array<{ name: string }>;
+    const hasClassId = columns.some(col => col.name === 'class_id');
+    if (!hasClassId) {
+      db.exec("ALTER TABLE rooms ADD COLUMN class_id TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_rooms_class_id ON rooms(class_id)");
+      console.log('Migration: Added class_id column to rooms table');
+    }
+  } catch (error) {
+    console.error('Migration error (class_id):', error);
+  }
+
+  // Migration: Recreate person_room_assignments table without CHECK constraint
+  // This allows flexible role values (student, companymentor, schoolteacher, etc.)
+  try {
+    // Check if we need to migrate by looking for the old default value
+    const tableInfo = db.prepare("PRAGMA table_info(person_room_assignments)").all() as Array<{ name: string; dflt_value: string | null }>;
+    const roleColumn = tableInfo.find(col => col.name === 'role');
+
+    // If default is 'reader', we need to migrate to new schema with 'student' default
+    if (roleColumn && roleColumn.dflt_value === "'reader'") {
+      console.log('Migration: Recreating person_room_assignments table with new schema...');
+
+      // Drop and recreate the table (data will be repopulated on next sync)
+      db.exec("DROP TABLE IF EXISTS person_room_assignments");
+      db.exec(`
+        CREATE TABLE person_room_assignments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          person_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'student',
+          synced_at INTEGER,
+          created_at INTEGER DEFAULT (strftime('%s', 'now')),
+          updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+          FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE,
+          FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+          UNIQUE(person_id, room_id)
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_assignments_person ON person_room_assignments(person_id)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_assignments_room ON person_room_assignments(room_id)");
+
+      console.log('Migration: person_room_assignments table recreated successfully');
+    }
+  } catch (error) {
+    console.error('Migration error (person_room_assignments):', error);
+  }
 }
 
 // Inline schema for development
@@ -56,6 +113,7 @@ function runInlineSchema(): void {
         icon TEXT,
         room_type TEXT NOT NULL,
         parent_id TEXT,
+        class_id TEXT,
         tags TEXT DEFAULT '[]',
         raw_data TEXT,
         synced_at INTEGER NOT NULL,
@@ -84,7 +142,7 @@ function runInlineSchema(): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         person_id TEXT NOT NULL,
         room_id TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'reader',
+        role TEXT NOT NULL DEFAULT 'student',
         synced_at INTEGER,
         created_at INTEGER DEFAULT (strftime('%s', 'now')),
         updated_at INTEGER DEFAULT (strftime('%s', 'now')),

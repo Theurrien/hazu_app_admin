@@ -31,7 +31,9 @@ function Dashboard() {
 
   const checkConfig = async () => {
     try {
-      const configured = await window.electronAPI.isApiConfigured();
+      // Load config from DB into memory first, then check if configured
+      const config = await window.electronAPI.getApiConfig();
+      const configured = !!(config.apiKey && config.rootHazuId);
       setIsConfigured(configured);
     } catch (error) {
       console.error('Failed to check config:', error);
