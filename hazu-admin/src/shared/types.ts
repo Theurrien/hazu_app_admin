@@ -118,3 +118,12 @@ export interface HazuSnapshot {
 export interface HazuEntity {
   snapshot: HazuSnapshot;
 }
+
+// Template entity
+export interface Template {
+  id: string;
+  title: string;
+  roomType: 'class' | 'cie' | 'enterprise' | 'state';
+  icon?: string;
+  color?: string;
+}

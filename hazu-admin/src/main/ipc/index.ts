@@ -425,7 +425,7 @@ export function registerIpcHandlers(): void {
           }
 
           return {
-            id: snapshot.key || snapshot.id,
+            id: snapshot.key,
             title: snapshot.title || 'Untitled',
             roomType: roomType as 'class' | 'cie' | 'enterprise' | 'state',
             icon: snapshot.icon,
