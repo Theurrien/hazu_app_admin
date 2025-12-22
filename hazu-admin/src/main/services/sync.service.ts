@@ -4,7 +4,7 @@
  * Fetches rooms and persons from Hazu API and stores them in SQLite.
  */
 
-import { getDb } from "../database";
+import { getDb, run } from "../database";
 import { sendApiRequestList, sendApiRequestGetAclInfo } from "./hazu-api/api";
 import { getRootHazuId, isConfigured } from "./hazu-api/config";
 import { HazuEntity } from "./hazu-api/interfaces";
@@ -186,6 +186,23 @@ function extractClassId(tags: string[]): string | null {
 // Helper to strip HTML tags from strings
 function stripHtml(str: string): string {
   return str?.replace(/<[^>]*>/g, '').trim() || "";
+}
+
+// Extract webhook config from admin item's form HTML
+function extractWebhookConfig(html: string): { webhookUrl: string; templateId: string } | null {
+  // Extract form action URL
+  const actionMatch = html.match(/action="([^"]+)"/);
+  const webhookUrl = actionMatch?.[1] || '';
+
+  // Extract templateLink from hidden input
+  const templateMatch = html.match(/name="hazu\[templateLink\]"\s+value="([^"]+)"/);
+  const templateId = templateMatch?.[1] || '';
+
+  if (!webhookUrl || !templateId) {
+    return null;
+  }
+
+  return { webhookUrl, templateId };
 }
 
 async function syncRoomsRecursive(parentId: string): Promise<void> {
@@ -466,6 +483,51 @@ async function syncAssignments(): Promise<void> {
   syncProgress.message = `Synced ${syncProgress.assignmentsProcessed} assignments...`;
 }
 
+async function syncAdminConfig(): Promise<void> {
+  const rootId = getRootHazuId();
+
+  console.log('[SYNC] Fetching first-level children to find Admin Hazu...');
+
+  // Fetch first-level children of root
+  const firstLevelChildren = await sendApiRequestList(rootId);
+  if (!firstLevelChildren) {
+    console.log('[SYNC] Failed to fetch first-level children');
+    return;
+  }
+
+  // Find and process Admin Hazu (hz-config-admin)
+  const adminHazu = firstLevelChildren.find((child: HazuEntity) =>
+    child.snapshot.tags?.includes('hz-config-admin')
+  );
+
+  if (adminHazu) {
+    console.log('[SYNC] Found Admin Hazu:', adminHazu.snapshot.key);
+
+    // Save admin_id
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
+      ['admin_id', adminHazu.snapshot.key, Date.now()]);
+
+    // Get children of admin Hazu to find the config item
+    const adminChildren = await sendApiRequestList(adminHazu.snapshot.key);
+    if (adminChildren) {
+      for (const child of adminChildren) {
+        const description = child.snapshot.description || '';
+        const config = extractWebhookConfig(description);
+        if (config) {
+          console.log('[SYNC] Found webhook config:', config.webhookUrl);
+          run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
+            ['webhook_url', config.webhookUrl, Date.now()]);
+          run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
+            ['template_id', config.templateId, Date.now()]);
+          break;
+        }
+      }
+    }
+  } else {
+    console.log('[SYNC] No Admin Hazu found (hz-config-admin tag)');
+  }
+}
+
 export async function runFullSync(): Promise<SyncProgress> {
   if (!isConfigured()) {
     return {
@@ -483,6 +545,9 @@ export async function runFullSync(): Promise<SyncProgress> {
   try {
     // Clear old data before syncing (full refresh)
     clearOldData();
+
+    // Step 0: Extract admin configuration (webhook URL and template ID)
+    await syncAdminConfig();
 
     // Step 1: Sync rooms (extracts class_ids from hz-config-class-* tags)
     await syncRooms();
