@@ -527,5 +527,110 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.WEBHOOK_CREATE_ROOM,
+    async (_event, templateId: string, targetId: string, title: string) => {
+      try {
+        // Get webhook config
+        const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
+        const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
+
+        if (!webhookUrl) {
+          return { success: false, error: 'Webhook not configured. Run sync first.' };
+        }
+
+        if (!rootHazuId) {
+          return { success: false, error: 'Root Hazu ID not configured. Go to Settings.' };
+        }
+
+        // Build payload for create-group action
+        const payload = {
+          data: { action: 'create-group' },
+          hazu: { env: '' },
+          dataForCloudFunction: {
+            sourceId: templateId,     // Template to copy
+            templateId: rootHazuId,   // Root template ID
+            targetId: targetId,       // Where to create it
+            title: title,             // User-entered room name
+          },
+        };
+
+        // Call webhook
+        console.log('[WEBHOOK_CREATE_ROOM] Sending payload:', JSON.stringify(payload, null, 2));
+        const response = await axios.post(webhookUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 100000,
+        });
+        console.log('[WEBHOOK_CREATE_ROOM] Response:', response.status, response.data);
+
+        // Extract room data from response
+        const profileSnapshot = response.data?.profileSnapshot?.snapshot;
+        if (!profileSnapshot) {
+          return { success: false, error: 'Invalid webhook response: missing profileSnapshot' };
+        }
+
+        // Extract room type from tags (hz-config-room-*)
+        let roomType = 'class'; // default
+        if (Array.isArray(profileSnapshot.tags)) {
+          const roomTypeTag = profileSnapshot.tags.find((tag: string) =>
+            tag.startsWith('hz-config-room-')
+          );
+          if (roomTypeTag) {
+            roomType = roomTypeTag.replace('hz-config-room-', '');
+            // Normalize 'entreprise' to 'enterprise'
+            if (roomType === 'entreprise') {
+              roomType = 'enterprise';
+            }
+          }
+        }
+
+        // Insert into rooms table
+        const now = Date.now();
+        run(
+          `INSERT INTO rooms (id, title, description, color, icon, room_type, parent_id, tags, raw_data, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            profileSnapshot.key,
+            profileSnapshot.title || title,
+            profileSnapshot.description || null,
+            profileSnapshot.color || null,
+            profileSnapshot.icon || null,
+            roomType,
+            profileSnapshot.parentId || targetId,
+            JSON.stringify(profileSnapshot.tags || []),
+            JSON.stringify(profileSnapshot),
+            now,
+          ]
+        );
+
+        // Build room object to return
+        const room = {
+          id: profileSnapshot.key,
+          title: profileSnapshot.title || title,
+          description: profileSnapshot.description || null,
+          color: profileSnapshot.color || null,
+          icon: profileSnapshot.icon || null,
+          room_type: roomType,
+          parent_id: profileSnapshot.parentId || targetId,
+          tags: profileSnapshot.tags || [],
+          raw_data: JSON.stringify(profileSnapshot),
+          synced_at: now,
+        };
+
+        console.log('[WEBHOOK_CREATE_ROOM] Room created successfully:', room.id);
+        return { success: true, room };
+      } catch (error) {
+        console.error('Webhook create room error:', error);
+        let message = 'Unknown error';
+        if (axios.isAxiosError(error)) {
+          message = error.response?.data?.message || error.message;
+        } else if (error instanceof Error) {
+          message = error.message;
+        }
+        return { success: false, error: message };
+      }
+    }
+  );
+
   console.log('IPC handlers registered');
 }
