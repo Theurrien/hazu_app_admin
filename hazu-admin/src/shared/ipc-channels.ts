@@ -40,8 +40,12 @@ export const IPC_CHANNELS = {
   SETTINGS_SET: 'settings:set',
   SETTINGS_GET_WEBHOOK_CONFIG: 'settings:getWebhookConfig',
 
+  // Templates
+  TEMPLATES_FETCH: 'templates:fetch',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
+  WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
