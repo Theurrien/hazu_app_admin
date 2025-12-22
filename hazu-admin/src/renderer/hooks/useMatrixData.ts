@@ -52,10 +52,10 @@ export function useMatrixData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state
+  // Filter state - empty sets mean "show all"
   const [filters, setFilters] = useState<MatrixFilters>({
-    personTypes: new Set(ALL_PERSON_TYPES),
-    roomTypes: new Set(ALL_ROOM_TYPES),
+    personTypes: new Set<PersonType>(),
+    roomTypes: new Set<RoomType>(),
     personSearch: '',
     roomSearch: '',
   });
@@ -118,7 +118,10 @@ export function useMatrixData() {
 
   // Filter and sort persons
   const filteredPersons = useMemo(() => {
-    let persons = allPersons.filter(p => filters.personTypes.has(p.person_type));
+    // Empty set = show all, otherwise show only selected types
+    let persons = filters.personTypes.size === 0
+      ? allPersons
+      : allPersons.filter(p => filters.personTypes.has(p.person_type));
 
     // Apply search filter
     if (filters.personSearch) {
@@ -144,7 +147,10 @@ export function useMatrixData() {
 
   // Filter and sort rooms
   const filteredRooms = useMemo(() => {
-    let rooms = allRooms.filter(r => filters.roomTypes.has(r.room_type));
+    // Empty set = show all, otherwise show only selected types
+    let rooms = filters.roomTypes.size === 0
+      ? allRooms
+      : allRooms.filter(r => filters.roomTypes.has(r.room_type));
 
     // Apply search filter
     if (filters.roomSearch) {
