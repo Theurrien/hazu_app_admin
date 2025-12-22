@@ -1,6 +1,6 @@
 import React from 'react';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'assignments' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'sync' | 'settings';
 
 interface SidebarProps {
   currentPage: Page;
@@ -17,7 +17,7 @@ const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '📊' },
   { id: 'rooms', label: 'Rooms', icon: '🏠' },
   { id: 'persons', label: 'Persons', icon: '👥' },
-  { id: 'assignments', label: 'Assignments', icon: '🔗' },
+  { id: 'matrix', label: 'Matrix', icon: '📋' },
   { id: 'sync', label: 'Sync', icon: '🔄' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];

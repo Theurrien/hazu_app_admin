@@ -107,6 +107,17 @@ export function registerIpcHandlers(): void {
   // ASSIGNMENTS
   // ============================================================================
 
+  ipcMain.handle(IPC_CHANNELS.ASSIGNMENTS_GET_ALL, async () => {
+    try {
+      return query(
+        `SELECT person_id, room_id, role FROM person_room_assignments`
+      );
+    } catch (error) {
+      console.error('Get all assignments error:', error);
+      throw error;
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.ASSIGNMENTS_GET_FOR_PERSON, async (_event, personId: string) => {
     try {
       return query(

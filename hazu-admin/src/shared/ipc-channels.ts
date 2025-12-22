@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   PERSONS_SEARCH: 'persons:search',
 
   // Assignments
+  ASSIGNMENTS_GET_ALL: 'assignments:getAll',
   ASSIGNMENTS_GET_FOR_PERSON: 'assignments:getForPerson',
   ASSIGNMENTS_GET_FOR_ROOM: 'assignments:getForRoom',
   ASSIGNMENTS_CREATE: 'assignments:create',

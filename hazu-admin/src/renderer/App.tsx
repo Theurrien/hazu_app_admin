@@ -4,9 +4,10 @@ import Header from './components/layout/Header';
 import Dashboard from './pages/Dashboard';
 import RoomsPage from './pages/RoomsPage';
 import PersonsPage from './pages/PersonsPage';
+import MatrixPage from './pages/MatrixPage';
 import SettingsPage from './pages/SettingsPage';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'assignments' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'sync' | 'settings';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
@@ -19,6 +20,8 @@ function App() {
         return <RoomsPage />;
       case 'persons':
         return <PersonsPage />;
+      case 'matrix':
+        return <MatrixPage />;
       case 'settings':
         return <SettingsPage />;
       default:

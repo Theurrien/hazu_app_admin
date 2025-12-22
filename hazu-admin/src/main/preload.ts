@@ -10,6 +10,7 @@ const IPC_CHANNELS = {
   PERSONS_GET_ALL: 'persons:getAll',
   PERSONS_GET_BY_ID: 'persons:getById',
   PERSONS_SEARCH: 'persons:search',
+  ASSIGNMENTS_GET_ALL: 'assignments:getAll',
   ASSIGNMENTS_GET_FOR_PERSON: 'assignments:getForPerson',
   ASSIGNMENTS_GET_FOR_ROOM: 'assignments:getForRoom',
   ASSIGNMENTS_CREATE: 'assignments:create',
@@ -51,6 +52,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.PERSONS_SEARCH, query),
 
   // Assignments
+  getAllAssignments: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ASSIGNMENTS_GET_ALL),
   getAssignmentsForPerson: (personId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ASSIGNMENTS_GET_FOR_PERSON, personId),
   getAssignmentsForRoom: (roomId: string) =>
@@ -104,6 +107,7 @@ declare global {
       getPersons: (type?: string) => Promise<any[]>;
       getPersonById: (id: string) => Promise<any>;
       searchPersons: (query: string) => Promise<any[]>;
+      getAllAssignments: () => Promise<Array<{ person_id: string; room_id: string; role: string }>>;
       getAssignmentsForPerson: (personId: string) => Promise<any[]>;
       getAssignmentsForRoom: (roomId: string) => Promise<any[]>;
       createAssignment: (personId: string, roomId: string, role: string) => Promise<any>;
