@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Room, RoomType } from '../../shared/types';
 import { RoomAssignmentsList } from '../components/AssignmentsList';
+import { CreateRoomModal } from '../components/CreateRoomModal';
 
 const roomTypeLabels: Record<RoomType, string> = {
   state: 'Cantons',
@@ -31,6 +32,7 @@ function RoomsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<PersonAssignment[]>([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     loadRooms();
@@ -79,6 +81,13 @@ function RoomsPage() {
     );
   });
 
+  const handleRoomCreated = (room: Room) => {
+    // Add new room to list
+    setRooms(prev => [...prev, room]);
+    // Show success in console
+    console.log('Room created:', room.title);
+  };
+
   return (
     <div className="space-y-6">
       {/* Filters */}
@@ -98,6 +107,13 @@ function RoomsPage() {
             />
           ))}
         </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+        >
+          <span>+</span>
+          <span>New Room</span>
+        </button>
         <div className="flex-1 max-w-md">
           <input
             type="text"
@@ -132,6 +148,14 @@ function RoomsPage() {
           ))}
         </div>
       )}
+
+      {/* Create Room Modal */}
+      <CreateRoomModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onRoomCreated={handleRoomCreated}
+        rooms={rooms}
+      />
     </div>
   );
 }
