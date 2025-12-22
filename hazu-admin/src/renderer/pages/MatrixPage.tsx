@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { useMatrixData } from '../hooks/useMatrixData';
 import { MatrixFilters } from '../components/MatrixFilters';
 import { MatrixGrid } from '../components/MatrixGrid';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 function MatrixPage() {
   const {
@@ -18,6 +19,49 @@ function MatrixPage() {
     allPersonTypes,
     allRoomTypes,
   } = useMatrixData();
+
+  const { addTask } = useTaskQueue();
+
+  // Local state for optimistic updates
+  const [assignments, setAssignments] = useState<Map<string, string>>(new Map());
+
+  // Handle role changes from the grid
+  const handleRoleChange = useCallback(
+    (
+      personId: string,
+      personName: string,
+      roomId: string,
+      roomName: string,
+      oldRole: string | null,
+      newRole: string | null
+    ) => {
+      // Update local state immediately for responsiveness
+      if (newRole) {
+        setAssignments((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(`${personId}:${roomId}`, newRole);
+          return newMap;
+        });
+      } else {
+        setAssignments((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(`${personId}:${roomId}`);
+          return newMap;
+        });
+      }
+
+      // Add to task queue
+      addTask({
+        personName,
+        roomName,
+        personId,
+        roomId,
+        oldRole,
+        newRole,
+      });
+    },
+    [addTask]
+  );
 
   if (loading) {
     return (
@@ -53,6 +97,7 @@ function MatrixPage() {
         persons={persons}
         rooms={rooms}
         getAssignment={getAssignment}
+        onRoleChange={handleRoleChange}
       />
     </div>
   );
