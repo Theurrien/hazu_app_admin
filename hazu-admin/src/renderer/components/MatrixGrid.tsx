@@ -19,13 +19,31 @@ const roleLabels: Record<string, string> = {
   guardian: 'Guardian',
 };
 
+const roleOptions = [
+  { value: '_', label: '-' },
+  { value: 'student', label: 'Student' },
+  { value: 'companymentor', label: 'Mentor' },
+  { value: 'schoolteacher', label: 'Teacher' },
+  { value: 'courseteacher', label: 'Course T.' },
+  { value: 'stateadvisor', label: 'Advisor' },
+  { value: 'guardian', label: 'Guardian' },
+];
+
 interface MatrixGridProps {
   persons: Person[];
   rooms: Room[];
   getAssignment: (personId: string, roomId: string) => string | null;
+  onRoleChange?: (
+    personId: string,
+    personName: string,
+    roomId: string,
+    roomName: string,
+    oldRole: string | null,
+    newRole: string | null
+  ) => void;
 }
 
-export function MatrixGrid({ persons, rooms, getAssignment }: MatrixGridProps) {
+export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange }: MatrixGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -193,6 +211,24 @@ export function MatrixGrid({ persons, rooms, getAssignment }: MatrixGridProps) {
               return rooms.slice(visibleCols.start, visibleCols.end).map((room, colIdx) => {
                 const colIndex = visibleCols.start + colIdx;
                 const role = getAssignment(person.id, room.id);
+
+                const handleRoleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+                  const newValue = e.target.value;
+                  const newRole = newValue === '_' ? null : newValue;
+                  const roomTitle = stripHtml(room.title);
+
+                  if (onRoleChange) {
+                    onRoleChange(
+                      person.id,
+                      person.display_name,
+                      room.id,
+                      roomTitle,
+                      role,
+                      newRole
+                    );
+                  }
+                };
+
                 return (
                   <div
                     key={`${person.id}-${room.id}`}
@@ -206,11 +242,18 @@ export function MatrixGrid({ persons, rooms, getAssignment }: MatrixGridProps) {
                       height: ROW_HEIGHT,
                     }}
                   >
-                    {role && (
-                      <span className="text-xs text-blue-700">
-                        {roleLabels[role] || role}
-                      </span>
-                    )}
+                    <select
+                      value={role || '_'}
+                      onChange={handleRoleChange}
+                      className="w-full h-full px-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                      style={{ appearance: 'none' }}
+                    >
+                      {roleOptions.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 );
               });
