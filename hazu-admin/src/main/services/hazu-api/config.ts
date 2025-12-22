@@ -16,6 +16,9 @@ export interface HazuApiConfig {
   apiKey: string;
   environment: HazuEnvironment;
   rootHazuId: string;
+  userId?: string;
+  userEmail?: string;
+  userDisplayName?: string;
 }
 
 let currentConfig: HazuApiConfig | null = null;

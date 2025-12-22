@@ -269,21 +269,22 @@ export function registerIpcHandlers(): void {
     console.log('API_SET_CONFIG called with:', {
       apiKey: config.apiKey ? '[REDACTED]' : 'empty',
       environment: config.environment,
-      rootHazuId: config.rootHazuId
+      rootHazuId: config.rootHazuId,
+      userId: config.userId,
+      userEmail: config.userEmail,
     });
 
     try {
       console.log('Setting config in memory...');
       setApiConfig(config);
 
-      console.log('Saving api_key to database...');
+      console.log('Saving settings to database...');
       run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['api_key', config.apiKey]);
-
-      console.log('Saving environment to database...');
       run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['environment', config.environment]);
-
-      console.log('Saving root_hazu_id to database...');
       run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['root_hazu_id', config.rootHazuId]);
+      run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['user_id', config.userId || '']);
+      run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['user_email', config.userEmail || '']);
+      run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['user_display_name', config.userDisplayName || '']);
 
       console.log('All settings saved successfully');
       return { success: true };
@@ -298,11 +299,17 @@ export function registerIpcHandlers(): void {
       const apiKey = get<{ value: string }>("SELECT value FROM settings WHERE key = 'api_key'");
       const environment = get<{ value: string }>("SELECT value FROM settings WHERE key = 'environment'");
       const rootHazuId = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
+      const userId = get<{ value: string }>("SELECT value FROM settings WHERE key = 'user_id'");
+      const userEmail = get<{ value: string }>("SELECT value FROM settings WHERE key = 'user_email'");
+      const userDisplayName = get<{ value: string }>("SELECT value FROM settings WHERE key = 'user_display_name'");
 
       const config: HazuApiConfig = {
         apiKey: apiKey?.value || '',
         environment: (environment?.value as 'swiss' | 'io' | 'dev') || 'swiss',
         rootHazuId: rootHazuId?.value || '',
+        userId: userId?.value || '',
+        userEmail: userEmail?.value || '',
+        userDisplayName: userDisplayName?.value || '',
       };
 
       // Load config into memory
@@ -375,18 +382,31 @@ export function registerIpcHandlers(): void {
       newRole: string | null
     ) => {
       try {
-        // Get webhook config
+        // Get webhook config and user info
         const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
         const templateId = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+        const adminId = query(`SELECT value FROM settings WHERE key = 'admin_id'`)?.[0]?.value;
+        const userId = query(`SELECT value FROM settings WHERE key = 'user_id'`)?.[0]?.value;
+        const userEmail = query(`SELECT value FROM settings WHERE key = 'user_email'`)?.[0]?.value;
+        const userDisplayName = query(`SELECT value FROM settings WHERE key = 'user_display_name'`)?.[0]?.value;
 
         if (!webhookUrl || !templateId) {
           return { success: false, error: 'Webhook not configured. Run sync first.' };
         }
 
+        if (!userId || !userEmail) {
+          return { success: false, error: 'User not configured. Go to Settings and enter your user info.' };
+        }
+
         // Build payload
         const payload = {
-          // Empty env for production, webhook uses default environment
-          hazu: { env: '' },
+          hazu: {
+            env: '',
+            parentId: adminId,
+            userId: userId,
+            email: userEmail,
+            displayName: userDisplayName || userEmail,
+          },
           data: { action: 'update-user-roles' },
           dataForCloudFunction: {
             templateId,
@@ -403,10 +423,12 @@ export function registerIpcHandlers(): void {
         };
 
         // Call webhook
+        console.log('[WEBHOOK] Sending payload:', JSON.stringify(payload, null, 2));
         const response = await axios.post(webhookUrl, payload, {
           headers: { 'Content-Type': 'application/json' },
           timeout: 10000,
         });
+        console.log('[WEBHOOK] Response:', response.status, response.data);
 
         // Update local DB on success
         if (newRole && newRole !== '_') {

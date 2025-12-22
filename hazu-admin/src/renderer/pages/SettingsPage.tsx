@@ -4,6 +4,9 @@ function SettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [environment, setEnvironment] = useState('swiss');
   const [rootHazuId, setRootHazuId] = useState('');
+  const [userId, setUserId] = useState('');
+  const [userEmail, setUserEmail] = useState('');
+  const [userDisplayName, setUserDisplayName] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -17,6 +20,9 @@ function SettingsPage() {
       if (config.apiKey) setApiKey(config.apiKey);
       if (config.environment) setEnvironment(config.environment);
       if (config.rootHazuId) setRootHazuId(config.rootHazuId);
+      if (config.userId) setUserId(config.userId);
+      if (config.userEmail) setUserEmail(config.userEmail);
+      if (config.userDisplayName) setUserDisplayName(config.userDisplayName);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -30,6 +36,9 @@ function SettingsPage() {
         apiKey,
         environment,
         rootHazuId,
+        userId,
+        userEmail,
+        userDisplayName,
       });
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
     } catch (error) {
@@ -105,6 +114,57 @@ function SettingsPage() {
             />
             <p className="mt-1 text-sm text-gray-500">
               The ID of the root Hazu to sync from.
+            </p>
+          </div>
+        </div>
+
+        <h3 className="text-lg font-semibold pt-4">User Configuration (for webhooks)</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              User ID
+            </label>
+            <input
+              type="text"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              placeholder="e.g., eixzjfiXYSYj3mpRDc9h8GKFPSq1"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              Your Firebase User ID (found in Hazu admin settings).
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Email
+            </label>
+            <input
+              type="email"
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              placeholder="e.g., admin@example.com"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              Your email address for webhook requests.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Display Name
+            </label>
+            <input
+              type="text"
+              value={userDisplayName}
+              onChange={(e) => setUserDisplayName(e.target.value)}
+              placeholder="e.g., Admin Hazu"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              Your display name for webhook requests.
             </p>
           </div>
         </div>
