@@ -142,4 +142,7 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('api_environment', 'swiss'),
     ('root_hazu_id', ''),
-    ('last_sync_at', '0');
+    ('last_sync_at', '0'),
+    ('admin_id', ''),
+    ('template_id', ''),
+    ('webhook_url', '');
