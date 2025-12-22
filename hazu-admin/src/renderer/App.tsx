@@ -6,6 +6,8 @@ import RoomsPage from './pages/RoomsPage';
 import PersonsPage from './pages/PersonsPage';
 import MatrixPage from './pages/MatrixPage';
 import SettingsPage from './pages/SettingsPage';
+import { TaskQueueProvider } from './contexts/TaskQueueContext';
+import { TaskQueuePanel } from './components/TaskQueuePanel';
 
 type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'sync' | 'settings';
 
@@ -30,15 +32,18 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header currentPage={currentPage} />
-        <main className="flex-1 overflow-auto p-6">
-          {renderPage()}
-        </main>
+    <TaskQueueProvider>
+      <div className="flex h-screen bg-gray-100">
+        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Header currentPage={currentPage} />
+          <main className="flex-1 overflow-auto p-6">
+            {renderPage()}
+          </main>
+        </div>
       </div>
-    </div>
+      <TaskQueuePanel />
+    </TaskQueueProvider>
   );
 }
 
