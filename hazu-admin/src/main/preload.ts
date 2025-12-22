@@ -26,6 +26,8 @@ const IPC_CHANNELS = {
   SETTINGS_SET: 'settings:set',
   SETTINGS_GET_WEBHOOK_CONFIG: 'settings:getWebhookConfig',
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
+  TEMPLATES_FETCH: 'templates:fetch',
+  WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -99,6 +101,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     newRole: string | null
   ) => ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_UPDATE_USER_ROLE, personId, roomId, oldRole, newRole),
 
+  // Templates
+  fetchTemplates: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEMPLATES_FETCH),
+
+  // Room creation
+  createRoom: (templateId: string, targetId: string, title: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_CREATE_ROOM, templateId, targetId, title),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -140,6 +150,22 @@ declare global {
         oldRole: string | null,
         newRole: string | null
       ) => Promise<{ success: boolean; error?: string }>;
+      fetchTemplates: () => Promise<{
+        success: boolean;
+        templates?: Array<{
+          id: string;
+          title: string;
+          roomType: 'class' | 'cie' | 'enterprise' | 'state';
+          icon?: string;
+          color?: string;
+        }>;
+        error?: string;
+      }>;
+      createRoom: (
+        templateId: string,
+        targetId: string,
+        title: string
+      ) => Promise<{ success: boolean; room?: any; error?: string }>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }
