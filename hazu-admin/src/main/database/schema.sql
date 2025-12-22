@@ -145,4 +145,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('last_sync_at', '0'),
     ('admin_id', ''),
     ('template_id', ''),
-    ('webhook_url', '');
+    ('webhook_url', ''),
+    ('user_id', ''),
+    ('user_email', ''),
+    ('user_display_name', '');
