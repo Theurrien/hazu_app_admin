@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
 import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
 import { runFullSync, getSyncProgress } from '../services/sync.service';
+import { sendApiRequestList } from '../services/hazu-api/api';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -365,6 +366,80 @@ export function registerIpcHandlers(): void {
     } catch (error) {
       console.error('Get webhook config error:', error);
       throw error;
+    }
+  });
+
+  // ============================================================================
+  // TEMPLATES
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.TEMPLATES_FETCH, async () => {
+    try {
+      // Check if API is configured
+      if (!isConfigured()) {
+        return { success: false, error: 'API not configured. Please configure API settings first.' };
+      }
+
+      // Get the templateLink (root_hazu_id) from settings
+      const rootHazuIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
+      const rootHazuId = rootHazuIdRow?.value;
+
+      if (!rootHazuId) {
+        return { success: false, error: 'Root Hazu ID not configured. Please set it in Settings.' };
+      }
+
+      // Fetch children from Hazu API
+      console.log('[TEMPLATES_FETCH] Fetching templates from root_hazu_id:', rootHazuId);
+      const children = await sendApiRequestList(rootHazuId);
+
+      if (!children) {
+        return { success: false, error: 'Failed to fetch templates from Hazu API.' };
+      }
+
+      // Filter and map to Template interface
+      const templates = children
+        .filter(child => {
+          // Must have snapshot and tags
+          if (!child.snapshot || !Array.isArray(child.snapshot.tags)) {
+            return false;
+          }
+          // Must have at least one hz-config-room-* tag
+          return child.snapshot.tags.some(tag =>
+            typeof tag === 'string' && tag.startsWith('hz-config-room-')
+          );
+        })
+        .map(child => {
+          const snapshot = child.snapshot;
+
+          // Extract room type from tag
+          const roomTypeTag = snapshot.tags.find((tag: string) =>
+            tag.startsWith('hz-config-room-')
+          );
+
+          // Extract the type part after 'hz-config-room-'
+          let roomType = roomTypeTag?.replace('hz-config-room-', '') || '';
+
+          // Normalize 'entreprise' to 'enterprise'
+          if (roomType === 'entreprise') {
+            roomType = 'enterprise';
+          }
+
+          return {
+            id: snapshot.key || snapshot.id,
+            title: snapshot.title || 'Untitled',
+            roomType: roomType as 'class' | 'cie' | 'enterprise' | 'state',
+            icon: snapshot.icon,
+            color: snapshot.color,
+          };
+        });
+
+      console.log(`[TEMPLATES_FETCH] Found ${templates.length} templates`);
+      return { success: true, templates };
+
+    } catch (error) {
+      console.error('Fetch templates error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: `Failed to fetch templates: ${errorMessage}` };
     }
   });
 
