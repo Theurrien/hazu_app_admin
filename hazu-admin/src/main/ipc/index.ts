@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron';
+import axios from 'axios';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
 import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
@@ -384,6 +385,7 @@ export function registerIpcHandlers(): void {
 
         // Build payload
         const payload = {
+          // Empty env for production, webhook uses default environment
           hazu: { env: '' },
           data: { action: 'update-user-roles' },
           dataForCloudFunction: {
@@ -392,6 +394,7 @@ export function registerIpcHandlers(): void {
             userTypesInfo: [
               {
                 classId: roomId,
+                // Use '_' to indicate no role (deletion) in webhook payload
                 oldUserType: oldRole || '_',
                 newUserType: newRole || '_',
               },
@@ -400,7 +403,6 @@ export function registerIpcHandlers(): void {
         };
 
         // Call webhook
-        const axios = require('axios');
         const response = await axios.post(webhookUrl, payload, {
           headers: { 'Content-Type': 'application/json' },
           timeout: 10000,
@@ -421,9 +423,16 @@ export function registerIpcHandlers(): void {
         }
 
         return { success: true };
-      } catch (error: any) {
+      } catch (error) {
+        // Webhooks return error objects instead of throwing
+        // to allow graceful UI handling of network failures
         console.error('Webhook error:', error);
-        const message = error.response?.data?.message || error.message || 'Unknown error';
+        let message = 'Unknown error';
+        if (axios.isAxiosError(error)) {
+          message = error.response?.data?.message || error.message;
+        } else if (error instanceof Error) {
+          message = error.message;
+        }
         return { success: false, error: message };
       }
     }
