@@ -360,5 +360,74 @@ export function registerIpcHandlers(): void {
     }
   });
 
+  // ============================================================================
+  // WEBHOOKS
+  // ============================================================================
+
+  ipcMain.handle(
+    IPC_CHANNELS.WEBHOOK_UPDATE_USER_ROLE,
+    async (
+      _event,
+      personId: string,
+      roomId: string,
+      oldRole: string | null,
+      newRole: string | null
+    ) => {
+      try {
+        // Get webhook config
+        const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
+        const templateId = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+
+        if (!webhookUrl || !templateId) {
+          return { success: false, error: 'Webhook not configured. Run sync first.' };
+        }
+
+        // Build payload
+        const payload = {
+          hazu: { env: '' },
+          data: { action: 'update-user-roles' },
+          dataForCloudFunction: {
+            templateId,
+            profileId: personId,
+            userTypesInfo: [
+              {
+                classId: roomId,
+                oldUserType: oldRole || '_',
+                newUserType: newRole || '_',
+              },
+            ],
+          },
+        };
+
+        // Call webhook
+        const axios = require('axios');
+        const response = await axios.post(webhookUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000,
+        });
+
+        // Update local DB on success
+        if (newRole && newRole !== '_') {
+          query(
+            `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
+             VALUES (?, ?, ?, ?)`,
+            [personId, roomId, newRole, Date.now()]
+          );
+        } else {
+          query(
+            `DELETE FROM person_room_assignments WHERE person_id = ? AND room_id = ?`,
+            [personId, roomId]
+          );
+        }
+
+        return { success: true };
+      } catch (error: any) {
+        console.error('Webhook error:', error);
+        const message = error.response?.data?.message || error.message || 'Unknown error';
+        return { success: false, error: message };
+      }
+    }
+  );
+
   console.log('IPC handlers registered');
 }

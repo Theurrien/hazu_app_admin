@@ -25,6 +25,7 @@ const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   SETTINGS_GET_WEBHOOK_CONFIG: 'settings:getWebhookConfig',
+  WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -90,6 +91,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getWebhookConfig: () =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_WEBHOOK_CONFIG),
 
+  // Webhooks
+  updateUserRole: (
+    personId: string,
+    roomId: string,
+    oldRole: string | null,
+    newRole: string | null
+  ) => ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_UPDATE_USER_ROLE, personId, roomId, oldRole, newRole),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -125,6 +134,12 @@ declare global {
       getSetting: (key: string) => Promise<string | null>;
       setSetting: (key: string, value: string) => Promise<void>;
       getWebhookConfig: () => Promise<{ adminId: string; templateId: string; webhookUrl: string }>;
+      updateUserRole: (
+        personId: string,
+        roomId: string,
+        oldRole: string | null,
+        newRole: string | null
+      ) => Promise<{ success: boolean; error?: string }>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }
