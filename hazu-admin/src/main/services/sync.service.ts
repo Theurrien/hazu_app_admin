@@ -500,31 +500,41 @@ async function syncAdminConfig(): Promise<void> {
     child.snapshot.tags?.includes('hz-config-admin')
   );
 
-  if (adminHazu) {
-    console.log('[SYNC] Found Admin Hazu:', adminHazu.snapshot.key);
-
-    // Save admin_id
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
-      ['admin_id', adminHazu.snapshot.key, Date.now()]);
-
-    // Get children of admin Hazu to find the config item
-    const adminChildren = await sendApiRequestList(adminHazu.snapshot.key);
-    if (adminChildren) {
-      for (const child of adminChildren) {
-        const description = child.snapshot.description || '';
-        const config = extractWebhookConfig(description);
-        if (config) {
-          console.log('[SYNC] Found webhook config:', config.webhookUrl);
-          run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
-            ['webhook_url', config.webhookUrl, Date.now()]);
-          run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
-            ['template_id', config.templateId, Date.now()]);
-          break;
-        }
-      }
-    }
-  } else {
+  if (!adminHazu) {
     console.log('[SYNC] No Admin Hazu found (hz-config-admin tag)');
+    return;
+  }
+
+  console.log('[SYNC] Found Admin Hazu:', adminHazu.snapshot.key);
+
+  // Save admin_id
+  run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
+    ['admin_id', adminHazu.snapshot.key, Date.now()]);
+
+  // Get children of admin Hazu to find the config item
+  const adminChildren = await sendApiRequestList(adminHazu.snapshot.key);
+  if (!adminChildren) {
+    console.log('[SYNC] Failed to fetch Admin Hazu children');
+    return;
+  }
+
+  let foundConfig = false;
+  for (const child of adminChildren) {
+    const description = child.snapshot.description || '';
+    const config = extractWebhookConfig(description);
+    if (config) {
+      console.log('[SYNC] Found webhook config:', config.webhookUrl);
+      run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
+        ['webhook_url', config.webhookUrl, Date.now()]);
+      run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)',
+        ['template_id', config.templateId, Date.now()]);
+      foundConfig = true;
+      break;
+    }
+  }
+
+  if (!foundConfig) {
+    console.log('[SYNC] No webhook config found in Admin Hazu children');
   }
 }
 
