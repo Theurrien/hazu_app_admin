@@ -50,7 +50,7 @@ function MatrixPage() {
         });
       }
 
-      // Add to task queue
+      // Add to task queue with revert callback
       addTask({
         personName,
         roomName,
@@ -58,6 +58,22 @@ function MatrixPage() {
         roomId,
         oldRole,
         newRole,
+        onError: () => {
+          // Revert to old role on error
+          if (oldRole) {
+            setAssignments((prev) => {
+              const newMap = new Map(prev);
+              newMap.set(`${personId}:${roomId}`, oldRole);
+              return newMap;
+            });
+          } else {
+            setAssignments((prev) => {
+              const newMap = new Map(prev);
+              newMap.delete(`${personId}:${roomId}`);
+              return newMap;
+            });
+          }
+        },
       });
     },
     [addTask]
