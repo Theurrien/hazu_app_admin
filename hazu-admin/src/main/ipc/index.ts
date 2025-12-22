@@ -382,34 +382,26 @@ export function registerIpcHandlers(): void {
       newRole: string | null
     ) => {
       try {
-        // Get webhook config and user info
+        // Get webhook config - templateId is actually root_hazu_id
         const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
-        const templateId = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
-        const adminId = query(`SELECT value FROM settings WHERE key = 'admin_id'`)?.[0]?.value;
-        const userId = query(`SELECT value FROM settings WHERE key = 'user_id'`)?.[0]?.value;
-        const userEmail = query(`SELECT value FROM settings WHERE key = 'user_email'`)?.[0]?.value;
-        const userDisplayName = query(`SELECT value FROM settings WHERE key = 'user_display_name'`)?.[0]?.value;
+        const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
 
-        if (!webhookUrl || !templateId) {
+        if (!webhookUrl) {
           return { success: false, error: 'Webhook not configured. Run sync first.' };
         }
 
-        if (!userId || !userEmail) {
-          return { success: false, error: 'User not configured. Go to Settings and enter your user info.' };
+        if (!rootHazuId) {
+          return { success: false, error: 'Root Hazu ID not configured. Go to Settings.' };
         }
 
-        // Build payload
+        // Build payload - matches Admin Panel format exactly
         const payload = {
           hazu: {
             env: '',
-            parentId: adminId,
-            userId: userId,
-            email: userEmail,
-            displayName: userDisplayName || userEmail,
           },
           data: { action: 'update-user-roles' },
           dataForCloudFunction: {
-            templateId,
+            templateId: rootHazuId,
             profileId: personId,
             userTypesInfo: [
               {
@@ -426,7 +418,7 @@ export function registerIpcHandlers(): void {
         console.log('[WEBHOOK] Sending payload:', JSON.stringify(payload, null, 2));
         const response = await axios.post(webhookUrl, payload, {
           headers: { 'Content-Type': 'application/json' },
-          timeout: 10000,
+          timeout: 100000,
         });
         console.log('[WEBHOOK] Response:', response.status, response.data);
 
