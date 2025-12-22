@@ -168,11 +168,16 @@ async function syncRooms(): Promise<void> {
 }
 
 // Extract class ID from hz-config-class-* tag
+// Class IDs are alphanumeric only, so we extract only alphanumeric characters
+// This handles inconsistent tags like "hz-config-class-ID-" (trailing hyphen)
 function extractClassId(tags: string[]): string | null {
   const prefix = "hz-config-class-";
   for (const tag of tags) {
     if (tag.startsWith(prefix)) {
-      return tag.substring(prefix.length);
+      const remainder = tag.substring(prefix.length);
+      // Extract only alphanumeric characters (the actual ID)
+      const match = remainder.match(/^[a-zA-Z0-9]+/);
+      return match ? match[0] : null;
     }
   }
   return null;
