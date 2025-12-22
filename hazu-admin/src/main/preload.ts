@@ -24,6 +24,7 @@ const IPC_CHANNELS = {
   API_IS_CONFIGURED: 'api:isConfigured',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+  SETTINGS_GET_WEBHOOK_CONFIG: 'settings:getWebhookConfig',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -86,6 +87,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET, key),
   setSetting: (key: string, value: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET, key, value),
+  getWebhookConfig: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_WEBHOOK_CONFIG),
 
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
@@ -121,6 +124,7 @@ declare global {
       isApiConfigured: () => Promise<boolean>;
       getSetting: (key: string) => Promise<string | null>;
       setSetting: (key: string, value: string) => Promise<void>;
+      getWebhookConfig: () => Promise<{ adminId: string; templateId: string; webhookUrl: string }>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }

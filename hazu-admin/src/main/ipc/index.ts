@@ -348,5 +348,17 @@ export function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_WEBHOOK_CONFIG, async () => {
+    try {
+      const adminId = query(`SELECT value FROM settings WHERE key = 'admin_id'`)?.[0]?.value || '';
+      const templateId = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value || '';
+      const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value || '';
+      return { adminId, templateId, webhookUrl };
+    } catch (error) {
+      console.error('Get webhook config error:', error);
+      throw error;
+    }
+  });
+
   console.log('IPC handlers registered');
 }
