@@ -6,6 +6,7 @@ interface CreateRoomModalProps {
   onClose: () => void;
   onRoomCreated: (room: any) => void;
   rooms: Array<{ id: string; room_type: string; parent_id: string | null }>;
+  rootHazuId: string | null;
 }
 
 interface Template {
@@ -26,7 +27,7 @@ const roomTypeLabels: Record<RoomType, string> = {
   cie: 'CIE',
 };
 
-export function CreateRoomModal({ isOpen, onClose, onRoomCreated, rooms }: CreateRoomModalProps) {
+export function CreateRoomModal({ isOpen, onClose, onRoomCreated, rooms, rootHazuId }: CreateRoomModalProps) {
   const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [errorState, setErrorState] = useState<ErrorState>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -78,9 +79,9 @@ export function CreateRoomModal({ isOpen, onClose, onRoomCreated, rooms }: Creat
   };
 
   const findTargetIdForType = (type: RoomType): string | null => {
-    // Find first-level room (parent_id = null) of the selected type
+    // Find first-level room (parent_id = rootHazuId) of the selected type
     const targetRoom = rooms.find(
-      (room) => room.room_type === type && room.parent_id === null
+      (room) => room.room_type === type && room.parent_id === rootHazuId
     );
     return targetRoom?.id || null;
   };

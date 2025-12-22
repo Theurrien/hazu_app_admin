@@ -33,10 +33,21 @@ function RoomsPage() {
   const [assignments, setAssignments] = useState<PersonAssignment[]>([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [rootHazuId, setRootHazuId] = useState<string | null>(null);
 
   useEffect(() => {
     loadRooms();
+    loadRootHazuId();
   }, [filter]);
+
+  const loadRootHazuId = async () => {
+    try {
+      const config = await window.electronAPI.getApiConfig();
+      setRootHazuId(config.rootHazuId || null);
+    } catch (error) {
+      console.error('Failed to load rootHazuId:', error);
+    }
+  };
 
   const loadRooms = async () => {
     setLoading(true);
@@ -155,6 +166,7 @@ function RoomsPage() {
         onClose={() => setIsModalOpen(false)}
         onRoomCreated={handleRoomCreated}
         rooms={rooms}
+        rootHazuId={rootHazuId}
       />
     </div>
   );
