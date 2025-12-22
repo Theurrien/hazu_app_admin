@@ -96,15 +96,18 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
 
   // Auto-dismiss successful tasks
   useEffect(() => {
+    const hasDismissableTasks = tasks.some((t) => t.dismissAt);
+    if (!hasDismissableTasks) return;
+
     const interval = setInterval(() => {
       const now = Date.now();
       setTasks((prev) => prev.filter((t) => !t.dismissAt || t.dismissAt > now));
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [tasks]);
 
   const addTask = useCallback((taskData: Omit<Task, 'id' | 'status'>) => {
-    const id = `task-${++taskIdCounter.current}`;
+    const id = `task-${Date.now()}-${++taskIdCounter.current}`;
     const task: Task = { ...taskData, id, status: 'queued' };
     setTasks((prev) => [...prev, task]);
     return id;
