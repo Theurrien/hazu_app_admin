@@ -424,9 +424,12 @@ export function registerIpcHandlers(): void {
             roomType = 'enterprise';
           }
 
+          // Strip HTML tags from title
+          const cleanTitle = (snapshot.title || 'Untitled').replace(/<[^>]*>/g, '').trim();
+
           return {
             id: snapshot.key,
-            title: snapshot.title || 'Untitled',
+            title: cleanTitle,
             roomType: roomType as 'class' | 'cie' | 'enterprise' | 'state',
             icon: snapshot.icon,
             color: snapshot.color,
