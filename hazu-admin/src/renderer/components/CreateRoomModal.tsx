@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { RoomType, Room } from '../../shared/types';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ const roomTypeLabels: Record<RoomType, string> = {
 };
 
 export function CreateRoomModal({ isOpen, onClose, onRoomCreated, rooms, rootHazuId }: CreateRoomModalProps) {
+  const { addNotification } = useTaskQueue();
   const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [errorState, setErrorState] = useState<ErrorState>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -111,7 +113,13 @@ export function CreateRoomModal({ isOpen, onClose, onRoomCreated, rooms, rootHaz
       );
 
       if (result.success && result.room) {
-        // Success - call callback and close modal
+        // Add success notification to task queue
+        addNotification({
+          type: 'createRoom',
+          roomName: roomName.trim(),
+          roomId: result.room.id,
+        });
+        // Call callback and close modal
         onRoomCreated(result.room);
         onClose();
         resetForm();

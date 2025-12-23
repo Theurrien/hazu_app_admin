@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { RoomCategorySelector } from './RoomCategorySelector';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 interface CreatePersonModalProps {
   isOpen: boolean;
@@ -32,6 +33,7 @@ const roleLabels: Record<string, string> = {
 };
 
 export function CreatePersonModal({ isOpen, onClose, onPersonCreated, rooms }: CreatePersonModalProps) {
+  const { addNotification } = useTaskQueue();
   const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [errorState, setErrorState] = useState<ErrorState>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -207,7 +209,13 @@ export function CreatePersonModal({ isOpen, onClose, onPersonCreated, rooms }: C
       });
 
       if (result.success && result.person) {
-        // Success - call callback and close modal
+        // Add success notification to task queue
+        addNotification({
+          type: 'createPerson',
+          personName: `${firstName.trim()} ${lastName.trim()}`,
+          personId: result.person.id,
+        });
+        // Call callback and close modal
         onPersonCreated(result.person);
         onClose();
         resetForm();
