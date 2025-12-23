@@ -896,6 +896,169 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.WEBHOOK_DELETE_ROOM, async (_event, roomId: string) => {
+    try {
+      // Get webhook config
+      const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
+      const templateIdRow = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+
+      if (!webhookUrl) {
+        return { success: false, error: 'Webhook not configured. Run sync first.' };
+      }
+
+      if (!templateIdRow) {
+        return { success: false, error: 'Template ID not configured. Run sync first.' };
+      }
+
+      // Build payload for remove-group action
+      const payload = {
+        hazu: {
+          env: '',
+        },
+        data: {
+          action: 'remove-group',
+        },
+        dataForCloudFunction: {
+          templateId: templateIdRow,
+          groupId: roomId,
+        },
+      };
+
+      // Call webhook
+      console.log('[WEBHOOK_DELETE_ROOM] Sending payload:', JSON.stringify(payload, null, 2));
+      const response = await axios.post(webhookUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 100000,
+      });
+      console.log('[WEBHOOK_DELETE_ROOM] Response:', response.status, response.data);
+
+      // Delete from local database on success
+      run('DELETE FROM rooms WHERE id = ?', [roomId]);
+      console.log('[WEBHOOK_DELETE_ROOM] Room deleted successfully:', roomId);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Webhook delete room error:', error);
+      let message = 'Unknown error';
+      if (axios.isAxiosError(error)) {
+        message = error.response?.data?.message || error.message;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      return { success: false, error: message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WEBHOOK_DELETE_PERSON, async (_event, personId: string) => {
+    try {
+      // Get webhook config
+      const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
+      const templateIdRow = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+
+      if (!webhookUrl) {
+        return { success: false, error: 'Webhook not configured. Run sync first.' };
+      }
+
+      if (!templateIdRow) {
+        return { success: false, error: 'Template ID not configured. Run sync first.' };
+      }
+
+      // Build payload for remove-user action
+      const payload = {
+        hazu: {
+          env: '',
+        },
+        data: {
+          action: 'remove-user',
+        },
+        dataForCloudFunction: {
+          templateId: templateIdRow,
+          profileId: personId,
+        },
+      };
+
+      // Call webhook
+      console.log('[WEBHOOK_DELETE_PERSON] Sending payload:', JSON.stringify(payload, null, 2));
+      const response = await axios.post(webhookUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 100000,
+      });
+      console.log('[WEBHOOK_DELETE_PERSON] Response:', response.status, response.data);
+
+      // Delete from local database on success
+      run('DELETE FROM persons WHERE id = ?', [personId]);
+      console.log('[WEBHOOK_DELETE_PERSON] Person deleted successfully:', personId);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Webhook delete person error:', error);
+      let message = 'Unknown error';
+      if (axios.isAxiosError(error)) {
+        message = error.response?.data?.message || error.message;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      return { success: false, error: message };
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.WEBHOOK_RENAME_ROOM,
+    async (_event, roomId: string, newTitle: string) => {
+      try {
+        // Get webhook config
+        const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
+        const templateIdRow = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+
+        if (!webhookUrl) {
+          return { success: false, error: 'Webhook not configured. Run sync first.' };
+        }
+
+        if (!templateIdRow) {
+          return { success: false, error: 'Template ID not configured. Run sync first.' };
+        }
+
+        // Build payload for rename-group action
+        const payload = {
+          hazu: {
+            env: '',
+          },
+          data: {
+            action: 'rename-group',
+          },
+          dataForCloudFunction: {
+            templateId: templateIdRow,
+            groupId: roomId,
+            newName: newTitle,
+          },
+        };
+
+        // Call webhook
+        console.log('[WEBHOOK_RENAME_ROOM] Sending payload:', JSON.stringify(payload, null, 2));
+        const response = await axios.post(webhookUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 100000,
+        });
+        console.log('[WEBHOOK_RENAME_ROOM] Response:', response.status, response.data);
+
+        // Update local database on success
+        run('UPDATE rooms SET title = ? WHERE id = ?', [newTitle, roomId]);
+        console.log('[WEBHOOK_RENAME_ROOM] Room renamed successfully:', roomId, '->', newTitle);
+
+        return { success: true };
+      } catch (error) {
+        console.error('Webhook rename room error:', error);
+        let message = 'Unknown error';
+        if (axios.isAxiosError(error)) {
+          message = error.response?.data?.message || error.message;
+        } else if (error instanceof Error) {
+          message = error.message;
+        }
+        return { success: false, error: message };
+      }
+    }
+  );
+
   // ============================================================================
   // SHELL
   // ============================================================================
