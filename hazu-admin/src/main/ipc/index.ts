@@ -447,6 +447,136 @@ export function registerIpcHandlers(): void {
   });
 
   // ============================================================================
+  // PROFILE CATEGORIES
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.PROFILE_CATEGORIES_FETCH, async () => {
+    try {
+      // Check if API is configured
+      if (!isConfigured()) {
+        return { success: false, error: 'API not configured. Please configure API settings first.' };
+      }
+
+      // Get the root_hazu_id from settings
+      const rootHazuIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
+      const rootHazuId = rootHazuIdRow?.value;
+
+      if (!rootHazuId) {
+        return { success: false, error: 'Root Hazu ID not configured. Please configure API settings first.' };
+      }
+
+      // Fetch first-level children from Hazu API
+      console.log('[PROFILE_CATEGORIES_FETCH] Fetching categories from root_hazu_id:', rootHazuId);
+      const children = await sendApiRequestList(rootHazuId);
+
+      if (!children) {
+        return { success: false, error: 'Failed to fetch profile categories from Hazu API.' };
+      }
+
+      // Filter and map to ProfileCategory interface
+      const categories = children
+        .filter(child => {
+          // Must have snapshot and tags
+          if (!child.snapshot || !Array.isArray(child.snapshot.tags)) {
+            return false;
+          }
+          // Must have at least one hz-config-profile-* tag
+          return child.snapshot.tags.some(tag =>
+            typeof tag === 'string' && tag.startsWith('hz-config-profile-')
+          );
+        })
+        .map(child => {
+          const snapshot = child.snapshot;
+
+          // Extract profile type from tag
+          const profileTypeTag = snapshot.tags.find((tag: string) =>
+            tag.startsWith('hz-config-profile-')
+          );
+
+          // Extract the type part after 'hz-config-profile-'
+          const profileType = profileTypeTag?.replace('hz-config-profile-', '') || '';
+
+          // Strip HTML tags from title
+          const cleanTitle = (snapshot.title || 'Untitled').replace(/<[^>]*>/g, '').trim();
+
+          return {
+            id: snapshot.key,
+            title: cleanTitle,
+            profileType: profileType,
+          };
+        });
+
+      console.log(`[PROFILE_CATEGORIES_FETCH] Found ${categories.length} profile categories`);
+      return { success: true, categories };
+
+    } catch (error) {
+      console.error('Fetch profile categories error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: `Failed to fetch profile categories: ${errorMessage}` };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROFILE_TEMPLATES_FETCH, async (_event, role: string) => {
+    try {
+      // Check if API is configured
+      if (!isConfigured()) {
+        return { success: false, error: 'API not configured. Please configure API settings first.' };
+      }
+
+      // Get the template_id from settings
+      const templateIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'template_id'");
+      const templateId = templateIdRow?.value;
+
+      if (!templateId) {
+        return { success: false, error: 'Template ID not configured. Please run sync first to fetch from Admin Hazu.' };
+      }
+
+      // Fetch children from Hazu API (profile templates are children of template_id)
+      console.log('[PROFILE_TEMPLATES_FETCH] Fetching templates from template_id:', templateId, 'for role:', role);
+      const children = await sendApiRequestList(templateId);
+
+      if (!children) {
+        return { success: false, error: 'Failed to fetch profile templates from Hazu API.' };
+      }
+
+      // Construct the tag to look for
+      const targetTag = `hz-config-profile-${role}`;
+
+      // Filter and map to ProfileTemplate interface
+      const templates = children
+        .filter(child => {
+          // Must have snapshot and tags
+          if (!child.snapshot || !Array.isArray(child.snapshot.tags)) {
+            return false;
+          }
+          // Must have the matching hz-config-profile-{role} tag
+          return child.snapshot.tags.some(tag =>
+            typeof tag === 'string' && tag === targetTag
+          );
+        })
+        .map(child => {
+          const snapshot = child.snapshot;
+
+          // Strip HTML tags from title
+          const cleanTitle = (snapshot.title || 'Untitled').replace(/<[^>]*>/g, '').trim();
+
+          return {
+            id: snapshot.key,
+            title: cleanTitle,
+          };
+        });
+
+      console.log(`[PROFILE_TEMPLATES_FETCH] Found ${templates.length} profile templates for role "${role}"`);
+      return { success: true, templates };
+
+    } catch (error) {
+      console.error('Fetch profile templates error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: `Failed to fetch profile templates: ${errorMessage}` };
+    }
+  });
+
+  // ============================================================================
   // WEBHOOKS
   // ============================================================================
 
