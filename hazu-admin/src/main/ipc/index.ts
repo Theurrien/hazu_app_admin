@@ -1,6 +1,5 @@
 import { ipcMain, shell } from 'electron';
 import axios from 'axios';
-import * as XLSX from 'xlsx';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
 import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
@@ -1076,13 +1075,17 @@ export function registerIpcHandlers(): void {
     try {
       console.log('[FILE_PARSE] Parsing file:', filePath, 'hasHeaders:', hasHeaders);
 
+      // Lazy require to avoid issues with Electron sandbox
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const XLSX = require('xlsx');
+
       // Read file
       const workbook = XLSX.readFile(filePath);
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
 
       // Convert to JSON
-      const rawData = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+      const rawData: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, {
         header: hasHeaders ? undefined : 1,
         defval: '',
       });
@@ -1097,7 +1100,7 @@ export function registerIpcHandlers(): void {
 
       if (hasHeaders) {
         headers = Object.keys(rawData[0]);
-        rows = rawData.map(row => {
+        rows = rawData.map((row: Record<string, any>) => {
           const normalized: Record<string, string> = {};
           for (const key of headers) {
             normalized[key] = String(row[key] ?? '');
@@ -1113,7 +1116,7 @@ export function registerIpcHandlers(): void {
           return `Column ${prefix}${letter}`;
         });
 
-        rows = rawData.map(row => {
+        rows = rawData.map((row: Record<string, any>) => {
           const normalized: Record<string, string> = {};
           const values = Object.values(row);
           headers.forEach((header, i) => {
