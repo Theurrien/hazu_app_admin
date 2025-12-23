@@ -898,16 +898,16 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.WEBHOOK_DELETE_ROOM, async (_event, roomId: string) => {
     try {
-      // Get webhook config
+      // Get webhook config - templateId is actually root_hazu_id
       const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
-      const templateIdRow = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+      const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
 
       if (!webhookUrl) {
         return { success: false, error: 'Webhook not configured. Run sync first.' };
       }
 
-      if (!templateIdRow) {
-        return { success: false, error: 'Template ID not configured. Run sync first.' };
+      if (!rootHazuId) {
+        return { success: false, error: 'Root Hazu ID not configured. Run sync first.' };
       }
 
       // Build payload for remove-group action
@@ -919,7 +919,7 @@ export function registerIpcHandlers(): void {
           action: 'remove-group',
         },
         dataForCloudFunction: {
-          templateId: templateIdRow,
+          templateId: rootHazuId,
           groupId: roomId,
         },
       };
@@ -951,16 +951,16 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.WEBHOOK_DELETE_PERSON, async (_event, personId: string) => {
     try {
-      // Get webhook config
+      // Get webhook config - templateId is actually root_hazu_id
       const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
-      const templateIdRow = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+      const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
 
       if (!webhookUrl) {
         return { success: false, error: 'Webhook not configured. Run sync first.' };
       }
 
-      if (!templateIdRow) {
-        return { success: false, error: 'Template ID not configured. Run sync first.' };
+      if (!rootHazuId) {
+        return { success: false, error: 'Root Hazu ID not configured. Run sync first.' };
       }
 
       // Build payload for remove-user action
@@ -972,7 +972,7 @@ export function registerIpcHandlers(): void {
           action: 'remove-user',
         },
         dataForCloudFunction: {
-          templateId: templateIdRow,
+          templateId: rootHazuId,
           profileId: personId,
         },
       };
@@ -1006,16 +1006,16 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.WEBHOOK_RENAME_ROOM,
     async (_event, roomId: string, newTitle: string) => {
       try {
-        // Get webhook config
+        // Get webhook config - templateId is actually root_hazu_id
         const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
-        const templateIdRow = query(`SELECT value FROM settings WHERE key = 'template_id'`)?.[0]?.value;
+        const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
 
         if (!webhookUrl) {
           return { success: false, error: 'Webhook not configured. Run sync first.' };
         }
 
-        if (!templateIdRow) {
-          return { success: false, error: 'Template ID not configured. Run sync first.' };
+        if (!rootHazuId) {
+          return { success: false, error: 'Root Hazu ID not configured. Run sync first.' };
         }
 
         // Build payload for rename-group action
@@ -1027,7 +1027,7 @@ export function registerIpcHandlers(): void {
             action: 'rename-group',
           },
           dataForCloudFunction: {
-            templateId: templateIdRow,
+            templateId: rootHazuId,
             groupId: roomId,
             newName: newTitle,
           },
