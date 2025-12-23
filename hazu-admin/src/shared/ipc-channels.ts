@@ -60,6 +60,7 @@ export const IPC_CHANNELS = {
 
   // File operations
   FILE_PARSE: 'file:parse',
+  FILE_SELECT_DIALOG: 'file:selectDialog',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

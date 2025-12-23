@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron';
+import { ipcMain, shell, dialog } from 'electron';
 import axios from 'axios';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
@@ -1065,6 +1065,25 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, async (_event, url: string) => {
     await shell.openExternal(url);
+  });
+
+  // ============================================================================
+  // FILE SELECT DIALOG
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.FILE_SELECT_DIALOG, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Spreadsheets', extensions: ['xlsx', 'xls', 'csv'] },
+      ],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    return { canceled: false, filePath: result.filePaths[0] };
   });
 
   // ============================================================================
