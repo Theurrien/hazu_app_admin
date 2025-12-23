@@ -51,6 +51,9 @@ export const IPC_CHANNELS = {
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
   WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
+  WEBHOOK_DELETE_ROOM: 'webhook:deleteRoom',
+  WEBHOOK_DELETE_PERSON: 'webhook:deletePerson',
+  WEBHOOK_RENAME_ROOM: 'webhook:renameRoom',
 
   // Shell
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
