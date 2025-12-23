@@ -41,9 +41,12 @@ interface MatrixGridProps {
     oldRole: string | null,
     newRole: string | null
   ) => void;
+  onDeleteRoom?: (roomId: string, roomTitle: string) => void;
+  onDeletePerson?: (personId: string, personName: string) => void;
+  onRenameRoom?: (roomId: string, currentTitle: string) => void;
 }
 
-export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange }: MatrixGridProps) {
+export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDeleteRoom, onDeletePerson, onRenameRoom }: MatrixGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -139,7 +142,7 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange }: Matr
               return (
                 <div
                   key={room.id}
-                  className="absolute border-r border-gray-200 px-1 py-1 bg-gray-50"
+                  className="absolute border-r border-gray-200 px-1 py-1 bg-gray-50 group"
                   style={{
                     left: colIndex * COL_WIDTH,
                     width: COL_WIDTH,
@@ -147,8 +150,40 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange }: Matr
                   }}
                   title={title}
                 >
-                  <div className="text-xs text-gray-700 font-medium leading-tight line-clamp-3">
-                    {title}
+                  <div className="flex flex-col h-full">
+                    <div className="text-xs text-gray-700 font-medium leading-tight line-clamp-3 flex-1">
+                      {title}
+                    </div>
+                    <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
+                      {onRenameRoom && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRenameRoom(room.id, title);
+                          }}
+                          className="p-0.5 text-gray-500 hover:text-gray-700 transition-colors"
+                          title="Rename room"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                        </button>
+                      )}
+                      {onDeleteRoom && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteRoom(room.id, title);
+                          }}
+                          className="p-0.5 text-red-500 hover:text-red-700 transition-colors"
+                          title="Delete room"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -176,7 +211,7 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange }: Matr
               return (
                 <div
                   key={person.id}
-                  className="absolute border-b border-gray-100 px-2 flex items-center bg-white"
+                  className="absolute border-b border-gray-100 px-2 flex items-center bg-white group"
                   style={{
                     top: rowIndex * ROW_HEIGHT,
                     width: PERSON_COL_WIDTH,
@@ -184,9 +219,25 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange }: Matr
                   }}
                   title={person.display_name}
                 >
-                  <span className="text-sm text-gray-800 truncate">
+                  <span className="text-sm text-gray-800 truncate flex-1">
                     {person.display_name}
                   </span>
+                  {onDeletePerson && (
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeletePerson(person.id, person.display_name);
+                        }}
+                        className="p-0.5 text-red-500 hover:text-red-700 transition-colors"
+                        title="Delete person"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
