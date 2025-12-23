@@ -31,6 +31,9 @@ const IPC_CHANNELS = {
   PROFILE_CATEGORIES_FETCH: 'profileCategories:fetch',
   PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
   WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
+  WEBHOOK_DELETE_ROOM: 'webhook:deleteRoom',
+  WEBHOOK_DELETE_PERSON: 'webhook:deletePerson',
+  WEBHOOK_RENAME_ROOM: 'webhook:renameRoom',
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
 } as const;
 
@@ -133,6 +136,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invitationMail: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_CREATE_PERSON, params),
 
+  // Room deletion
+  deleteRoom: (roomId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_DELETE_ROOM, roomId),
+
+  // Person deletion
+  deletePerson: (personId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_DELETE_PERSON, personId),
+
+  // Room rename
+  renameRoom: (roomId: string, newTitle: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_RENAME_ROOM, roomId, newTitle),
+
   // Shell
   openExternal: (url: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, url),
@@ -214,6 +229,9 @@ declare global {
         roomIds: string[];
         invitationMail: boolean;
       }) => Promise<{ success: boolean; person?: any; error?: string }>;
+      deleteRoom: (roomId: string) => Promise<{ success: boolean; error?: string }>;
+      deletePerson: (personId: string) => Promise<{ success: boolean; error?: string }>;
+      renameRoom: (roomId: string, newTitle: string) => Promise<{ success: boolean; error?: string }>;
       openExternal: (url: string) => Promise<void>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
