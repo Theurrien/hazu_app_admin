@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Person, PersonType, RoomType } from '../../shared/types';
 import { PersonAssignmentsList } from '../components/AssignmentsList';
+import { CreatePersonModal } from '../components/CreatePersonModal';
 
 const personTypeLabels: Record<PersonType, string> = {
   student: 'Students',
@@ -36,9 +37,12 @@ function PersonsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<RoomAssignment[]>([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [rooms, setRooms] = useState<Array<{ id: string; title: string; room_type: string }>>([]);
 
   useEffect(() => {
     loadPersons();
+    loadRooms();
   }, [filter]);
 
   const loadPersons = async () => {
@@ -51,6 +55,15 @@ function PersonsPage() {
       console.error('Failed to load persons:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadRooms = async () => {
+    try {
+      const result = await window.electronAPI.getRooms();
+      setRooms(result);
+    } catch (error) {
+      console.error('Failed to load rooms:', error);
     }
   };
 
@@ -92,6 +105,11 @@ function PersonsPage() {
     );
   });
 
+  const handlePersonCreated = (person: Person) => {
+    setPersons(prev => [...prev, person]);
+    console.log('Person created:', person.display_name);
+  };
+
   return (
     <div className="space-y-6">
       {/* Filters */}
@@ -111,6 +129,13 @@ function PersonsPage() {
             />
           ))}
         </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+        >
+          <span>+</span>
+          <span>New Person</span>
+        </button>
         <div className="flex-1 max-w-md">
           <input
             type="text"
@@ -163,6 +188,14 @@ function PersonsPage() {
           </table>
         </div>
       )}
+
+      {/* Create Person Modal */}
+      <CreatePersonModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onPersonCreated={handlePersonCreated}
+        rooms={rooms}
+      />
     </div>
   );
 }
