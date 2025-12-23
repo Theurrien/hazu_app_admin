@@ -1,5 +1,6 @@
 import { ipcMain, shell } from 'electron';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
 import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
@@ -1065,6 +1066,70 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, async (_event, url: string) => {
     await shell.openExternal(url);
+  });
+
+  // ============================================================================
+  // FILE PARSING
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.FILE_PARSE, async (_event, filePath: string, hasHeaders: boolean) => {
+    try {
+      console.log('[FILE_PARSE] Parsing file:', filePath, 'hasHeaders:', hasHeaders);
+
+      // Read file
+      const workbook = XLSX.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+
+      // Convert to JSON
+      const rawData = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+        header: hasHeaders ? undefined : 1,
+        defval: '',
+      });
+
+      if (rawData.length === 0) {
+        return { success: false, error: 'File is empty or contains no data' };
+      }
+
+      // Extract headers
+      let headers: string[];
+      let rows: Record<string, string>[];
+
+      if (hasHeaders) {
+        headers = Object.keys(rawData[0]);
+        rows = rawData.map(row => {
+          const normalized: Record<string, string> = {};
+          for (const key of headers) {
+            normalized[key] = String(row[key] ?? '');
+          }
+          return normalized;
+        });
+      } else {
+        const firstRow = rawData[0];
+        const numCols = Object.keys(firstRow).length;
+        headers = Array.from({ length: numCols }, (_, i) => {
+          const letter = String.fromCharCode(65 + (i % 26));
+          const prefix = i >= 26 ? String.fromCharCode(64 + Math.floor(i / 26)) : '';
+          return `Column ${prefix}${letter}`;
+        });
+
+        rows = rawData.map(row => {
+          const normalized: Record<string, string> = {};
+          const values = Object.values(row);
+          headers.forEach((header, i) => {
+            normalized[header] = String(values[i] ?? '');
+          });
+          return normalized;
+        });
+      }
+
+      console.log('[FILE_PARSE] Parsed', rows.length, 'rows with', headers.length, 'columns');
+      return { success: true, data: { headers, rows } };
+    } catch (error) {
+      console.error('File parse error:', error);
+      const message = error instanceof Error ? error.message : 'Failed to parse file';
+      return { success: false, error: message };
+    }
   });
 
   console.log('IPC handlers registered');

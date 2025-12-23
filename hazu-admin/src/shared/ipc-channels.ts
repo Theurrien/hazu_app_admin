@@ -57,6 +57,9 @@ export const IPC_CHANNELS = {
 
   // Shell
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
+
+  // File operations
+  FILE_PARSE: 'file:parse',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
