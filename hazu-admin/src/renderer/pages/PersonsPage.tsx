@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { Person, PersonType, RoomType } from '../../shared/types';
 import { PersonAssignmentsList } from '../components/AssignmentsList';
 import { CreatePersonModal } from '../components/CreatePersonModal';
+import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
 
 const personTypeLabels: Record<PersonType, string> = {
   student: 'Students',
@@ -39,6 +40,10 @@ function PersonsPage() {
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [rooms, setRooms] = useState<Array<{ id: string; title: string; room_type: string }>>([]);
+  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; person: Person | null }>({
+    isOpen: false,
+    person: null,
+  });
 
   useEffect(() => {
     loadPersons();
@@ -110,6 +115,31 @@ function PersonsPage() {
     console.log('Person created:', person.display_name);
   };
 
+  const handleDeleteClick = (person: Person, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleteModalState({ isOpen: true, person });
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteModalState.person) return { success: false, error: 'No person selected' };
+
+    try {
+      const result = await window.electronAPI.deletePerson(deleteModalState.person.id);
+
+      if (result.success) {
+        // Refetch persons list
+        await loadPersons();
+      }
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete person',
+      };
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Filters */}
@@ -171,6 +201,7 @@ function PersonsPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Type
                 </th>
+                <th className="w-16 px-3 py-3"></th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -182,6 +213,7 @@ function PersonsPage() {
                   assignments={expandedId === person.id ? assignments : []}
                   assignmentsLoading={expandedId === person.id && assignmentsLoading}
                   onClick={() => handleRowClick(person.id)}
+                  onDeleteClick={(e) => handleDeleteClick(person, e)}
                 />
               ))}
             </tbody>
@@ -195,6 +227,15 @@ function PersonsPage() {
         onClose={() => setIsModalOpen(false)}
         onPersonCreated={handlePersonCreated}
         rooms={rooms}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={deleteModalState.isOpen}
+        entityType="person"
+        entityName={deleteModalState.person?.display_name || ''}
+        onConfirm={handleDeleteConfirm}
+        onClose={() => setDeleteModalState({ isOpen: false, person: null })}
       />
     </div>
   );
@@ -227,9 +268,10 @@ interface PersonRowProps {
   assignments: RoomAssignment[];
   assignmentsLoading: boolean;
   onClick: () => void;
+  onDeleteClick: (e: React.MouseEvent) => void;
 }
 
-function PersonRow({ person, isExpanded, assignments, assignmentsLoading, onClick }: PersonRowProps) {
+function PersonRow({ person, isExpanded, assignments, assignmentsLoading, onClick, onDeleteClick }: PersonRowProps) {
   return (
     <>
       <tr
@@ -254,10 +296,21 @@ function PersonRow({ person, isExpanded, assignments, assignmentsLoading, onClic
             {personTypeLabels[person.person_type as PersonType]}
           </span>
         </td>
+        <td className="px-3 py-4">
+          <button
+            onClick={onDeleteClick}
+            className="p-1 text-red-500 hover:text-red-700 transition-colors"
+            title="Delete person"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </td>
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={4} className="p-0">
+          <td colSpan={5} className="p-0">
             <PersonAssignmentsList
               assignments={assignments}
               loading={assignmentsLoading}
