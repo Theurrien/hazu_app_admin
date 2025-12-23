@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import type { Room, RoomType } from '../../shared/types';
 import { RoomAssignmentsList } from '../components/AssignmentsList';
 import { CreateRoomModal } from '../components/CreateRoomModal';
+import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
+import { RenameRoomModal } from '../components/RenameRoomModal';
 
 const roomTypeLabels: Record<RoomType, string> = {
   state: 'Cantons',
@@ -34,6 +36,14 @@ function RoomsPage() {
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [rootHazuId, setRootHazuId] = useState<string | null>(null);
+  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; room: Room | null }>({
+    isOpen: false,
+    room: null,
+  });
+  const [renameModalState, setRenameModalState] = useState<{ isOpen: boolean; room: Room | null }>({
+    isOpen: false,
+    room: null,
+  });
 
   useEffect(() => {
     loadRooms();
@@ -99,6 +109,56 @@ function RoomsPage() {
     console.log('Room created:', room.title);
   };
 
+  const handleDeleteClick = (room: Room, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleteModalState({ isOpen: true, room });
+  };
+
+  const handleRenameClick = (room: Room, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenameModalState({ isOpen: true, room });
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteModalState.room) return { success: false, error: 'No room selected' };
+
+    try {
+      const result = await window.electronAPI.deleteRoom(deleteModalState.room.id);
+
+      if (result.success) {
+        // Refetch rooms list
+        await loadRooms();
+      }
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete room',
+      };
+    }
+  };
+
+  const handleRenameConfirm = async (newTitle: string) => {
+    if (!renameModalState.room) return { success: false, error: 'No room selected' };
+
+    try {
+      const result = await window.electronAPI.renameRoom(renameModalState.room.id, newTitle);
+
+      if (result.success) {
+        // Refetch rooms list
+        await loadRooms();
+      }
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to rename room',
+      };
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Filters */}
@@ -155,6 +215,8 @@ function RoomsPage() {
               assignments={expandedId === room.id ? assignments : []}
               assignmentsLoading={expandedId === room.id && assignmentsLoading}
               onClick={() => handleCardClick(room.id)}
+              onDeleteClick={(e) => handleDeleteClick(room, e)}
+              onRenameClick={(e) => handleRenameClick(room, e)}
             />
           ))}
         </div>
@@ -167,6 +229,23 @@ function RoomsPage() {
         onRoomCreated={handleRoomCreated}
         rooms={rooms}
         rootHazuId={rootHazuId}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={deleteModalState.isOpen}
+        entityType="room"
+        entityName={deleteModalState.room?.title.replace(/<[^>]*>/g, '').trim() || ''}
+        onConfirm={handleDeleteConfirm}
+        onClose={() => setDeleteModalState({ isOpen: false, room: null })}
+      />
+
+      {/* Rename Room Modal */}
+      <RenameRoomModal
+        isOpen={renameModalState.isOpen}
+        currentTitle={renameModalState.room?.title.replace(/<[^>]*>/g, '').trim() || ''}
+        onConfirm={handleRenameConfirm}
+        onClose={() => setRenameModalState({ isOpen: false, room: null })}
       />
     </div>
   );
@@ -199,9 +278,11 @@ interface RoomCardProps {
   assignments: PersonAssignment[];
   assignmentsLoading: boolean;
   onClick: () => void;
+  onDeleteClick: (e: React.MouseEvent) => void;
+  onRenameClick: (e: React.MouseEvent) => void;
 }
 
-function RoomCard({ room, isExpanded, assignments, assignmentsLoading, onClick }: RoomCardProps) {
+function RoomCard({ room, isExpanded, assignments, assignmentsLoading, onClick, onDeleteClick, onRenameClick }: RoomCardProps) {
   const cleanTitle = room.title.replace(/<[^>]*>/g, '').trim();
 
   return (
@@ -246,6 +327,31 @@ function RoomCard({ room, isExpanded, assignments, assignmentsLoading, onClick }
           >
             {roomTypeLabels[room.room_type as RoomType]}
           </span>
+
+          {/* Action icons */}
+          <div className="flex items-center gap-2 ml-2">
+            {/* Rename icon */}
+            <button
+              onClick={onRenameClick}
+              className="p-1 text-gray-500 hover:text-gray-700 transition-colors"
+              title="Rename room"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </button>
+
+            {/* Delete icon */}
+            <button
+              onClick={onDeleteClick}
+              className="p-1 text-red-500 hover:text-red-700 transition-colors"
+              title="Delete room"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
