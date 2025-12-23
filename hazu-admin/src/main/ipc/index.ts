@@ -770,5 +770,85 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.WEBHOOK_CREATE_PERSON,
+    async (
+      _event,
+      params: {
+        sourceId: string;
+        targetId: string;
+        firstName: string;
+        lastName: string;
+        userEmail: string;
+        role: string;
+        roomIds: string[];
+        invitationMail: boolean;
+      }
+    ) => {
+      try {
+        // Get webhook config
+        const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
+        const adminIdRow = query(`SELECT value FROM settings WHERE key = 'admin_id'`)?.[0]?.value;
+        const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
+
+        if (!webhookUrl) {
+          return { success: false, error: 'Webhook not configured. Run sync first.' };
+        }
+
+        // Use admin_id if available, fall back to root_hazu_id
+        const adminId = adminIdRow || rootHazuId;
+        if (!adminId) {
+          return { success: false, error: 'Admin ID not configured. Go to Settings.' };
+        }
+
+        // Build classIds array from roomIds
+        const classIds = params.roomIds.map(roomId => ({
+          classId: roomId,
+          userType: params.role,
+        }));
+
+        // Build payload for add-user action
+        const payload = {
+          data: {
+            action: 'add-user',
+            invitationMail: params.invitationMail,
+          },
+          hazu: {
+            env: '',
+          },
+          dataForCloudFunction: {
+            sourceId: params.sourceId,           // Template to copy from
+            targetId: params.targetId,           // Profile category folder ID
+            adminId: adminId,                    // Admin Hazu ID
+            firstName: params.firstName,
+            lastName: params.lastName,
+            userEmail: params.userEmail,
+            classIds: classIds,                  // Room assignments
+          },
+        };
+
+        // Call webhook
+        console.log('[WEBHOOK_CREATE_PERSON] Sending payload:', JSON.stringify(payload, null, 2));
+        const response = await axios.post(webhookUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 100000,
+        });
+        console.log('[WEBHOOK_CREATE_PERSON] Response:', response.status, response.data);
+
+        // Return success with response data
+        return { success: true, person: response.data };
+      } catch (error) {
+        console.error('Webhook create person error:', error);
+        let message = 'Unknown error';
+        if (axios.isAxiosError(error)) {
+          message = error.response?.data?.message || error.message;
+        } else if (error instanceof Error) {
+          message = error.message;
+        }
+        return { success: false, error: message };
+      }
+    }
+  );
+
   console.log('IPC handlers registered');
 }
