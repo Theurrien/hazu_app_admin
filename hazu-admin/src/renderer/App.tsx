@@ -5,11 +5,12 @@ import Dashboard from './pages/Dashboard';
 import RoomsPage from './pages/RoomsPage';
 import PersonsPage from './pages/PersonsPage';
 import MatrixPage from './pages/MatrixPage';
+import BulkImportPage from './pages/BulkImportPage';
 import SettingsPage from './pages/SettingsPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'sync' | 'settings';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
@@ -24,6 +25,8 @@ function App() {
         return <PersonsPage />;
       case 'matrix':
         return <MatrixPage />;
+      case 'import':
+        return <BulkImportPage />;
       case 'settings':
         return <SettingsPage />;
       default:
