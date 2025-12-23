@@ -35,6 +35,7 @@ const IPC_CHANNELS = {
   WEBHOOK_DELETE_PERSON: 'webhook:deletePerson',
   WEBHOOK_RENAME_ROOM: 'webhook:renameRoom',
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
+  FILE_PARSE: 'file:parse',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -152,6 +153,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, url),
 
+  // File parsing
+  parseFile: (filePath: string, hasHeaders: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_PARSE, filePath, hasHeaders),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -233,6 +238,11 @@ declare global {
       deletePerson: (personId: string) => Promise<{ success: boolean; error?: string }>;
       renameRoom: (roomId: string, newTitle: string) => Promise<{ success: boolean; error?: string }>;
       openExternal: (url: string) => Promise<void>;
+      parseFile: (filePath: string, hasHeaders: boolean) => Promise<{
+        success: boolean;
+        data?: { headers: string[]; rows: Record<string, string>[] };
+        error?: string;
+      }>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }
