@@ -1,22 +1,49 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
-export interface Task {
+// Task type discriminated union
+export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson';
+
+interface BaseTask {
   id: string;
+  type: TaskType;
+  status: 'queued' | 'processing' | 'success' | 'error';
+  error?: string;
+}
+
+export interface RoleUpdateTask extends BaseTask {
+  type: 'roleUpdate';
   personName: string;
-  roomName: string;
   personId: string;
+  roomName: string;
   roomId: string;
   oldRole: string | null;
   newRole: string | null;
-  status: 'queued' | 'processing' | 'success' | 'error';
-  error?: string;
-  dismissAt?: number; // Timestamp when to auto-dismiss
-  onError?: () => void; // Callback to revert UI
+  onError?: () => void;
 }
+
+export interface CreateRoomTask extends BaseTask {
+  type: 'createRoom';
+  roomName: string;
+  roomId: string;
+}
+
+export interface CreatePersonTask extends BaseTask {
+  type: 'createPerson';
+  personName: string;
+  personId: string;
+}
+
+export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask;
+
+// Notification input types (for addNotification)
+type CreateRoomNotification = { type: 'createRoom'; roomName: string; roomId: string };
+type CreatePersonNotification = { type: 'createPerson'; personName: string; personId: string };
+type NotificationInput = CreateRoomNotification | CreatePersonNotification;
 
 interface TaskQueueContextType {
   tasks: Task[];
-  addTask: (task: Omit<Task, 'id' | 'status'>) => string;
+  addTask: (task: Omit<RoleUpdateTask, 'id' | 'status' | 'type'>) => string;
+  addNotification: (notification: NotificationInput) => string;
   dismissTask: (id: string) => void;
   dismissAllErrors: () => void;
 }
@@ -36,11 +63,11 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
   const processingRef = useRef(false);
   const taskIdCounter = useRef(0);
 
-  // Process queue
+  // Process queue - only for roleUpdate tasks
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
 
-    const nextTask = tasks.find((t) => t.status === 'queued');
+    const nextTask = tasks.find((t) => t.type === 'roleUpdate' && t.status === 'queued') as RoleUpdateTask | undefined;
     if (!nextTask) return;
 
     processingRef.current = true;
@@ -62,7 +89,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         setTasks((prev) =>
           prev.map((t) =>
             t.id === nextTask.id
-              ? { ...t, status: 'success' as const, dismissAt: Date.now() + 5000 }
+              ? { ...t, status: 'success' as const }
               : t
           )
         );
@@ -94,22 +121,38 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
     processQueue();
   }, [tasks, processQueue]);
 
-  // Auto-dismiss successful tasks
-  useEffect(() => {
-    const hasDismissableTasks = tasks.some((t) => t.dismissAt);
-    if (!hasDismissableTasks) return;
-
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setTasks((prev) => prev.filter((t) => !t.dismissAt || t.dismissAt > now));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [tasks]);
-
-  const addTask = useCallback((taskData: Omit<Task, 'id' | 'status'>) => {
+  // Add role update task (queued)
+  const addTask = useCallback((taskData: Omit<RoleUpdateTask, 'id' | 'status' | 'type'>) => {
     const id = `task-${Date.now()}-${++taskIdCounter.current}`;
-    const task: Task = { ...taskData, id, status: 'queued' };
+    const task: RoleUpdateTask = { ...taskData, id, type: 'roleUpdate', status: 'queued' };
     setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
+  // Add notification (immediate success)
+  const addNotification = useCallback((notification: NotificationInput) => {
+    const id = `notif-${Date.now()}-${++taskIdCounter.current}`;
+
+    if (notification.type === 'createRoom') {
+      const task: CreateRoomTask = {
+        id,
+        type: 'createRoom',
+        status: 'success',
+        roomName: notification.roomName,
+        roomId: notification.roomId,
+      };
+      setTasks((prev) => [...prev, task]);
+    } else {
+      const task: CreatePersonTask = {
+        id,
+        type: 'createPerson',
+        status: 'success',
+        personName: notification.personName,
+        personId: notification.personId,
+      };
+      setTasks((prev) => [...prev, task]);
+    }
+
     return id;
   }, []);
 
@@ -122,7 +165,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <TaskQueueContext.Provider value={{ tasks, addTask, dismissTask, dismissAllErrors }}>
+    <TaskQueueContext.Provider value={{ tasks, addTask, addNotification, dismissTask, dismissAllErrors }}>
       {children}
     </TaskQueueContext.Provider>
   );

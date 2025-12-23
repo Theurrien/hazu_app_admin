@@ -15,11 +15,25 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task;
     }
   };
 
-  const getTimeLeft = () => {
-    if (!task.dismissAt) return null;
-    const seconds = Math.ceil((task.dismissAt - Date.now()) / 1000);
-    return seconds > 0 ? `${seconds}s` : null;
+  const getLabel = () => {
+    switch (task.type) {
+      case 'roleUpdate':
+        return `${task.personName} → ${task.roomName}`;
+      case 'createRoom':
+        return `+ ${task.roomName}`;
+      case 'createPerson':
+        return `+ ${task.personName}`;
+    }
   };
+
+  const getLink = (): string | null => {
+    if (task.status !== 'success') return null;
+    if (task.type === 'createRoom') return `https://hazu.swiss/${task.roomId}`;
+    if (task.type === 'createPerson') return `https://hazu.swiss/${task.personId}`;
+    return null; // roleUpdate has no link
+  };
+
+  const link = getLink();
 
   return (
     <div
@@ -29,24 +43,30 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task;
     >
       <span className="flex-shrink-0 w-5">{getIcon()}</span>
       <div className="flex-1 min-w-0">
-        <div className="truncate">
-          {task.personName} → {task.roomName}
-        </div>
-        {task.error && <div className="text-xs text-red-600 truncate">{task.error}</div>}
+        <div className="truncate">{getLabel()}</div>
+        {task.status === 'error' && task.error && (
+          <div className="text-xs text-red-600 truncate">{task.error}</div>
+        )}
       </div>
-      {task.status === 'success' && (
-        <span className="text-xs text-gray-400 flex-shrink-0">{getTimeLeft()}</span>
-      )}
-      {task.status === 'error' && (
-        <button
-          onClick={onDismiss}
-          className="text-gray-400 hover:text-gray-600 flex-shrink-0"
-          title="Dismiss"
-          aria-label={`Dismiss error for ${task.personName}`}
+      {link && (
+        <a
+          href={link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex-shrink-0"
+          onClick={(e) => e.stopPropagation()}
         >
-          ×
-        </button>
+          Open ↗
+        </a>
       )}
+      <button
+        onClick={onDismiss}
+        className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+        title="Dismiss"
+        aria-label="Dismiss task"
+      >
+        ×
+      </button>
     </div>
   );
 });
