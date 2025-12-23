@@ -43,9 +43,14 @@ export const IPC_CHANNELS = {
   // Templates
   TEMPLATES_FETCH: 'templates:fetch',
 
+  // Profile Categories
+  PROFILE_CATEGORIES_FETCH: 'profileCategories:fetch',
+  PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
+  WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
