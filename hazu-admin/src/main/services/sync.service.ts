@@ -121,6 +121,28 @@ async function syncRooms(): Promise<void> {
       const categoryTitle = stripHtml(categorySnapshot.title);
       console.log(`[SYNC] Found room category: ${categoryTitle} (${roomType})`);
 
+      // Store the category folder itself (needed for room creation targetId lookup)
+      const categoryStmt = db.prepare(`
+        INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, class_id, tags, raw_data, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      categoryStmt.run(
+        categorySnapshot.key,
+        categoryTitle,
+        stripHtml(categorySnapshot.description || ""),
+        categorySnapshot.color || "",
+        categorySnapshot.icon || "",
+        roomType,
+        rootId,  // Category folders have rootId as parent
+        null,    // No class_id for category folders
+        JSON.stringify(categoryTags),
+        JSON.stringify(categorySnapshot),
+        Date.now()
+      );
+
+      syncProgress.roomsProcessed++;
+
       // Level 2: Fetch children of this category
       const children = await sendApiRequestList(categorySnapshot.key);
       if (children) {

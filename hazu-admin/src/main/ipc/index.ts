@@ -380,17 +380,17 @@ export function registerIpcHandlers(): void {
         return { success: false, error: 'API not configured. Please configure API settings first.' };
       }
 
-      // Get the templateLink (root_hazu_id) from settings
-      const rootHazuIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
-      const rootHazuId = rootHazuIdRow?.value;
+      // Get the templateLink (template_id) from settings - this is where templates live
+      const templateIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'template_id'");
+      const templateId = templateIdRow?.value;
 
-      if (!rootHazuId) {
-        return { success: false, error: 'Root Hazu ID not configured. Please set it in Settings.' };
+      if (!templateId) {
+        return { success: false, error: 'Template ID not configured. Please run sync first to fetch from Admin Hazu.' };
       }
 
-      // Fetch children from Hazu API
-      console.log('[TEMPLATES_FETCH] Fetching templates from root_hazu_id:', rootHazuId);
-      const children = await sendApiRequestList(rootHazuId);
+      // Fetch children from Hazu API (templates are children of templateLink)
+      console.log('[TEMPLATES_FETCH] Fetching templates from template_id:', templateId);
+      const children = await sendApiRequestList(templateId);
 
       if (!children) {
         return { success: false, error: 'Failed to fetch templates from Hazu API.' };
