@@ -60,28 +60,30 @@ export function useMatrixData() {
     roomSearch: '',
   });
 
-  // Load all data on mount
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [persons, rooms, assignments] = await Promise.all([
-          window.electronAPI.getPersons(),
-          window.electronAPI.getRooms(),
-          window.electronAPI.getAllAssignments(),
-        ]);
-        setAllPersons(persons);
-        setAllRooms(rooms);
-        setAllAssignments(assignments);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
-      } finally {
-        setLoading(false);
-      }
+  // Load all data
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [persons, rooms, assignments] = await Promise.all([
+        window.electronAPI.getPersons(),
+        window.electronAPI.getRooms(),
+        window.electronAPI.getAllAssignments(),
+      ]);
+      setAllPersons(persons);
+      setAllRooms(rooms);
+      setAllAssignments(assignments);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
     }
-    loadData();
   }, []);
+
+  // Load on mount
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // Build assignment lookup map
   const assignmentMap = useMemo(() => {
@@ -283,6 +285,7 @@ export function useMatrixData() {
     getAssignment,
     loading,
     error,
+    refetch: loadData,
 
     // Filters
     filters,
