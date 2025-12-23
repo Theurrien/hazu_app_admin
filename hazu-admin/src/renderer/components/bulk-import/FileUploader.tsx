@@ -18,35 +18,20 @@ export function FileUploader({
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleFile = useCallback(async (file: File) => {
+  const parseFilePath = useCallback(async (filePath: string) => {
     setError(null);
     setIsLoading(true);
 
-    // Validate file type
-    const validExtensions = ['.xlsx', '.xls', '.csv'];
-    const extension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
-    if (!validExtensions.includes(extension)) {
-      setError('Unsupported file format. Please upload .xlsx, .xls, or .csv files.');
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      // Get file path - in Electron we can access the path property
-      const filePath = (file as any).path;
-      if (!filePath) {
-        setError('Could not access file path. Please try again.');
-        setIsLoading(false);
-        return;
-      }
-
       const result = await window.electronAPI.parseFile(filePath, hasHeaders);
 
       if (result.success && result.data) {
+        // Extract filename from path
+        const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'file';
         onFileLoaded({
           headers: result.data.headers,
           rows: result.data.rows,
-          fileName: file.name,
+          fileName,
         });
       } else {
         setError(result.error || 'Failed to parse file');
@@ -58,15 +43,33 @@ export function FileUploader({
     }
   }, [hasHeaders, onFileLoaded, setIsLoading]);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleBrowseClick = useCallback(async () => {
+    try {
+      const result = await window.electronAPI.selectFileDialog();
+      if (!result.canceled && result.filePath) {
+        await parseFilePath(result.filePath);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open file dialog');
+    }
+  }, [parseFilePath]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
 
     const file = e.dataTransfer.files[0];
     if (file) {
-      handleFile(file);
+      // Try to get path from dropped file (works in some Electron configs)
+      const filePath = (file as any).path;
+      if (filePath) {
+        await parseFilePath(filePath);
+      } else {
+        // Fallback: show error and suggest using Browse button
+        setError('Drag and drop not supported. Please use the Browse Files button.');
+      }
     }
-  }, [handleFile]);
+  }, [parseFilePath]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -77,13 +80,6 @@ export function FileUploader({
     e.preventDefault();
     setIsDragging(false);
   }, []);
-
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFile(file);
-    }
-  }, [handleFile]);
 
   return (
     <div className="space-y-3">
@@ -120,17 +116,12 @@ export function FileUploader({
             <div className="text-gray-600 mb-2">
               Drag and drop an Excel or CSV file here, or
             </div>
-            <label className="inline-block">
-              <span className="px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors">
-                Browse Files
-              </span>
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleInputChange}
-                className="hidden"
-              />
-            </label>
+            <button
+              onClick={handleBrowseClick}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
+            >
+              Browse Files
+            </button>
             <div className="text-xs text-gray-400 mt-2">
               Supported: .xlsx, .xls, .csv
             </div>
