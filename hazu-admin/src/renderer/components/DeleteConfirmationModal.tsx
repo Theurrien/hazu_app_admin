@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface DeleteConfirmationModalProps {
   isOpen: boolean;
@@ -17,6 +17,14 @@ export function DeleteConfirmationModal({
 }: DeleteConfirmationModalProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setIsDeleting(false);
+      setErrorMessage('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) {
     return null;
