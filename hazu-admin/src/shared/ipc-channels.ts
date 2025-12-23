@@ -51,6 +51,9 @@ export const IPC_CHANNELS = {
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
   WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
+
+  // Shell
+  SHELL_OPEN_EXTERNAL: 'shell:openExternal',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import axios from 'axios';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
@@ -895,6 +895,14 @@ export function registerIpcHandlers(): void {
       }
     }
   );
+
+  // ============================================================================
+  // SHELL
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, async (_event, url: string) => {
+    await shell.openExternal(url);
+  });
 
   console.log('IPC handlers registered');
 }
