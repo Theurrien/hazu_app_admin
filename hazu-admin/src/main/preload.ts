@@ -31,6 +31,7 @@ const IPC_CHANNELS = {
   PROFILE_CATEGORIES_FETCH: 'profileCategories:fetch',
   PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
   WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
+  SHELL_OPEN_EXTERNAL: 'shell:openExternal',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -132,6 +133,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invitationMail: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_CREATE_PERSON, params),
 
+  // Shell
+  openExternal: (url: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, url),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -209,6 +214,7 @@ declare global {
         roomIds: string[];
         invitationMail: boolean;
       }) => Promise<{ success: boolean; person?: any; error?: string }>;
+      openExternal: (url: string) => Promise<void>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }

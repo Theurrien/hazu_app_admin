@@ -49,15 +49,15 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task;
         )}
       </div>
       {link && (
-        <a
-          href={link}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
           className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex-shrink-0"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            window.electronAPI.openExternal(link);
+          }}
         >
           Open ↗
-        </a>
+        </button>
       )}
       <button
         onClick={onDismiss}
