@@ -518,6 +518,11 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.PROFILE_TEMPLATES_FETCH, async (_event, role: string) => {
     try {
+      // Validate role parameter
+      if (!role || typeof role !== 'string' || role.trim() === '') {
+        return { success: false, error: 'Invalid role parameter. Role must be a non-empty string.' };
+      }
+
       // Check if API is configured
       if (!isConfigured()) {
         return { success: false, error: 'API not configured. Please configure API settings first.' };
