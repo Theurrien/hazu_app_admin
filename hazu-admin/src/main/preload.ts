@@ -28,6 +28,9 @@ const IPC_CHANNELS = {
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   TEMPLATES_FETCH: 'templates:fetch',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
+  PROFILE_CATEGORIES_FETCH: 'profileCategories:fetch',
+  PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
+  WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -109,6 +112,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createRoom: (templateId: string, targetId: string, title: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_CREATE_ROOM, templateId, targetId, title),
 
+  // Profile Categories
+  fetchProfileCategories: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROFILE_CATEGORIES_FETCH),
+
+  // Profile Templates
+  fetchProfileTemplates: (role: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROFILE_TEMPLATES_FETCH, role),
+
+  // Person creation
+  createPerson: (params: {
+    sourceId: string;
+    targetId: string;
+    firstName: string;
+    lastName: string;
+    userEmail: string;
+    role: string;
+    roomIds: string[];
+    invitationMail: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.WEBHOOK_CREATE_PERSON, params),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -166,6 +189,26 @@ declare global {
         targetId: string,
         title: string
       ) => Promise<{ success: boolean; room?: any; error?: string }>;
+      fetchProfileCategories: () => Promise<{
+        success: boolean;
+        categories?: Array<{ id: string; title: string; profileType: string }>;
+        error?: string;
+      }>;
+      fetchProfileTemplates: (role: string) => Promise<{
+        success: boolean;
+        templates?: Array<{ id: string; title: string }>;
+        error?: string;
+      }>;
+      createPerson: (params: {
+        sourceId: string;
+        targetId: string;
+        firstName: string;
+        lastName: string;
+        userEmail: string;
+        role: string;
+        roomIds: string[];
+        invitationMail: boolean;
+      }) => Promise<{ success: boolean; person?: any; error?: string }>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }
