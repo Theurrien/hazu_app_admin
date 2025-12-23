@@ -835,8 +835,54 @@ export function registerIpcHandlers(): void {
         });
         console.log('[WEBHOOK_CREATE_PERSON] Response:', response.status, response.data);
 
-        // Return success with response data
-        return { success: true, person: response.data };
+        // Extract person data from response
+        const profileSnapshot = response.data?.profileSnapshot?.snapshot;
+        if (!profileSnapshot) {
+          return { success: false, error: 'Invalid webhook response: missing profileSnapshot' };
+        }
+
+        // Insert into persons table
+        const now = Date.now();
+        run(
+          `INSERT INTO persons (id, email, first_name, last_name, display_name, person_type, tags, raw_data, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            profileSnapshot.key,
+            params.userEmail,
+            params.firstName,
+            params.lastName,
+            `${params.firstName} ${params.lastName}`,
+            params.role,
+            JSON.stringify(profileSnapshot.tags || []),
+            JSON.stringify(profileSnapshot),
+            now,
+          ]
+        );
+
+        // Insert room assignments
+        for (const roomId of params.roomIds) {
+          run(
+            `INSERT INTO person_room_assignments (person_id, room_id, role, synced_at)
+             VALUES (?, ?, ?, ?)`,
+            [profileSnapshot.key, roomId, params.role, now]
+          );
+        }
+
+        // Build person object to return
+        const person = {
+          id: profileSnapshot.key,
+          email: params.userEmail,
+          first_name: params.firstName,
+          last_name: params.lastName,
+          display_name: `${params.firstName} ${params.lastName}`,
+          person_type: params.role,
+          tags: profileSnapshot.tags || [],
+          raw_data: JSON.stringify(profileSnapshot),
+          synced_at: now,
+        };
+
+        console.log('[WEBHOOK_CREATE_PERSON] Person created successfully:', person.id);
+        return { success: true, person };
       } catch (error) {
         console.error('Webhook create person error:', error);
         let message = 'Unknown error';
