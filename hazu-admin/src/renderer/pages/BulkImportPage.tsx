@@ -5,6 +5,10 @@ import { DataPreviewTable } from '../components/bulk-import/DataPreviewTable';
 import { RoomTypeSelector } from '../components/bulk-import/RoomTypeSelector';
 import { VariableTabs } from '../components/bulk-import/VariableTabs';
 import { RoomConfigurator } from '../components/bulk-import/RoomConfigurator';
+import { PersonRoleSelector } from '../components/bulk-import/PersonRoleSelector';
+import { TemplateSelector } from '../components/bulk-import/TemplateSelector';
+import { RoomAssignmentPanel, RoomAssignment } from '../components/bulk-import/RoomAssignmentPanel';
+import type { ColumnMapping } from '../components/bulk-import/ColumnMappingDropdown';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 interface Template {
@@ -26,8 +30,11 @@ interface FileData {
 
 type Workflow = 'room' | 'person' | 'assignment';
 
+// Email validation regex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function BulkImportPage() {
-  const { addCreateRoomTask } = useTaskQueue();
+  const { addCreateRoomTask, addCreatePersonTask } = useTaskQueue();
 
   // Workflow state
   const [activeWorkflow, setActiveWorkflow] = useState<Workflow>('room');
@@ -43,12 +50,35 @@ function BulkImportPage() {
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
   const [roomConfigs, setRoomConfigs] = useState<Map<string, RoomConfig>>(new Map());
 
-  // Templates state
+  // Templates state (Room workflow)
   const [allTemplates, setAllTemplates] = useState<Template[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
 
-  // Rooms for target lookup
-  const [rooms, setRooms] = useState<Array<{ id: string; room_type: string; parent_id: string | null }>>([]);
+  // Person workflow state - Role & Template
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [personTemplates, setPersonTemplates] = useState<Array<{ id: string; title: string }>>([]);
+  const [isLoadingPersonTemplates, setIsLoadingPersonTemplates] = useState(false);
+  const [selectedPersonTemplateId, setSelectedPersonTemplateId] = useState<string | null>(null);
+
+  // Person workflow - Template grouping mode
+  const [useTemplateGrouping, setUseTemplateGrouping] = useState(false);
+  const [templateGroupColumn, setTemplateGroupColumn] = useState<string | null>(null);
+  const [templatesByGroup, setTemplatesByGroup] = useState<Map<string, string>>(new Map());
+
+  // Person workflow - Column mappings
+  const [columnMappings, setColumnMappings] = useState<Record<string, ColumnMapping>>({});
+
+  // Person workflow - Room assignments
+  const [roomAssignments, setRoomAssignments] = useState<Map<string, RoomAssignment>>(new Map());
+
+  // Person workflow - Options
+  const [sendInvitationEmail, setSendInvitationEmail] = useState(false);
+
+  // Person workflow - Profile categories (for targetId lookup)
+  const [profileCategories, setProfileCategories] = useState<Array<{ id: string; title: string; profileType: string }>>([]);
+
+  // Rooms for target lookup and assignments
+  const [rooms, setRooms] = useState<Array<{ id: string; title: string; room_type: string; parent_id: string | null }>>([]);
   const [rootHazuId, setRootHazuId] = useState<string | null>(null);
 
   // Load rooms and root ID on mount
@@ -64,7 +94,7 @@ function BulkImportPage() {
     loadData();
   }, []);
 
-  // Fetch templates when room type changes
+  // Fetch templates when room type changes (Room workflow)
   useEffect(() => {
     if (!roomType) {
       setAllTemplates([]);
@@ -88,13 +118,46 @@ function BulkImportPage() {
     fetchTemplates();
   }, [roomType]);
 
-  // Filter templates by selected room type
+  // Fetch profile templates and categories when role changes (Person workflow)
+  useEffect(() => {
+    if (!selectedRole) {
+      setPersonTemplates([]);
+      setProfileCategories([]);
+      return;
+    }
+
+    const fetchData = async () => {
+      setIsLoadingPersonTemplates(true);
+      try {
+        const [templatesResult, categoriesResult] = await Promise.all([
+          window.electronAPI.fetchProfileTemplates(selectedRole),
+          window.electronAPI.fetchProfileCategories(),
+        ]);
+
+        if (templatesResult.success && templatesResult.templates) {
+          setPersonTemplates(templatesResult.templates);
+        }
+
+        if (categoriesResult.success && categoriesResult.categories) {
+          setProfileCategories(categoriesResult.categories);
+        }
+      } catch (error) {
+        console.error('Failed to fetch profile data:', error);
+      } finally {
+        setIsLoadingPersonTemplates(false);
+      }
+    };
+
+    fetchData();
+  }, [selectedRole]);
+
+  // Filter templates by selected room type (Room workflow)
   const filteredTemplates = useMemo(() => {
     if (!roomType) return [];
     return allTemplates.filter(t => t.roomType === roomType);
   }, [allTemplates, roomType]);
 
-  // Extract unique values when column is mapped
+  // Extract unique values when column is mapped (Room workflow)
   const uniqueValues = useMemo(() => {
     if (!fileData || !mappedColumn) return [];
     const values = new Set<string>();
@@ -106,6 +169,140 @@ function BulkImportPage() {
     }
     return Array.from(values).sort();
   }, [fileData, mappedColumn]);
+
+  // Person workflow - Get reverse mapping (columnMapping -> header)
+  const getHeaderForMapping = useCallback((mapping: ColumnMapping): string | null => {
+    for (const [header, m] of Object.entries(columnMappings)) {
+      if (m === mapping) return header;
+    }
+    return null;
+  }, [columnMappings]);
+
+  // Person workflow - Extract unique grouping values
+  const uniqueGroupValues = useMemo(() => {
+    if (!fileData) return [];
+
+    const grouping1Header = getHeaderForMapping('grouping1');
+    const grouping2Header = getHeaderForMapping('grouping2');
+
+    if (!grouping1Header && !grouping2Header) return [];
+
+    const values = new Set<string>();
+
+    for (const row of fileData.rows) {
+      const parts: string[] = [];
+
+      if (grouping1Header) {
+        const val = row[grouping1Header]?.trim();
+        if (val) parts.push(val);
+      }
+
+      if (grouping2Header) {
+        const val = row[grouping2Header]?.trim();
+        if (val) parts.push(val);
+      }
+
+      if (parts.length > 0) {
+        values.add(parts.join(' - '));
+      }
+    }
+
+    return Array.from(values).sort();
+  }, [fileData, columnMappings, getHeaderForMapping]);
+
+  // Person workflow - Extract unique template group values
+  const uniqueTemplateGroupValues = useMemo(() => {
+    if (!fileData || !templateGroupColumn) return [];
+
+    const values = new Set<string>();
+    for (const row of fileData.rows) {
+      const value = row[templateGroupColumn]?.trim();
+      if (value) {
+        values.add(value);
+      }
+    }
+    return Array.from(values).sort();
+  }, [fileData, templateGroupColumn]);
+
+  // Person workflow - Extract group1 values only (for separator in RoomAssignmentPanel)
+  const group1Values = useMemo(() => {
+    if (!fileData) return [];
+
+    const grouping1Header = getHeaderForMapping('grouping1');
+    if (!grouping1Header) return [];
+
+    const values = new Set<string>();
+    for (const row of fileData.rows) {
+      const val = row[grouping1Header]?.trim();
+      if (val) values.add(val);
+    }
+    return Array.from(values).sort();
+  }, [fileData, columnMappings, getHeaderForMapping]);
+
+  // Person workflow - Validation
+  const personValidation = useMemo(() => {
+    if (!fileData || activeWorkflow !== 'person') {
+      return { validCount: 0, invalidCount: 0, warnings: {} };
+    }
+
+    const firstNameHeader = getHeaderForMapping('firstName');
+    const lastNameHeader = getHeaderForMapping('lastName');
+    const emailHeader = getHeaderForMapping('email');
+
+    let validCount = 0;
+    let invalidCount = 0;
+    const warnings: Record<string, number[]> = {};
+
+    fileData.rows.forEach((row, rowIndex) => {
+      let isValid = true;
+
+      // Check firstName
+      if (!firstNameHeader || !row[firstNameHeader]?.trim()) {
+        isValid = false;
+        if (firstNameHeader) {
+          if (!warnings[firstNameHeader]) warnings[firstNameHeader] = [];
+          warnings[firstNameHeader].push(rowIndex + 1);
+        }
+      }
+
+      // Check lastName
+      if (!lastNameHeader || !row[lastNameHeader]?.trim()) {
+        isValid = false;
+        if (lastNameHeader) {
+          if (!warnings[lastNameHeader]) warnings[lastNameHeader] = [];
+          warnings[lastNameHeader].push(rowIndex + 1);
+        }
+      }
+
+      // Check email
+      const email = emailHeader ? row[emailHeader]?.trim() : '';
+      if (!emailHeader || !email || !EMAIL_REGEX.test(email)) {
+        isValid = false;
+        if (emailHeader) {
+          if (!warnings[emailHeader]) warnings[emailHeader] = [];
+          warnings[emailHeader].push(rowIndex + 1);
+        }
+      }
+
+      // Check template group if grouping is enabled
+      if (useTemplateGrouping && templateGroupColumn) {
+        const groupValue = row[templateGroupColumn]?.trim();
+        if (!groupValue || !templatesByGroup.has(groupValue)) {
+          isValid = false;
+          if (!warnings[templateGroupColumn]) warnings[templateGroupColumn] = [];
+          warnings[templateGroupColumn].push(rowIndex + 1);
+        }
+      }
+
+      if (isValid) {
+        validCount++;
+      } else {
+        invalidCount++;
+      }
+    });
+
+    return { validCount, invalidCount, warnings };
+  }, [fileData, activeWorkflow, columnMappings, getHeaderForMapping, useTemplateGrouping, templateGroupColumn, templatesByGroup]);
 
   // Initialize room configs when unique values change
   useEffect(() => {
@@ -125,15 +322,33 @@ function BulkImportPage() {
   // Handle file loaded
   const handleFileLoaded = useCallback((data: FileData) => {
     setFileData(data);
+    // Reset Room workflow state
     setMappedColumn(null);
     setSelectedValue(null);
     setRoomConfigs(new Map());
+    // Reset Person workflow state
+    setColumnMappings({});
+    setRoomAssignments(new Map());
+    setTemplatesByGroup(new Map());
   }, []);
 
-  // Handle column click
+  // Handle column click (Room workflow - old API)
   const handleColumnClick = useCallback((header: string) => {
     setMappedColumn(header);
     setSelectedValue(null);
+  }, []);
+
+  // Handle column mapping change (Person workflow - new API)
+  const handleColumnMappingChange = useCallback((header: string, mapping: ColumnMapping | null) => {
+    setColumnMappings(prev => {
+      const newMappings = { ...prev };
+      if (mapping === null) {
+        delete newMappings[header];
+      } else {
+        newMappings[header] = mapping;
+      }
+      return newMappings;
+    });
   }, []);
 
   // Handle config change for selected value
@@ -153,6 +368,12 @@ function BulkImportPage() {
     );
     return targetRoom?.id || null;
   }, [rooms, rootHazuId]);
+
+  // Find target ID for person role
+  const findPersonTargetId = useCallback((role: string): string | null => {
+    const category = profileCategories.find(c => c.profileType === role);
+    return category?.id || null;
+  }, [profileCategories]);
 
   // Count rooms ready to create
   const readyCount = useMemo(() => {
@@ -185,6 +406,103 @@ function BulkImportPage() {
     });
   }, [roomType, roomConfigs, findTargetId, addCreateRoomTask]);
 
+  // Handle person creation - adds tasks to queue
+  const handleCreatePersons = useCallback(() => {
+    if (!selectedRole || !fileData) return;
+
+    const targetId = findPersonTargetId(selectedRole);
+    if (!targetId) {
+      alert(`No parent location found for role: ${selectedRole}`);
+      return;
+    }
+
+    const firstNameHeader = getHeaderForMapping('firstName');
+    const lastNameHeader = getHeaderForMapping('lastName');
+    const emailHeader = getHeaderForMapping('email');
+    const grouping1Header = getHeaderForMapping('grouping1');
+    const grouping2Header = getHeaderForMapping('grouping2');
+
+    if (!firstNameHeader || !lastNameHeader || !emailHeader) {
+      alert('Please map firstName, lastName, and email columns');
+      return;
+    }
+
+    // Get template ID (either global or needs grouping)
+    let globalTemplateId: string | null = null;
+    if (!useTemplateGrouping) {
+      globalTemplateId = selectedPersonTemplateId;
+      if (!globalTemplateId) {
+        alert('Please select a template');
+        return;
+      }
+    }
+
+    fileData.rows.forEach((row, index) => {
+      const firstName = row[firstNameHeader]?.trim();
+      const lastName = row[lastNameHeader]?.trim();
+      const email = row[emailHeader]?.trim();
+
+      // Skip invalid rows
+      if (!firstName || !lastName || !email || !EMAIL_REGEX.test(email)) {
+        return;
+      }
+
+      // Get template ID
+      let sourceId = globalTemplateId;
+      if (useTemplateGrouping && templateGroupColumn) {
+        const groupValue = row[templateGroupColumn]?.trim();
+        if (!groupValue) return;
+        sourceId = templatesByGroup.get(groupValue) || null;
+        if (!sourceId) return;
+      }
+
+      if (!sourceId) return;
+
+      // Build grouping value for room lookup
+      const groupingParts: string[] = [];
+      if (grouping1Header) {
+        const val = row[grouping1Header]?.trim();
+        if (val) groupingParts.push(val);
+      }
+      if (grouping2Header) {
+        const val = row[grouping2Header]?.trim();
+        if (val) groupingParts.push(val);
+      }
+
+      const groupingValue = groupingParts.length > 0 ? groupingParts.join(' - ') : null;
+
+      // Get room IDs from assignments
+      const roomIds = groupingValue ? (roomAssignments.get(groupingValue)?.roomIds || []) : [];
+
+      // Add person creation task
+      addCreatePersonTask({
+        personName: `${firstName} ${lastName}`,
+        params: {
+          sourceId,
+          targetId,
+          firstName,
+          lastName,
+          userEmail: email,
+          role: selectedRole,
+          roomIds,
+          invitationMail: sendInvitationEmail,
+        },
+      });
+    });
+  }, [
+    selectedRole,
+    fileData,
+    findPersonTargetId,
+    getHeaderForMapping,
+    useTemplateGrouping,
+    selectedPersonTemplateId,
+    templateGroupColumn,
+    templatesByGroup,
+    roomAssignments,
+    sendInvitationEmail,
+    addCreatePersonTask,
+  ]);
+
   // Handle start over
   const handleStartOver = useCallback(() => {
     setFileData(null);
@@ -192,6 +510,9 @@ function BulkImportPage() {
     setSelectedValue(null);
     setRoomConfigs(new Map());
     setRoomType(null);
+    setColumnMappings({});
+    setRoomAssignments(new Map());
+    setTemplatesByGroup(new Map());
   }, []);
 
   const selectedConfig = selectedValue ? roomConfigs.get(selectedValue) : null;
@@ -251,12 +572,24 @@ function BulkImportPage() {
             />
           ) : (
             <div className="space-y-3">
-              <DataPreviewTable
-                headers={fileData.headers}
-                rows={fileData.rows}
-                mappedColumn={mappedColumn}
-                onColumnClick={handleColumnClick}
-              />
+              {/* Show different table based on workflow */}
+              {activeWorkflow === 'room' ? (
+                <DataPreviewTable
+                  headers={fileData.headers}
+                  rows={fileData.rows}
+                  columnMappings={mappedColumn ? { [mappedColumn]: 'firstName' } : {}}
+                  onColumnMappingChange={handleColumnClick as any}
+                />
+              ) : activeWorkflow === 'person' ? (
+                <DataPreviewTable
+                  headers={fileData.headers}
+                  rows={fileData.rows}
+                  columnMappings={columnMappings}
+                  onColumnMappingChange={handleColumnMappingChange}
+                  validationWarnings={personValidation.warnings}
+                  showTemplateGroup={useTemplateGrouping}
+                />
+              ) : null}
               <button
                 onClick={handleStartOver}
                 className="text-sm text-gray-600 hover:text-gray-800"
@@ -268,7 +601,7 @@ function BulkImportPage() {
         </div>
 
         {/* Room workflow - only show when Room tab is active */}
-        {activeWorkflow === 'room' && (
+        {activeWorkflow === 'room' && fileData && (
           <>
             {/* Room type selector */}
             <div>
@@ -308,11 +641,50 @@ function BulkImportPage() {
           </>
         )}
 
-        {/* Person workflow placeholder */}
-        {activeWorkflow === 'person' && (
-          <div className="text-center py-12 text-gray-500">
-            Person workflow coming soon...
-          </div>
+        {/* Person workflow */}
+        {activeWorkflow === 'person' && fileData && (
+          <>
+            {/* Role selection */}
+            <div>
+              <PersonRoleSelector
+                selectedRole={selectedRole}
+                onRoleChange={setSelectedRole}
+              />
+            </div>
+
+            {/* Template selection */}
+            {selectedRole && (
+              <div>
+                <TemplateSelector
+                  templates={personTemplates}
+                  isLoadingTemplates={isLoadingPersonTemplates}
+                  selectedTemplateId={selectedPersonTemplateId}
+                  onTemplateChange={setSelectedPersonTemplateId}
+                  useGrouping={useTemplateGrouping}
+                  onUseGroupingChange={setUseTemplateGrouping}
+                  groupingColumn={templateGroupColumn}
+                  onGroupingColumnChange={setTemplateGroupColumn}
+                  templatesByGroup={templatesByGroup}
+                  onTemplatesByGroupChange={setTemplatesByGroup}
+                  availableColumns={fileData.headers}
+                  uniqueGroupValues={uniqueTemplateGroupValues}
+                />
+              </div>
+            )}
+
+            {/* Room assignments - show if either grouping column is mapped */}
+            {uniqueGroupValues.length > 0 && (
+              <div>
+                <RoomAssignmentPanel
+                  groupingValues={uniqueGroupValues}
+                  group1Values={group1Values}
+                  roomAssignments={roomAssignments}
+                  onRoomAssignmentsChange={setRoomAssignments}
+                  rooms={rooms}
+                />
+              </div>
+            )}
+          </>
         )}
 
         {/* Assignment workflow placeholder */}
@@ -323,8 +695,8 @@ function BulkImportPage() {
         )}
       </div>
 
-      {/* Footer with action button - only show for Room workflow */}
-      {activeWorkflow === 'room' && (
+      {/* Footer with action button - Room workflow */}
+      {activeWorkflow === 'room' && fileData && (
         <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between">
           <div className="text-sm text-gray-500">
             {readyCount > 0
@@ -342,6 +714,39 @@ function BulkImportPage() {
           >
             Add {readyCount} Room{readyCount !== 1 ? 's' : ''} to Queue
           </button>
+        </div>
+      )}
+
+      {/* Footer with action button - Person workflow */}
+      {activeWorkflow === 'person' && fileData && (
+        <div className="border-t border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sendInvitationEmail}
+                  onChange={(e) => setSendInvitationEmail(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Send invitation emails</span>
+              </label>
+              <div className="text-sm text-gray-500">
+                Ready: {personValidation.validCount} | Skipped: {personValidation.invalidCount}
+              </div>
+            </div>
+            <button
+              onClick={handleCreatePersons}
+              disabled={personValidation.validCount === 0 || !selectedRole}
+              className={`px-6 py-2 rounded-lg transition-colors ${
+                personValidation.validCount > 0 && selectedRole
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              Add {personValidation.validCount} Person{personValidation.validCount !== 1 ? 's' : ''} to Queue
+            </button>
+          </div>
         </div>
       )}
     </div>
