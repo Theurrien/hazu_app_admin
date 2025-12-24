@@ -199,27 +199,6 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div
-        className="bg-white rounded-xl p-6"
-        style={{
-          border: '1px solid var(--hazu-border)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-        }}
-      >
-        <h3
-          className="text-lg font-semibold mb-4"
-          style={{ color: 'var(--hazu-text)' }}
-        >
-          Quick Actions
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <ActionButton label="View Rooms" icon={faBuilding} color="bg-[#E57B4D]" onClick={() => {}} />
-          <ActionButton label="View Persons" icon={faUsers} color="bg-[#5B9B8C]" onClick={() => {}} />
-          <ActionButton label="Manage Assignments" icon={faLink} color="bg-[#7B6B9B]" onClick={() => {}} />
-          <ActionButton label="View Changes" icon={faFileLines} color="bg-[#5B7BA5]" onClick={() => {}} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -272,45 +251,6 @@ function StatCard({ title, value, icon, color }: StatCardProps) {
         </div>
       </div>
     </div>
-  );
-}
-
-interface ActionButtonProps {
-  label: string;
-  icon: IconDefinition;
-  color: string;
-  onClick: () => void;
-}
-
-function ActionButton({ label, icon, color, onClick }: ActionButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex flex-col items-center gap-3 p-5 rounded-xl transition-all hover:shadow-md"
-      style={{
-        backgroundColor: 'var(--hazu-bg-subtle)',
-        border: '1px solid var(--hazu-border)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = 'var(--hazu-bg-hover)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'var(--hazu-bg-subtle)';
-      }}
-    >
-      {/* Hazu-style colored icon */}
-      <div
-        className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm ${color}`}
-      >
-        <FontAwesomeIcon icon={icon} className="text-white text-lg" />
-      </div>
-      <span
-        className="text-sm font-medium"
-        style={{ color: 'var(--hazu-text)' }}
-      >
-        {label}
-      </span>
-    </button>
   );
 }
 

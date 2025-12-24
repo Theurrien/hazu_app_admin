@@ -1,6 +1,6 @@
 import React from 'react';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'settings';
 
 interface HeaderProps {
   currentPage: Page;
@@ -12,7 +12,6 @@ const pageTitles: Record<Page, string> = {
   persons: 'Persons',
   matrix: 'Assignment Matrix',
   import: 'Bulk Import',
-  sync: 'Synchronization',
   settings: 'Settings',
 };
 
