@@ -30,7 +30,7 @@ function BulkImportPage() {
   const { addCreateRoomTask } = useTaskQueue();
 
   // Workflow state
-  const [activeWorkflow] = useState<Workflow>('room');
+  const [activeWorkflow, setActiveWorkflow] = useState<Workflow>('room');
 
   // File state
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -202,23 +202,32 @@ function BulkImportPage() {
       <div className="border-b border-gray-200 px-6 py-4">
         <div className="flex items-center gap-4">
           <button
+            onClick={() => setActiveWorkflow('room')}
             className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
               activeWorkflow === 'room'
                 ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
             Room Creation
           </button>
           <button
-            disabled
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-400 cursor-not-allowed"
+            onClick={() => setActiveWorkflow('person')}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeWorkflow === 'person'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
           >
             Person
           </button>
           <button
-            disabled
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-400 cursor-not-allowed"
+            onClick={() => setActiveWorkflow('assignment')}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeWorkflow === 'assignment'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
           >
             Assignment
           </button>
@@ -227,43 +236,7 @@ function BulkImportPage() {
 
       {/* Main content */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Room type selector */}
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-3">Room Type</h3>
-          <RoomTypeSelector
-            selectedType={roomType}
-            onTypeChange={setRoomType}
-          />
-        </div>
-
-        {/* Variable configuration section - only show when column is mapped */}
-        {uniqueValues.length > 0 && (
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">
-                Rooms to Create ({readyCount} of {uniqueValues.length} configured)
-              </h3>
-              <VariableTabs
-                uniqueValues={uniqueValues}
-                roomConfigs={roomConfigs}
-                selectedValue={selectedValue}
-                onSelectValue={setSelectedValue}
-              />
-            </div>
-
-            {selectedValue && selectedConfig && (
-              <RoomConfigurator
-                originalName={selectedValue}
-                config={selectedConfig}
-                templates={filteredTemplates}
-                onConfigChange={handleConfigChange}
-                isLoadingTemplates={isLoadingTemplates}
-              />
-            )}
-          </div>
-        )}
-
-        {/* File upload section */}
+        {/* File upload section - shared across all workflows */}
         <div>
           <h3 className="text-sm font-medium text-gray-700 mb-3">
             {fileData ? `File: ${fileData.fileName}` : 'Upload File'}
@@ -293,27 +266,84 @@ function BulkImportPage() {
             </div>
           )}
         </div>
+
+        {/* Room workflow - only show when Room tab is active */}
+        {activeWorkflow === 'room' && (
+          <>
+            {/* Room type selector */}
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Room Type</h3>
+              <RoomTypeSelector
+                selectedType={roomType}
+                onTypeChange={setRoomType}
+              />
+            </div>
+
+            {/* Variable configuration section - only show when column is mapped */}
+            {uniqueValues.length > 0 && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">
+                    Rooms to Create ({readyCount} of {uniqueValues.length} configured)
+                  </h3>
+                  <VariableTabs
+                    uniqueValues={uniqueValues}
+                    roomConfigs={roomConfigs}
+                    selectedValue={selectedValue}
+                    onSelectValue={setSelectedValue}
+                  />
+                </div>
+
+                {selectedValue && selectedConfig && (
+                  <RoomConfigurator
+                    originalName={selectedValue}
+                    config={selectedConfig}
+                    templates={filteredTemplates}
+                    onConfigChange={handleConfigChange}
+                    isLoadingTemplates={isLoadingTemplates}
+                  />
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Person workflow placeholder */}
+        {activeWorkflow === 'person' && (
+          <div className="text-center py-12 text-gray-500">
+            Person workflow coming soon...
+          </div>
+        )}
+
+        {/* Assignment workflow placeholder */}
+        {activeWorkflow === 'assignment' && (
+          <div className="text-center py-12 text-gray-500">
+            Assignment workflow coming soon...
+          </div>
+        )}
       </div>
 
-      {/* Footer with action button */}
-      <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="text-sm text-gray-500">
-          {readyCount > 0
-            ? `${readyCount} room${readyCount !== 1 ? 's' : ''} ready to create`
-            : 'Select templates for rooms to create'}
+      {/* Footer with action button - only show for Room workflow */}
+      {activeWorkflow === 'room' && (
+        <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            {readyCount > 0
+              ? `${readyCount} room${readyCount !== 1 ? 's' : ''} ready to create`
+              : 'Select templates for rooms to create'}
+          </div>
+          <button
+            onClick={handleCreateRooms}
+            disabled={readyCount === 0 || !roomType}
+            className={`px-6 py-2 rounded-lg transition-colors ${
+              readyCount > 0 && roomType
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            Add {readyCount} Room{readyCount !== 1 ? 's' : ''} to Queue
+          </button>
         </div>
-        <button
-          onClick={handleCreateRooms}
-          disabled={readyCount === 0 || !roomType}
-          className={`px-6 py-2 rounded-lg transition-colors ${
-            readyCount > 0 && roomType
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          Add {readyCount} Room{readyCount !== 1 ? 's' : ''} to Queue
-        </button>
-      </div>
+      )}
     </div>
   );
 }
