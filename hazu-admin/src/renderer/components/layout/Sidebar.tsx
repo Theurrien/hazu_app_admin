@@ -6,12 +6,11 @@ import {
   faUsers,
   faTableCells,
   faFileImport,
-  faRotate,
   faCog,
   IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'settings';
 
 interface SidebarProps {
   currentPage: Page;
@@ -31,7 +30,6 @@ const navItems: NavItem[] = [
   { id: 'persons', label: 'Persons', icon: faUsers },
   { id: 'matrix', label: 'Matrix', icon: faTableCells },
   { id: 'import', label: 'Bulk Import', icon: faFileImport },
-  { id: 'sync', label: 'Sync', icon: faRotate },
   { id: 'settings', label: 'Settings', icon: faCog },
 ];
 

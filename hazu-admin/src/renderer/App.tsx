@@ -10,7 +10,7 @@ import SettingsPage from './pages/SettingsPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'settings';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');

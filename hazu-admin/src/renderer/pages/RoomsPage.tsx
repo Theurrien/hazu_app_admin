@@ -1,9 +1,38 @@
 import React, { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { library } from '@fortawesome/fontawesome-svg-core';
+import { fas } from '@fortawesome/free-solid-svg-icons';
+import { IconName } from '@fortawesome/fontawesome-svg-core';
 import type { Room, RoomType } from '../../shared/types';
 import { RoomAssignmentsList } from '../components/AssignmentsList';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
 import { RenameRoomModal } from '../components/RenameRoomModal';
+
+// Add all solid icons to the library for dynamic lookup
+library.add(fas);
+
+// Hazu uses some custom icon names that need translation to FontAwesome names
+const iconNameTranslations: Record<string, string> = {
+  'battery-0': 'battery-empty',
+  'battery-1': 'battery-quarter',
+  'battery-2': 'battery-half',
+  'battery-3': 'battery-three-quarters',
+  'battery-4': 'battery-full',
+  'map-marked': 'map-location-dot',
+};
+
+// Convert Hazu icon string (e.g., "fa-building") to FontAwesome icon name (e.g., "building")
+function parseIconName(iconString: string | null | undefined): IconName {
+  if (!iconString) return 'building';
+  // Remove "fa-" or "fas fa-" prefix
+  let name = iconString.replace(/^(fas\s+)?fa-/, '');
+  // Translate Hazu-specific names to FontAwesome names
+  if (iconNameTranslations[name]) {
+    name = iconNameTranslations[name];
+  }
+  return name as IconName;
+}
 
 const roomTypeLabels: Record<RoomType, string> = {
   state: 'Cantons',
@@ -299,14 +328,10 @@ function RoomCard({ room, isExpanded, assignments, assignmentsLoading, onClick, 
 
           {/* Room icon */}
           <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg flex-shrink-0"
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-white flex-shrink-0"
             style={{ backgroundColor: room.color || '#6B7280' }}
           >
-            {room.icon ? (
-              <i className={`fa ${room.icon}`}></i>
-            ) : (
-              '🏠'
-            )}
+            <FontAwesomeIcon icon={['fas', parseIconName(room.icon)]} className="text-lg" />
           </div>
 
           {/* Room info */}
