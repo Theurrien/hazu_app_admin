@@ -36,7 +36,10 @@ function App() {
 
   return (
     <TaskQueueProvider>
-      <div className="flex h-screen bg-gray-100">
+      <div
+        className="flex h-screen"
+        style={{ backgroundColor: 'var(--hazu-bg-subtle)' }}
+      >
         <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header currentPage={currentPage} />
