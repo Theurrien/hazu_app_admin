@@ -5,7 +5,7 @@ import { DataPreviewTable } from '../components/bulk-import/DataPreviewTable';
 import { RoomTypeSelector } from '../components/bulk-import/RoomTypeSelector';
 import { VariableTabs } from '../components/bulk-import/VariableTabs';
 import { RoomConfigurator } from '../components/bulk-import/RoomConfigurator';
-import { BulkImportProgress, ImportResult } from '../components/bulk-import/BulkImportProgress';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 interface Template {
   id: string;
@@ -27,6 +27,8 @@ interface FileData {
 type Workflow = 'room' | 'person' | 'assignment';
 
 function BulkImportPage() {
+  const { addCreateRoomTask } = useTaskQueue();
+
   // Workflow state
   const [activeWorkflow] = useState<Workflow>('room');
 
@@ -44,10 +46,6 @@ function BulkImportPage() {
   // Templates state
   const [allTemplates, setAllTemplates] = useState<Template[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
-
-  // Processing state
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [results, setResults] = useState<ImportResult[]>([]);
 
   // Rooms for target lookup
   const [rooms, setRooms] = useState<Array<{ id: string; room_type: string; parent_id: string | null }>>([]);
@@ -130,7 +128,6 @@ function BulkImportPage() {
     setMappedColumn(null);
     setSelectedValue(null);
     setRoomConfigs(new Map());
-    setResults([]);
   }, []);
 
   // Handle column click
@@ -166,8 +163,8 @@ function BulkImportPage() {
     return count;
   }, [roomConfigs]);
 
-  // Handle room creation
-  const handleCreateRooms = useCallback(async () => {
+  // Handle room creation - adds tasks to queue
+  const handleCreateRooms = useCallback(() => {
     if (!roomType) return;
 
     const targetId = findTargetId(roomType);
@@ -176,108 +173,17 @@ function BulkImportPage() {
       return;
     }
 
-    // Get rooms to create (those with templates)
-    const roomsToCreate: Array<{ name: string; templateId: string; newName: string }> = [];
+    // Add each configured room to the task queue
     roomConfigs.forEach((config, name) => {
       if (config.templateId) {
-        roomsToCreate.push({
-          name,
+        addCreateRoomTask({
+          roomName: config.newName || name,
           templateId: config.templateId,
-          newName: config.newName || name,
+          targetId,
         });
       }
     });
-
-    if (roomsToCreate.length === 0) return;
-
-    setIsProcessing(true);
-
-    // Initialize results
-    setResults(roomsToCreate.map(room => ({
-      name: room.newName,
-      status: 'pending' as const,
-    })));
-
-    // Process each room sequentially
-    for (let i = 0; i < roomsToCreate.length; i++) {
-      const room = roomsToCreate[i];
-
-      // Update to processing
-      setResults(prev => prev.map((r, idx) =>
-        idx === i ? { ...r, status: 'processing' as const } : r
-      ));
-
-      try {
-        const result = await window.electronAPI.createRoom(
-          room.templateId,
-          targetId,
-          room.newName
-        );
-
-        if (result.success && result.room) {
-          setResults(prev => prev.map((r, idx) =>
-            idx === i ? { ...r, status: 'success' as const, roomId: result.room.id } : r
-          ));
-        } else {
-          setResults(prev => prev.map((r, idx) =>
-            idx === i ? { ...r, status: 'error' as const, error: result.error || 'Unknown error' } : r
-          ));
-        }
-      } catch (error) {
-        setResults(prev => prev.map((r, idx) =>
-          idx === i ? { ...r, status: 'error' as const, error: error instanceof Error ? error.message : 'Unknown error' } : r
-        ));
-      }
-    }
-
-    setIsProcessing(false);
-  }, [roomType, roomConfigs, findTargetId]);
-
-  // Handle open room
-  const handleOpenRoom = useCallback(async (roomId: string) => {
-    const config = await window.electronAPI.getApiConfig();
-    const env = config.environment || 'swiss';
-    const baseUrl = env === 'swiss' ? 'https://hazu.swiss' : env === 'io' ? 'https://hazu.io' : 'https://dev.hazu.swiss';
-    const url = `${baseUrl}/#/hazu/${roomId}`;
-    window.electronAPI.openExternal(url);
-  }, []);
-
-  // Handle retry
-  const handleRetry = useCallback(async (name: string) => {
-    // Find the original config
-    const config = roomConfigs.get(name);
-    if (!config?.templateId || !roomType) return;
-
-    const targetId = findTargetId(roomType);
-    if (!targetId) return;
-
-    // Update to processing
-    setResults(prev => prev.map(r =>
-      r.name === name ? { ...r, status: 'processing' as const, error: undefined } : r
-    ));
-
-    try {
-      const result = await window.electronAPI.createRoom(
-        config.templateId,
-        targetId,
-        config.newName || name
-      );
-
-      if (result.success && result.room) {
-        setResults(prev => prev.map(r =>
-          r.name === name ? { ...r, status: 'success' as const, roomId: result.room.id } : r
-        ));
-      } else {
-        setResults(prev => prev.map(r =>
-          r.name === name ? { ...r, status: 'error' as const, error: result.error || 'Unknown error' } : r
-        ));
-      }
-    } catch (error) {
-      setResults(prev => prev.map(r =>
-        r.name === name ? { ...r, status: 'error' as const, error: error instanceof Error ? error.message : 'Unknown error' } : r
-      ));
-    }
-  }, [roomConfigs, roomType, findTargetId]);
+  }, [roomType, roomConfigs, findTargetId, addCreateRoomTask]);
 
   // Handle start over
   const handleStartOver = useCallback(() => {
@@ -285,7 +191,6 @@ function BulkImportPage() {
     setMappedColumn(null);
     setSelectedValue(null);
     setRoomConfigs(new Map());
-    setResults([]);
     setRoomType(null);
   }, []);
 
@@ -328,7 +233,6 @@ function BulkImportPage() {
           <RoomTypeSelector
             selectedType={roomType}
             onTypeChange={setRoomType}
-            disabled={isProcessing}
           />
         </div>
 
@@ -383,22 +287,12 @@ function BulkImportPage() {
               <button
                 onClick={handleStartOver}
                 className="text-sm text-gray-600 hover:text-gray-800"
-                disabled={isProcessing}
               >
                 Upload different file
               </button>
             </div>
           )}
         </div>
-
-        {/* Results section */}
-        {results.length > 0 && (
-          <BulkImportProgress
-            results={results}
-            onOpenRoom={handleOpenRoom}
-            onRetry={handleRetry}
-          />
-        )}
       </div>
 
       {/* Footer with action button */}
@@ -408,30 +302,17 @@ function BulkImportPage() {
             ? `${readyCount} room${readyCount !== 1 ? 's' : ''} ready to create`
             : 'Select templates for rooms to create'}
         </div>
-        <div className="flex items-center gap-3">
-          {results.length > 0 && !isProcessing && (
-            <button
-              onClick={handleStartOver}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Start Over
-            </button>
-          )}
-          <button
-            onClick={handleCreateRooms}
-            disabled={readyCount === 0 || isProcessing || !roomType}
-            className={`px-6 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-              readyCount > 0 && !isProcessing && roomType
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            }`}
-          >
-            {isProcessing && (
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-            )}
-            Create {readyCount} Room{readyCount !== 1 ? 's' : ''}
-          </button>
-        </div>
+        <button
+          onClick={handleCreateRooms}
+          disabled={readyCount === 0 || !roomType}
+          className={`px-6 py-2 rounded-lg transition-colors ${
+            readyCount > 0 && roomType
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Add {readyCount} Room{readyCount !== 1 ? 's' : ''} to Queue
+        </button>
       </div>
     </div>
   );
