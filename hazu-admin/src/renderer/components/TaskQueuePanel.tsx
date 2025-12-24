@@ -1,7 +1,14 @@
 import React, { useMemo } from 'react';
 import { useTaskQueue, Task } from '../contexts/TaskQueueContext';
 
-const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task; onDismiss: () => void }) {
+interface TaskItemProps {
+  task: Task;
+  onDismiss: () => void;
+  onRetry: () => void;
+  onOpen: (id: string) => void;
+}
+
+const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen }: TaskItemProps) {
   const getIcon = () => {
     switch (task.status) {
       case 'processing':
@@ -26,14 +33,14 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task;
     }
   };
 
-  const getLink = (): string | null => {
+  const getEntityId = (): string | null => {
     if (task.status !== 'success') return null;
-    if (task.type === 'createRoom') return `https://hazu.swiss/${task.roomId}`;
-    if (task.type === 'createPerson') return `https://hazu.swiss/${task.personId}`;
-    return null; // roleUpdate has no link
+    if (task.type === 'createRoom') return (task as any).roomId || null;
+    if (task.type === 'createPerson') return (task as any).personId || null;
+    return null;
   };
 
-  const link = getLink();
+  const entityId = getEntityId();
 
   return (
     <div
@@ -48,12 +55,23 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task;
           <div className="text-xs text-red-600 truncate">{task.error}</div>
         )}
       </div>
-      {link && (
+      {task.status === 'error' && (
+        <button
+          className="text-xs text-orange-600 hover:text-orange-800 hover:underline flex-shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+        >
+          Retry
+        </button>
+      )}
+      {entityId && (
         <button
           className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex-shrink-0"
           onClick={(e) => {
             e.stopPropagation();
-            window.electronAPI.openExternal(link);
+            onOpen(entityId);
           }}
         >
           Open ↗
@@ -72,7 +90,7 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss }: { task: Task;
 });
 
 export function TaskQueuePanel() {
-  const { tasks, dismissTask } = useTaskQueue();
+  const { tasks, dismissTask, retryTask, dismissAllCompleted, dismissAllErrors } = useTaskQueue();
 
   if (tasks.length === 0) return null;
 
@@ -83,23 +101,75 @@ export function TaskQueuePanel() {
     errors: tasks.filter((t) => t.status === 'error'),
   }), [tasks]);
 
+  const handleOpen = async (entityId: string) => {
+    const config = await window.electronAPI.getApiConfig();
+    const env = config.environment || 'swiss';
+    const baseUrl = env === 'swiss' ? 'https://hazu.swiss' : env === 'io' ? 'https://hazu.io' : 'https://dev.hazu.swiss';
+    const url = `${baseUrl}/${entityId}`;
+    window.electronAPI.openExternal(url);
+  };
+
   return (
-    <div className="fixed top-4 right-4 w-72 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50">
-      <div className="bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 border-b">
-        Task Queue ({tasks.length})
+    <div className="fixed top-4 right-4 w-80 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50">
+      <div className="bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 border-b flex items-center justify-between">
+        <span>Task Queue ({tasks.length})</span>
+        <div className="flex gap-2">
+          {success.length > 0 && (
+            <button
+              onClick={dismissAllCompleted}
+              className="text-xs text-gray-500 hover:text-gray-700"
+              title="Clear completed"
+            >
+              Clear done
+            </button>
+          )}
+          {errors.length > 0 && (
+            <button
+              onClick={dismissAllErrors}
+              className="text-xs text-red-500 hover:text-red-700"
+              title="Clear errors"
+            >
+              Clear errors
+            </button>
+          )}
+        </div>
       </div>
-      <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+      <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
         {processing.map((task) => (
-          <TaskItem key={task.id} task={task} onDismiss={() => dismissTask(task.id)} />
+          <TaskItem
+            key={task.id}
+            task={task}
+            onDismiss={() => dismissTask(task.id)}
+            onRetry={() => retryTask(task.id)}
+            onOpen={handleOpen}
+          />
         ))}
         {queued.map((task) => (
-          <TaskItem key={task.id} task={task} onDismiss={() => dismissTask(task.id)} />
+          <TaskItem
+            key={task.id}
+            task={task}
+            onDismiss={() => dismissTask(task.id)}
+            onRetry={() => retryTask(task.id)}
+            onOpen={handleOpen}
+          />
         ))}
         {success.map((task) => (
-          <TaskItem key={task.id} task={task} onDismiss={() => dismissTask(task.id)} />
+          <TaskItem
+            key={task.id}
+            task={task}
+            onDismiss={() => dismissTask(task.id)}
+            onRetry={() => retryTask(task.id)}
+            onOpen={handleOpen}
+          />
         ))}
         {errors.map((task) => (
-          <TaskItem key={task.id} task={task} onDismiss={() => dismissTask(task.id)} />
+          <TaskItem
+            key={task.id}
+            task={task}
+            onDismiss={() => dismissTask(task.id)}
+            onRetry={() => retryTask(task.id)}
+            onOpen={handleOpen}
+          />
         ))}
       </div>
     </div>

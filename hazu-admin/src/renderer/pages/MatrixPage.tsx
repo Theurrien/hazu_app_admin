@@ -23,7 +23,7 @@ function MatrixPage() {
     allRoomTypes,
   } = useMatrixData();
 
-  const { addTask } = useTaskQueue();
+  const { addRoleUpdateTask } = useTaskQueue();
 
   // Local state for optimistic updates
   const [assignments, setAssignments] = useState<Map<string, string>>(new Map());
@@ -71,7 +71,7 @@ function MatrixPage() {
       }
 
       // Add to task queue with revert callback
-      addTask({
+      addRoleUpdateTask({
         personName,
         roomName,
         personId,
@@ -96,7 +96,7 @@ function MatrixPage() {
         },
       });
     },
-    [addTask]
+    [addRoleUpdateTask]
   );
 
   // Handlers for delete/rename from matrix headers

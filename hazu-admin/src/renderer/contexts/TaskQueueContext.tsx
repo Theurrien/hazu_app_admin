@@ -24,28 +24,55 @@ export interface RoleUpdateTask extends BaseTask {
 export interface CreateRoomTask extends BaseTask {
   type: 'createRoom';
   roomName: string;
-  roomId: string;
+  roomId?: string; // Set after creation
+  templateId: string;
+  targetId: string;
+  onSuccess?: (roomId: string) => void;
+  onError?: () => void;
 }
 
 export interface CreatePersonTask extends BaseTask {
   type: 'createPerson';
   personName: string;
-  personId: string;
+  personId?: string; // Set after creation
+  params: {
+    sourceId: string;
+    targetId: string;
+    firstName: string;
+    lastName: string;
+    userEmail: string;
+    role: string;
+    roomIds: string[];
+    invitationMail: boolean;
+  };
+  onSuccess?: (personId: string) => void;
+  onError?: () => void;
 }
 
 export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask;
 
-// Notification input types (for addNotification)
+// Input types for adding tasks to queue
+type AddRoleUpdateInput = Omit<RoleUpdateTask, 'id' | 'status' | 'type'>;
+type AddCreateRoomInput = Omit<CreateRoomTask, 'id' | 'status' | 'type' | 'roomId'>;
+type AddCreatePersonInput = Omit<CreatePersonTask, 'id' | 'status' | 'type' | 'personId'>;
+
+// Notification types (for already-completed operations like modal creates)
 type CreateRoomNotification = { type: 'createRoom'; roomName: string; roomId: string };
 type CreatePersonNotification = { type: 'createPerson'; personName: string; personId: string };
 type NotificationInput = CreateRoomNotification | CreatePersonNotification;
 
 interface TaskQueueContextType {
   tasks: Task[];
-  addTask: (task: Omit<RoleUpdateTask, 'id' | 'status' | 'type'>) => string;
+  // Queue a task for processing
+  addRoleUpdateTask: (task: AddRoleUpdateInput) => string;
+  addCreateRoomTask: (task: AddCreateRoomInput) => string;
+  addCreatePersonTask: (task: AddCreatePersonInput) => string;
+  // Add already-completed notification (for modals that call API directly)
   addNotification: (notification: NotificationInput) => string;
   dismissTask: (id: string) => void;
+  dismissAllCompleted: () => void;
   dismissAllErrors: () => void;
+  retryTask: (id: string) => void;
 }
 
 const TaskQueueContext = createContext<TaskQueueContextType | null>(null);
@@ -63,11 +90,11 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
   const processingRef = useRef(false);
   const taskIdCounter = useRef(0);
 
-  // Process queue - only for roleUpdate tasks
+  // Process next queued task (sequential for now, designed for parallel later)
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
 
-    const nextTask = tasks.find((t) => t.type === 'roleUpdate' && t.status === 'queued') as RoleUpdateTask | undefined;
+    const nextTask = tasks.find((t) => t.status === 'queued');
     if (!nextTask) return;
 
     processingRef.current = true;
@@ -78,39 +105,73 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
     );
 
     try {
-      const result = await window.electronAPI.updateUserRole(
-        nextTask.personId,
-        nextTask.roomId,
-        nextTask.oldRole,
-        nextTask.newRole
-      );
+      if (nextTask.type === 'roleUpdate') {
+        const task = nextTask as RoleUpdateTask;
+        const result = await window.electronAPI.updateUserRole(
+          task.personId,
+          task.roomId,
+          task.oldRole,
+          task.newRole
+        );
 
-      if (result.success) {
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === nextTask.id
-              ? { ...t, status: 'success' as const }
-              : t
-          )
+        if (result.success) {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+          );
+        } else {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
+          );
+          task.onError?.();
+        }
+      } else if (nextTask.type === 'createRoom') {
+        const task = nextTask as CreateRoomTask;
+        const result = await window.electronAPI.createRoom(
+          task.templateId,
+          task.targetId,
+          task.roomName
         );
-      } else {
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === nextTask.id ? { ...t, status: 'error' as const, error: result.error } : t
-          )
-        );
-        nextTask.onError?.();
+
+        if (result.success && result.room) {
+          const newRoomId = result.room.id;
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === task.id ? { ...t, status: 'success' as const, roomId: newRoomId } : t
+            )
+          );
+          task.onSuccess?.(newRoomId);
+        } else {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
+          );
+          task.onError?.();
+        }
+      } else if (nextTask.type === 'createPerson') {
+        const task = nextTask as CreatePersonTask;
+        const result = await window.electronAPI.createPerson(task.params);
+
+        if (result.success && result.person) {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === task.id ? { ...t, status: 'success' as const, personId: result.person.id } : t
+            )
+          );
+          task.onSuccess?.(result.person.id);
+        } else {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
+          );
+          task.onError?.();
+        }
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setTasks((prev) =>
-        prev.map((t) =>
-          t.id === nextTask.id
-            ? { ...t, status: 'error' as const, error: errorMessage }
-            : t
-        )
+        prev.map((t) => (t.id === nextTask.id ? { ...t, status: 'error' as const, error: errorMessage } : t))
       );
-      nextTask.onError?.();
+      if (nextTask.type === 'roleUpdate') (nextTask as RoleUpdateTask).onError?.();
+      if (nextTask.type === 'createRoom') (nextTask as CreateRoomTask).onError?.();
+      if (nextTask.type === 'createPerson') (nextTask as CreatePersonTask).onError?.();
     }
 
     processingRef.current = false;
@@ -121,15 +182,31 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
     processQueue();
   }, [tasks, processQueue]);
 
-  // Add role update task (queued)
-  const addTask = useCallback((taskData: Omit<RoleUpdateTask, 'id' | 'status' | 'type'>) => {
-    const id = `task-${Date.now()}-${++taskIdCounter.current}`;
+  // Add role update task
+  const addRoleUpdateTask = useCallback((taskData: AddRoleUpdateInput) => {
+    const id = `role-${Date.now()}-${++taskIdCounter.current}`;
     const task: RoleUpdateTask = { ...taskData, id, type: 'roleUpdate', status: 'queued' };
     setTasks((prev) => [...prev, task]);
     return id;
   }, []);
 
-  // Add notification (immediate success)
+  // Add create room task
+  const addCreateRoomTask = useCallback((taskData: AddCreateRoomInput) => {
+    const id = `room-${Date.now()}-${++taskIdCounter.current}`;
+    const task: CreateRoomTask = { ...taskData, id, type: 'createRoom', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
+  // Add create person task
+  const addCreatePersonTask = useCallback((taskData: AddCreatePersonInput) => {
+    const id = `person-${Date.now()}-${++taskIdCounter.current}`;
+    const task: CreatePersonTask = { ...taskData, id, type: 'createPerson', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
+  // Add notification for already-completed operations (modals call API directly)
   const addNotification = useCallback((notification: NotificationInput) => {
     const id = `notif-${Date.now()}-${++taskIdCounter.current}`;
 
@@ -140,6 +217,8 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         status: 'success',
         roomName: notification.roomName,
         roomId: notification.roomId,
+        templateId: '', // Not needed for notifications
+        targetId: '',   // Not needed for notifications
       };
       setTasks((prev) => [...prev, task]);
     } else {
@@ -149,6 +228,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         status: 'success',
         personName: notification.personName,
         personId: notification.personId,
+        params: {} as any, // Not needed for notifications
       };
       setTasks((prev) => [...prev, task]);
     }
@@ -160,12 +240,35 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
     setTasks((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const dismissAllCompleted = useCallback(() => {
+    setTasks((prev) => prev.filter((t) => t.status !== 'success'));
+  }, []);
+
   const dismissAllErrors = useCallback(() => {
     setTasks((prev) => prev.filter((t) => t.status !== 'error'));
   }, []);
 
+  // Retry a failed task
+  const retryTask = useCallback((id: string) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id && t.status === 'error' ? { ...t, status: 'queued' as const, error: undefined } : t))
+    );
+  }, []);
+
   return (
-    <TaskQueueContext.Provider value={{ tasks, addTask, addNotification, dismissTask, dismissAllErrors }}>
+    <TaskQueueContext.Provider
+      value={{
+        tasks,
+        addRoleUpdateTask,
+        addCreateRoomTask,
+        addCreatePersonTask,
+        addNotification,
+        dismissTask,
+        dismissAllCompleted,
+        dismissAllErrors,
+        retryTask,
+      }}
+    >
       {children}
     </TaskQueueContext.Provider>
   );
