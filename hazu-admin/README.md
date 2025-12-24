@@ -13,13 +13,11 @@ A cross-platform desktop application for managing the Hazu educational platform.
 - **Cross-Platform**: Single codebase for macOS and Windows
 - **Room Management**: View and manage classes, companies, cantons, and CIE locations
 - **Person Management**: Manage students, teachers, mentors, advisors, and guardians
-- **Assignment Tracking**: Track person-to-room assignments
-- **Change Logging**: Local changes tracked for future n8n integration
-- **Sync from Hazu**: Pull latest data from the Hazu platform
-
-## Screenshots
-
-*Coming soon*
+- **Assignment Matrix**: View all person-room assignments in a matrix view
+- **Bulk Import**: Import rooms and persons from Excel files with column mapping
+- **Task Queue**: Background processing for bulk operations with progress tracking
+- **Hazu Design System**: UI aligned with the Hazu platform using Font Awesome icons
+- **Sync from Hazu**: Pull latest data from the Hazu platform API
 
 ## Installation
 
@@ -32,7 +30,7 @@ A cross-platform desktop application for managing the Hazu educational platform.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/hazu-admin.git
+git clone https://github.com/Theurrien/hazu_app_admin.git
 cd hazu-admin
 
 # Install dependencies
@@ -74,15 +72,23 @@ On first launch, configure the app in **Settings**:
 ### Syncing Data
 
 1. Configure your API settings in the Settings page
-2. Go to Dashboard
-3. Click "Sync Now" to pull data from Hazu
-4. View synced rooms and persons in their respective pages
+2. Go to Dashboard and click "Sync Now"
+3. View synced rooms and persons in their respective pages
 
-### Managing Assignments
+### Bulk Import
 
-- View room assignments from the Rooms page
-- View person assignments from the Persons page
-- Create/remove assignments (changes tracked locally)
+1. Go to **Bulk Import** page
+2. Select workflow: **Create Rooms** or **Create Persons**
+3. Upload an Excel file
+4. Map columns to fields (Room Name, First Name, Last Name, Email, etc.)
+5. Configure options (room category, person role, template)
+6. Review and execute - tasks run in background via Task Queue
+
+### Assignment Matrix
+
+- View all assignments in a grid format
+- Filter by room type or person type
+- Quick overview of who is assigned where
 
 ## Tech Stack
 
@@ -91,6 +97,7 @@ On first launch, configure the app in **Settings**:
 | Runtime | Electron 39 |
 | Frontend | React 19 + TypeScript |
 | Styling | Tailwind CSS 4 |
+| Icons | Font Awesome 6 |
 | State | Zustand |
 | Database | better-sqlite3 |
 | Bundler | Vite 7 |
@@ -101,16 +108,19 @@ On first launch, configure the app in **Settings**:
 ```
 hazu-admin/
 ├── src/
-│   ├── main/           # Electron main process
-│   │   ├── database/   # SQLite setup & schema
-│   │   ├── ipc/        # IPC handlers
-│   │   └── services/   # Hazu API & sync
-│   ├── renderer/       # React frontend
-│   │   ├── pages/      # App pages
-│   │   └── components/ # UI components
-│   └── shared/         # Shared types & constants
-├── dist/               # Build output
-└── release/            # Packaged apps
+│   ├── main/              # Electron main process
+│   │   ├── database/      # SQLite setup & schema
+│   │   ├── ipc/           # IPC handlers
+│   │   └── services/      # Hazu API & sync
+│   ├── renderer/          # React frontend
+│   │   ├── pages/         # App pages
+│   │   ├── components/    # UI components
+│   │   └── contexts/      # React contexts (TaskQueue)
+│   └── shared/            # Shared types & constants
+├── docs/
+│   └── plans/             # Design documents
+├── dist/                  # Build output
+└── release/               # Packaged apps
 ```
 
 ## Entity Types
@@ -137,25 +147,18 @@ Data is stored in SQLite at:
 
 ## Roadmap
 
-- [x] Phase 1: Foundation (Electron + React + SQLite + API)
-- [ ] Phase 2: Full UI (detail pages, search, filtering)
-- [ ] Phase 3: Assignment management with change tracking
-- [ ] Phase 4: n8n webhook integration
-- [ ] Phase 5: Excel import/export
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- [x] Phase 1: Foundation (Electron + React + SQLite + API sync)
+- [x] Phase 2: Room & Person pages with assignments view
+- [x] Phase 3: Assignment Matrix view
+- [x] Phase 4: Bulk Import (Rooms & Persons from Excel)
+- [ ] Phase 5: Bulk Assignment import
+- [ ] Phase 6: n8n webhook integration for change sync
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License
 
 ## Acknowledgments
 
 - Built for the [Hazu](https://hazu.ch) educational platform
-- Hazu API starter kit for API integration patterns
+- UI design aligned with Hazu platform design language
