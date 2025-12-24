@@ -1,22 +1,65 @@
-import React from 'react';
+import React, { useState } from 'react';
+import ColumnMappingDropdown, { ColumnMapping } from './ColumnMappingDropdown';
 
 interface DataPreviewTableProps {
   headers: string[];
   rows: Record<string, string>[];
-  mappedColumn: string | null;
-  onColumnClick: (header: string) => void;
+  columnMappings: Record<string, ColumnMapping>;
+  onColumnMappingChange: (header: string, mapping: ColumnMapping | null) => void;
+  validationWarnings?: Record<string, number[]>;
+  showTemplateGroup?: boolean;
   maxRows?: number;
 }
+
+const mappingLabels: Record<ColumnMapping, string> = {
+  firstName: 'First Name',
+  lastName: 'Last Name',
+  email: 'Email',
+  grouping1: 'Grouping 1',
+  grouping2: 'Grouping 2',
+  templateGroup: 'Template Group',
+};
 
 export function DataPreviewTable({
   headers,
   rows,
-  mappedColumn,
-  onColumnClick,
+  columnMappings,
+  onColumnMappingChange,
+  validationWarnings = {},
+  showTemplateGroup = false,
   maxRows = 100,
 }: DataPreviewTableProps) {
+  const [openDropdownHeader, setOpenDropdownHeader] = useState<string | null>(null);
+
   const displayRows = rows.slice(0, maxRows);
   const hasMore = rows.length > maxRows;
+
+  // Get list of currently used mappings (excluding the one for openDropdownHeader)
+  const getUsedMappings = (excludeHeader?: string): ColumnMapping[] => {
+    return Object.entries(columnMappings)
+      .filter(([header]) => header !== excludeHeader)
+      .map(([_, mapping]) => mapping);
+  };
+
+  const handleColumnClick = (header: string) => {
+    setOpenDropdownHeader(openDropdownHeader === header ? null : header);
+  };
+
+  const handleMappingSelect = (header: string, mapping: ColumnMapping | null) => {
+    onColumnMappingChange(header, mapping);
+    setOpenDropdownHeader(null);
+  };
+
+  const formatWarningTooltip = (rowNumbers: number[]): string => {
+    const limit = 5;
+    const displayRows = rowNumbers.slice(0, limit);
+    const remaining = rowNumbers.length - limit;
+
+    const rowsText = displayRows.join(', ');
+    const moreText = remaining > 0 ? ` +${remaining} more` : '';
+
+    return `Invalid in rows: ${rowsText}${moreText}`;
+  };
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -27,7 +70,7 @@ export function DataPreviewTable({
             ? `Showing ${maxRows} of ${rows.length} rows`
             : `${rows.length} rows`}
         </span>
-        <span>Click a column header to select the Name column</span>
+        <span>Click column headers to assign meaning</span>
       </div>
 
       {/* Table container with scroll */}
@@ -35,43 +78,76 @@ export function DataPreviewTable({
         <table className="w-full text-sm">
           <thead className="bg-gray-100 sticky top-0">
             <tr>
-              {headers.map((header) => (
-                <th
-                  key={header}
-                  onClick={() => onColumnClick(header)}
-                  className={`
-                    px-3 py-2 text-left font-medium cursor-pointer transition-colors
-                    ${mappedColumn === header
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'text-gray-700 hover:bg-gray-200'}
-                  `}
-                >
-                  <div className="flex items-center gap-2">
-                    {mappedColumn === header && (
-                      <span className="inline-flex items-center justify-center w-5 h-5 text-xs bg-blue-600 text-white rounded-full">
-                        1
-                      </span>
+              {headers.map((header) => {
+                const mapping = columnMappings[header];
+                const isMapped = !!mapping;
+                const warnings = validationWarnings[header];
+                const hasWarnings = warnings && warnings.length > 0;
+
+                return (
+                  <th
+                    key={header}
+                    onClick={() => handleColumnClick(header)}
+                    className={`
+                      px-3 py-2 text-left font-medium cursor-pointer transition-colors relative
+                      ${isMapped
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'text-gray-700 hover:bg-gray-200'}
+                    `}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-col items-start min-w-0">
+                        <span className="truncate max-w-32">{header}</span>
+                        {isMapped && (
+                          <span className="text-xs font-normal text-blue-600">
+                            [{mappingLabels[mapping]}]
+                          </span>
+                        )}
+                      </div>
+                      {hasWarnings && (
+                        <span
+                          className="flex-shrink-0 text-yellow-600 cursor-help"
+                          title={formatWarningTooltip(warnings)}
+                        >
+                          ⚠️
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Dropdown */}
+                    {openDropdownHeader === header && (
+                      <ColumnMappingDropdown
+                        isOpen={true}
+                        onClose={() => setOpenDropdownHeader(null)}
+                        onSelect={(mapping) => handleMappingSelect(header, mapping)}
+                        currentMapping={mapping || null}
+                        usedMappings={getUsedMappings(header)}
+                        showTemplateGroup={showTemplateGroup}
+                      />
                     )}
-                    <span className="truncate max-w-32">{header}</span>
-                  </div>
-                </th>
-              ))}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {displayRows.map((row, rowIndex) => (
               <tr key={rowIndex} className="hover:bg-gray-50">
-                {headers.map((header) => (
-                  <td
-                    key={header}
-                    className={`
-                      px-3 py-2 truncate max-w-48
-                      ${mappedColumn === header ? 'bg-blue-50' : ''}
-                    `}
-                  >
-                    {row[header]}
-                  </td>
-                ))}
+                {headers.map((header) => {
+                  const isMapped = !!columnMappings[header];
+
+                  return (
+                    <td
+                      key={header}
+                      className={`
+                        px-3 py-2 truncate max-w-48
+                        ${isMapped ? 'bg-blue-50' : ''}
+                      `}
+                    >
+                      {row[header]}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
