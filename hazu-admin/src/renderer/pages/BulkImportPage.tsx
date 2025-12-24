@@ -577,8 +577,9 @@ function BulkImportPage() {
                 <DataPreviewTable
                   headers={fileData.headers}
                   rows={fileData.rows}
-                  columnMappings={mappedColumn ? { [mappedColumn]: 'firstName' } : {}}
+                  columnMappings={mappedColumn ? { [mappedColumn]: 'roomName' } : {}}
                   onColumnMappingChange={handleColumnClick as any}
+                  mode="room"
                 />
               ) : activeWorkflow === 'person' ? (
                 <DataPreviewTable
@@ -588,6 +589,7 @@ function BulkImportPage() {
                   onColumnMappingChange={handleColumnMappingChange}
                   validationWarnings={personValidation.warnings}
                   showTemplateGroup={useTemplateGrouping}
+                  mode="person"
                 />
               ) : null}
               <button

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import ColumnMappingDropdown, { ColumnMapping } from './ColumnMappingDropdown';
+import React, { useState, useRef } from 'react';
+import ColumnMappingDropdown, { ColumnMapping, MappingMode } from './ColumnMappingDropdown';
 
 interface DataPreviewTableProps {
   headers: string[];
@@ -9,9 +9,11 @@ interface DataPreviewTableProps {
   validationWarnings?: Record<string, number[]>;
   showTemplateGroup?: boolean;
   maxRows?: number;
+  mode?: MappingMode;
 }
 
 const mappingLabels: Record<ColumnMapping, string> = {
+  roomName: 'Room Name',
   firstName: 'First Name',
   lastName: 'Last Name',
   email: 'Email',
@@ -28,8 +30,10 @@ export function DataPreviewTable({
   validationWarnings = {},
   showTemplateGroup = false,
   maxRows = 100,
+  mode = 'person',
 }: DataPreviewTableProps) {
   const [openDropdownHeader, setOpenDropdownHeader] = useState<string | null>(null);
+  const headerRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
 
   const displayRows = rows.slice(0, maxRows);
   const hasMore = rows.length > maxRows;
@@ -87,6 +91,7 @@ export function DataPreviewTable({
                 return (
                   <th
                     key={header}
+                    ref={(el) => { headerRefs.current[header] = el; }}
                     onClick={() => handleColumnClick(header)}
                     className={`
                       px-3 py-2 text-left font-medium cursor-pointer transition-colors relative
@@ -123,6 +128,8 @@ export function DataPreviewTable({
                         currentMapping={mapping || null}
                         usedMappings={getUsedMappings(header)}
                         showTemplateGroup={showTemplateGroup}
+                        mode={mode}
+                        anchorRef={{ current: headerRefs.current[header] }}
                       />
                     )}
                   </th>
