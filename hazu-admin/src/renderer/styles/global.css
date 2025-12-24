@@ -1,5 +1,42 @@
 @import "tailwindcss";
 
+/* ===========================================
+   HAZU DESIGN SYSTEM
+   Aligned with Hazu Platform design language
+   =========================================== */
+
+:root {
+  /* Hazu Category Colors - Rooms */
+  --hazu-canton: #6B9B7A;
+  --hazu-school: #E57B4D;
+  --hazu-company: #7B6B9B;
+  --hazu-cie: #5B7BA5;
+
+  /* Hazu Category Colors - People */
+  --hazu-student: #5B9B8C;
+  --hazu-teacher: #5B8BA5;
+  --hazu-mentor: #7B8B6B;
+  --hazu-advisor: #8B7B6B;
+
+  /* Hazu UI Colors */
+  --hazu-primary: #5B7BA5;
+  --hazu-primary-hover: #4A6A94;
+  --hazu-text: #4A4A4A;
+  --hazu-text-light: #6B6B6B;
+  --hazu-text-muted: #9B9B9B;
+  --hazu-border: #E5E5E5;
+  --hazu-bg: #FFFFFF;
+  --hazu-bg-subtle: #F8F8F8;
+  --hazu-bg-hover: #F0F0F0;
+
+  /* Hazu Sidebar */
+  --hazu-sidebar-bg: #2C3E50;
+  --hazu-sidebar-hover: #34495E;
+  --hazu-sidebar-active: #3D566E;
+  --hazu-sidebar-text: #ECF0F1;
+  --hazu-sidebar-text-muted: #95A5A6;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

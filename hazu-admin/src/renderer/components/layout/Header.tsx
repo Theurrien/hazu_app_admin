@@ -1,6 +1,6 @@
 import React from 'react';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'assignments' | 'sync' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'sync' | 'settings';
 
 interface HeaderProps {
   currentPage: Page;
@@ -8,25 +8,48 @@ interface HeaderProps {
 
 const pageTitles: Record<Page, string> = {
   dashboard: 'Dashboard',
-  rooms: 'Rooms Management',
-  persons: 'Persons Management',
-  assignments: 'Assignments',
+  rooms: 'Rooms',
+  persons: 'Persons',
+  matrix: 'Assignment Matrix',
+  import: 'Bulk Import',
   sync: 'Synchronization',
   settings: 'Settings',
 };
 
 function Header({ currentPage }: HeaderProps) {
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <header
+      className="px-6 pb-4 pt-8 flex items-center justify-between"
+      style={{
+        WebkitAppRegion: 'drag',
+        backgroundColor: 'var(--hazu-bg)',
+        borderBottom: '1px solid var(--hazu-border)',
+      } as React.CSSProperties}
+    >
       <div>
-        <h2 className="text-2xl font-semibold text-gray-800">
-          {pageTitles[currentPage]}
+        <h2
+          className="text-2xl font-semibold"
+          style={{ color: 'var(--hazu-text)' }}
+        >
+          {pageTitles[currentPage] || currentPage}
         </h2>
       </div>
-      <div className="flex items-center gap-4">
+      <div
+        className="flex items-center gap-4"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         {/* Sync status indicator */}
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+        <div
+          className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-full"
+          style={{
+            backgroundColor: 'var(--hazu-bg-subtle)',
+            color: 'var(--hazu-text-light)',
+          }}
+        >
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: '#6B9B7A' }}
+          ></span>
           <span>Connected</span>
         </div>
       </div>
