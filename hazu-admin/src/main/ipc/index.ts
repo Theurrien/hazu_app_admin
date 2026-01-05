@@ -637,13 +637,13 @@ export function registerIpcHandlers(): void {
 
         // Update local DB on success
         if (newRole && newRole !== '_') {
-          query(
+          run(
             `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
              VALUES (?, ?, ?, ?)`,
             [personId, roomId, newRole, Date.now()]
           );
         } else {
-          query(
+          run(
             `DELETE FROM person_room_assignments WHERE person_id = ? AND room_id = ?`,
             [personId, roomId]
           );
