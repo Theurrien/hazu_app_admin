@@ -14,6 +14,7 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
+    show: false, // Don't show until ready
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -22,6 +23,17 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 15, y: 15 },
   });
+
+  // Show window when ready to avoid flash
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+
+  // Open DevTools in development or when debugging
+  if (isDev || process.env.DEBUG) {
+    mainWindow.webContents.openDevTools();
+  }
 
   // Load the app
   if (isDev) {
