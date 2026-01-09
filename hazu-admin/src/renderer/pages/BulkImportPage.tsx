@@ -9,6 +9,7 @@ import { PersonRoleSelector } from '../components/bulk-import/PersonRoleSelector
 import { TemplateSelector } from '../components/bulk-import/TemplateSelector';
 import { RoomAssignmentPanel, RoomAssignment } from '../components/bulk-import/RoomAssignmentPanel';
 import type { ColumnMapping } from '../components/bulk-import/ColumnMappingDropdown';
+import { VerifyAssignmentsTab } from '../components/bulk-import/VerifyAssignmentsTab';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 interface Template {
@@ -28,7 +29,7 @@ interface FileData {
   fileName: string;
 }
 
-type Workflow = 'room' | 'person' | 'assignment';
+type Workflow = 'room' | 'person' | 'assignment' | 'verify';
 
 // Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -552,6 +553,16 @@ function BulkImportPage() {
           >
             Assignment
           </button>
+          <button
+            onClick={() => setActiveWorkflow('verify')}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              activeWorkflow === 'verify'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Verify
+          </button>
         </div>
       </div>
 
@@ -694,6 +705,11 @@ function BulkImportPage() {
           <div className="text-center py-12 text-gray-500">
             Assignment workflow coming soon...
           </div>
+        )}
+
+        {/* Verify workflow */}
+        {activeWorkflow === 'verify' && (
+          <VerifyAssignmentsTab fileData={fileData} />
         )}
       </div>
 
