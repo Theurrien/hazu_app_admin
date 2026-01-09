@@ -20,6 +20,8 @@ const mappingLabels: Record<ColumnMapping, string> = {
   grouping1: 'Grouping 1',
   grouping2: 'Grouping 2',
   templateGroup: 'Template Group',
+  verifyEmail: 'Person Email',
+  verifyRoomName: 'Room Name',
 };
 
 export function DataPreviewTable({
