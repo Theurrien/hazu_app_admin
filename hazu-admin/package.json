@@ -6,6 +6,7 @@
   "author": "Hazu",
   "license": "MIT",
   "scripts": {
+    "postinstall": "electron-rebuild",
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "tsc -p tsconfig.main.json && electron .",
@@ -13,6 +14,7 @@
     "build:vite": "vite build",
     "build:electron": "tsc -p tsconfig.main.json",
     "start": "electron .",
+    "rebuild": "electron-rebuild",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
