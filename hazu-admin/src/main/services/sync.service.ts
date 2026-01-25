@@ -598,6 +598,61 @@ async function syncAdminConfig(): Promise<void> {
   }
 }
 
+async function syncUserTypes(): Promise<void> {
+  const db = getDb();
+
+  const adminIdRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_id'").get() as { value: string } | undefined;
+  const adminId = adminIdRow?.value;
+
+  if (!adminId) {
+    console.log('[SYNC] No admin_id found, skipping user types');
+    return;
+  }
+
+  syncProgress.message = "Fetching user types...";
+
+  const adminChildren = await sendApiRequestList(adminId);
+  if (!adminChildren) {
+    console.log('[SYNC] Failed to fetch admin children for user types');
+    return;
+  }
+
+  const userTypesContainer = adminChildren.find((child: HazuEntity) =>
+    child.snapshot.tags?.includes('hz-config-usertypes')
+  );
+
+  if (!userTypesContainer) {
+    console.log('[SYNC] No user types container found (hz-config-usertypes)');
+    return;
+  }
+
+  console.log('[SYNC] Found user types container:', userTypesContainer.snapshot.key);
+
+  const userTypes = await sendApiRequestList(userTypesContainer.snapshot.key);
+  if (!userTypes) {
+    console.log('[SYNC] Failed to fetch user types');
+    return;
+  }
+
+  console.log(`[SYNC] Found ${userTypes.length} user types`);
+
+  for (const type of userTypes) {
+    const title = stripHtml(type.snapshot.title);
+    const name = title.toLowerCase();
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO user_types (id, name, title, synced_at)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    stmt.run(type.snapshot.key, name, title, Date.now());
+    syncProgress.userTypesProcessed++;
+  }
+
+  console.log(`[SYNC] Synced ${syncProgress.userTypesProcessed} user types`);
+  syncProgress.message = `Synced ${syncProgress.userTypesProcessed} user types...`;
+}
+
 export async function runFullSync(): Promise<SyncProgress> {
   if (!isConfigured()) {
     return {
