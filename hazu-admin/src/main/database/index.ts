@@ -62,6 +62,55 @@ function runMigrations(): void {
     console.error('Migration error (class_id):', error);
   }
 
+  // Migration: Add user_types table
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_types'").all();
+    if (tables.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_types (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            synced_at INTEGER NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_usertypes_name ON user_types(name);
+      `);
+      console.log('Migration: Added user_types table');
+    }
+  } catch (error) {
+    console.error('Migration error (user_types):', error);
+  }
+
+  // Migration: Add distribution_groups table
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='distribution_groups'").all();
+    if (tables.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS distribution_groups (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            room_class_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            room_id TEXT,
+            tags TEXT DEFAULT '[]',
+            raw_data TEXT,
+            synced_at INTEGER NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_distgroups_room ON distribution_groups(room_id);
+        CREATE INDEX IF NOT EXISTS idx_distgroups_role ON distribution_groups(role);
+        CREATE INDEX IF NOT EXISTS idx_distgroups_class_id ON distribution_groups(room_class_id);
+      `);
+      console.log('Migration: Added distribution_groups table');
+    }
+  } catch (error) {
+    console.error('Migration error (distribution_groups):', error);
+  }
+
   // Migration: Recreate person_room_assignments table without CHECK constraint
   // This allows flexible role values (student, companymentor, schoolteacher, etc.)
   try {
@@ -184,6 +233,31 @@ function runInlineSchema(): void {
         category TEXT NOT NULL,
         semantic_value TEXT NOT NULL,
         description TEXT
+    );
+
+    -- User types (dynamic roles)
+    CREATE TABLE IF NOT EXISTS user_types (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    -- Distribution groups (room + role assignment targets)
+    CREATE TABLE IF NOT EXISTS distribution_groups (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        room_class_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        room_id TEXT,
+        tags TEXT DEFAULT '[]',
+        raw_data TEXT,
+        synced_at INTEGER NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL
     );
   `);
 }
