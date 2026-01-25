@@ -80,6 +80,10 @@ function clearOldData(): void {
   db.exec("DELETE FROM persons");
   db.exec("DELETE FROM rooms");
 
+  // Clear new tables
+  db.exec("DELETE FROM distribution_groups");
+  db.exec("DELETE FROM user_types");
+
   console.log('[SYNC] Old data cleared');
 }
 
