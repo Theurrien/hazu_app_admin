@@ -128,6 +128,39 @@ INSERT OR IGNORE INTO tag_mappings (tag, category, semantic_value, description) 
     ('guardian', 'person_role', 'guardian', 'Parent/Guardian role in a room');
 
 -- ============================================================================
+-- USER TYPES (Dynamic Roles)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS user_types (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    synced_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_usertypes_name ON user_types(name);
+
+-- ============================================================================
+-- DISTRIBUTION GROUPS (Room + Role Assignment Targets)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS distribution_groups (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    room_class_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    room_id TEXT,
+    tags TEXT DEFAULT '[]',
+    raw_data TEXT,
+    synced_at INTEGER NOT NULL,
+    FOREIGN KEY (room_id) REFERENCES rooms(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_distgroups_room ON distribution_groups(room_id);
+CREATE INDEX IF NOT EXISTS idx_distgroups_role ON distribution_groups(role);
+CREATE INDEX IF NOT EXISTS idx_distgroups_class_id ON distribution_groups(room_class_id);
+
+-- ============================================================================
 -- SETTINGS
 -- ============================================================================
 
