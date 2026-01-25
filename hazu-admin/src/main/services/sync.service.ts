@@ -394,6 +394,34 @@ function parseAssignmentTag(tag: string): { classId: string; role: string } | nu
   return { classId, role };
 }
 
+/**
+ * Parse hz-share-{role}-{classId} tag
+ * @param tags - Array of tags from the Hazu entity
+ * @param validRoles - Array of valid role names from user_types table
+ * @returns Parsed role and classId, or null if no valid tag found
+ */
+function parseShareTag(tags: string[], validRoles: string[]): { role: string; classId: string } | null {
+  const prefix = "hz-share-";
+
+  for (const tag of tags) {
+    if (!tag.startsWith(prefix)) continue;
+
+    const remainder = tag.substring(prefix.length);  // "student-ZXWELTkolFLPwijE5hU9"
+    const firstHyphen = remainder.indexOf("-");
+    if (firstHyphen === -1) continue;
+
+    const role = remainder.substring(0, firstHyphen);
+    const classId = remainder.substring(firstHyphen + 1);
+
+    // Validate role against user_types from DB
+    if (!validRoles.includes(role)) continue;
+
+    return { role, classId };
+  }
+
+  return null;
+}
+
 function syncPersonRoomAssignments(personId: string, tags: string[]): void {
   const db = getDb();
 
