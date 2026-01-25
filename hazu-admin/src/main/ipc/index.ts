@@ -614,6 +614,135 @@ export function registerIpcHandlers(): void {
   );
 
   // ============================================================================
+  // EXECUTE ASSIGNMENTS
+  // ============================================================================
+
+  ipcMain.handle(
+    IPC_CHANNELS.ASSIGNMENTS_EXECUTE,
+    async (
+      _event,
+      payload: {
+        assignments: Array<{
+          personId: string;
+          personEmail: string;
+          firstName: string;
+          lastName: string;
+          roomId: string;
+          role: string;
+        }>;
+      }
+    ) => {
+      try {
+        // Get config from settings
+        const rootHazuIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
+        const adminIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'admin_id'");
+        const rootHazuId = rootHazuIdRow?.value;
+        const adminId = adminIdRow?.value;
+
+        if (!rootHazuId || !adminId) {
+          return { success: false, error: 'Configuration missing. Please run sync first.' };
+        }
+
+        // Group assignments by person (aggregate classIds)
+        const byPerson = new Map<
+          string,
+          {
+            personId: string;
+            personEmail: string;
+            firstName: string;
+            lastName: string;
+            classIds: Array<{ classId: string; userType: string }>;
+          }
+        >();
+
+        for (const assignment of payload.assignments) {
+          // Look up distribution group
+          const distGroup = get<{ id: string }>(
+            'SELECT id FROM distribution_groups WHERE room_id = ? AND role = ?',
+            [assignment.roomId, assignment.role]
+          );
+
+          if (!distGroup) {
+            console.warn(
+              `[ASSIGNMENTS_EXECUTE] No distribution group for room ${assignment.roomId} and role ${assignment.role}`
+            );
+            continue;
+          }
+
+          const existing = byPerson.get(assignment.personId);
+          if (existing) {
+            existing.classIds.push({
+              classId: distGroup.id,
+              userType: assignment.role,
+            });
+          } else {
+            byPerson.set(assignment.personId, {
+              personId: assignment.personId,
+              personEmail: assignment.personEmail,
+              firstName: assignment.firstName,
+              lastName: assignment.lastName,
+              classIds: [{ classId: distGroup.id, userType: assignment.role }],
+            });
+          }
+        }
+
+        // Build API payload
+        const users = Array.from(byPerson.values()).map((person) => ({
+          sourceId: rootHazuId,
+          adminId: adminId,
+          targetId: person.personId,
+          userEmail: person.personEmail,
+          firstName: person.firstName,
+          lastName: person.lastName,
+          classIds: person.classIds,
+        }));
+
+        if (users.length === 0) {
+          return { success: false, error: 'No valid assignments to execute.' };
+        }
+
+        console.log('[ASSIGNMENTS_EXECUTE] Sending', users.length, 'users to API');
+
+        // Call API
+        const { getApiEndpoint, getApiHeaders } = await import('../services/hazu-api/config');
+        const response = await axios.post(
+          `${getApiEndpoint()}/api-v2-admin/add-users`,
+          { users },
+          { headers: getApiHeaders(), timeout: 120000 }
+        );
+
+        console.log('[ASSIGNMENTS_EXECUTE] Response:', response.status, response.data);
+
+        // Update local DB with new assignments
+        const now = Date.now();
+        for (const assignment of payload.assignments) {
+          run(
+            `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
+             VALUES (?, ?, ?, ?)`,
+            [assignment.personId, assignment.roomId, assignment.role, now]
+          );
+        }
+
+        return {
+          success: true,
+          totalUsers: response.data.totalUsers || users.length,
+          successful: response.data.successful || users.length,
+          failed: response.data.failed || 0,
+        };
+      } catch (error) {
+        console.error('Execute assignments error:', error);
+        let message = 'Unknown error';
+        if (axios.isAxiosError(error)) {
+          message = error.response?.data?.message || error.message;
+        } else if (error instanceof Error) {
+          message = error.message;
+        }
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  // ============================================================================
   // WEBHOOKS
   // ============================================================================
 
