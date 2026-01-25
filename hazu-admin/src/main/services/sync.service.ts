@@ -653,6 +653,85 @@ async function syncUserTypes(): Promise<void> {
   syncProgress.message = `Synced ${syncProgress.userTypesProcessed} user types...`;
 }
 
+async function syncDistributionGroups(): Promise<void> {
+  const db = getDb();
+
+  const adminIdRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_id'").get() as { value: string } | undefined;
+  const adminId = adminIdRow?.value;
+
+  if (!adminId) {
+    console.log('[SYNC] No admin_id found, skipping distribution groups');
+    return;
+  }
+
+  // Get valid roles from user_types table
+  const validRolesRows = db.prepare("SELECT name FROM user_types").all() as Array<{ name: string }>;
+  const validRoles = validRolesRows.map(row => row.name);
+
+  if (validRoles.length === 0) {
+    console.log('[SYNC] No user types found, skipping distribution groups');
+    return;
+  }
+
+  syncProgress.message = "Fetching distribution groups...";
+
+  const adminChildren = await sendApiRequestList(adminId);
+  if (!adminChildren) {
+    console.log('[SYNC] Failed to fetch admin children for distribution groups');
+    return;
+  }
+
+  const sharingContainer = adminChildren.find((child: HazuEntity) =>
+    child.snapshot.tags?.includes('hz-config-sharing')
+  );
+
+  if (!sharingContainer) {
+    console.log('[SYNC] No sharing container found (hz-config-sharing)');
+    return;
+  }
+
+  console.log('[SYNC] Found sharing container:', sharingContainer.snapshot.key);
+
+  const distGroups = await sendApiRequestList(sharingContainer.snapshot.key);
+  if (!distGroups) {
+    console.log('[SYNC] Failed to fetch distribution groups');
+    return;
+  }
+
+  console.log(`[SYNC] Found ${distGroups.length} distribution groups`);
+
+  for (const group of distGroups) {
+    const tags = group.snapshot.tags || [];
+    const parsed = parseShareTag(tags, validRoles);
+    if (!parsed) continue;
+
+    // Link to room via class_id
+    const room = db.prepare("SELECT id FROM rooms WHERE class_id = ?").get(parsed.classId) as { id: string } | undefined;
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO distribution_groups
+      (id, title, room_class_id, role, room_id, tags, raw_data, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      group.snapshot.key,
+      stripHtml(group.snapshot.title),
+      parsed.classId,
+      parsed.role,
+      room?.id || null,
+      JSON.stringify(tags),
+      JSON.stringify(group.snapshot),
+      Date.now()
+    );
+
+    syncProgress.distributionGroupsProcessed++;
+  }
+
+  console.log(`[SYNC] Synced ${syncProgress.distributionGroupsProcessed} distribution groups`);
+  syncProgress.message = `Synced ${syncProgress.distributionGroupsProcessed} distribution groups...`;
+}
+
 export async function runFullSync(): Promise<SyncProgress> {
   if (!isConfigured()) {
     return {
