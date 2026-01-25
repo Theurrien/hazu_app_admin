@@ -755,15 +755,18 @@ export async function runFullSync(): Promise<SyncProgress> {
     // Step 0: Extract admin configuration (webhook URL and template ID)
     await syncAdminConfig();
 
-    // Step 1: Sync rooms (extracts class_ids from hz-config-class-* tags)
+    // Step 1: Sync user types (needed for role validation)
+    await syncUserTypes();
+
+    // Step 2: Sync rooms (extracts class_ids from hz-config-class-* tags)
     await syncRooms();
 
-    // Step 2: Sync persons from their containers
+    // Step 3: Sync persons from their containers
     // (also syncs assignments by matching person tags to room class_ids)
     await syncPersonsFromContainers();
 
-    // Note: Assignments are synced within syncPersonsFromContainers()
-    // by matching person tags against room class_ids
+    // Step 4: Sync distribution groups (needs rooms for linking)
+    await syncDistributionGroups();
 
     // Update last sync time
     const db = getDb();
@@ -772,7 +775,7 @@ export async function runFullSync(): Promise<SyncProgress> {
     );
 
     syncProgress.status = "completed";
-    syncProgress.message = `Sync completed! Rooms: ${syncProgress.roomsProcessed}, Persons: ${syncProgress.personsProcessed}, Assignments: ${syncProgress.assignmentsProcessed}`;
+    syncProgress.message = `Sync completed! Rooms: ${syncProgress.roomsProcessed}, Persons: ${syncProgress.personsProcessed}, Assignments: ${syncProgress.assignmentsProcessed}, User Types: ${syncProgress.userTypesProcessed}, Distribution Groups: ${syncProgress.distributionGroupsProcessed}`;
 
     return getSyncProgress();
   } catch (error) {
