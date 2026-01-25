@@ -30,6 +30,8 @@ const IPC_CHANNELS = {
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
   PROFILE_CATEGORIES_FETCH: 'profileCategories:fetch',
   PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
+  USER_TYPES_GET_ALL: 'userTypes:getAll',
+  DISTRIBUTION_GROUPS_GET: 'distributionGroups:get',
   WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
   WEBHOOK_DELETE_ROOM: 'webhook:deleteRoom',
   WEBHOOK_DELETE_PERSON: 'webhook:deletePerson',
@@ -125,6 +127,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Profile Templates
   fetchProfileTemplates: (role: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PROFILE_TEMPLATES_FETCH, role),
+
+  // User Types
+  getUserTypes: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.USER_TYPES_GET_ALL),
+
+  // Distribution Groups
+  getDistributionGroup: (roomId: string, role: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DISTRIBUTION_GROUPS_GET, roomId, role),
 
   // Person creation
   createPerson: (params: {
@@ -227,6 +237,8 @@ declare global {
         templates?: Array<{ id: string; title: string }>;
         error?: string;
       }>;
+      getUserTypes: () => Promise<Array<{ id: string; name: string; title: string }>>;
+      getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;
         targetId: string;

@@ -582,6 +582,38 @@ export function registerIpcHandlers(): void {
   });
 
   // ============================================================================
+  // USER TYPES
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.USER_TYPES_GET_ALL, async () => {
+    try {
+      return query('SELECT id, name, title FROM user_types ORDER BY title');
+    } catch (error) {
+      console.error('Get user types error:', error);
+      throw error;
+    }
+  });
+
+  // ============================================================================
+  // DISTRIBUTION GROUPS
+  // ============================================================================
+
+  ipcMain.handle(
+    IPC_CHANNELS.DISTRIBUTION_GROUPS_GET,
+    async (_event, roomId: string, role: string) => {
+      try {
+        return get(
+          'SELECT id FROM distribution_groups WHERE room_id = ? AND role = ?',
+          [roomId, role]
+        );
+      } catch (error) {
+        console.error('Get distribution group error:', error);
+        throw error;
+      }
+    }
+  );
+
+  // ============================================================================
   // WEBHOOKS
   // ============================================================================
 
