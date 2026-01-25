@@ -135,7 +135,9 @@ CREATE TABLE IF NOT EXISTS user_types (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
-    synced_at INTEGER NOT NULL
+    synced_at INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_usertypes_name ON user_types(name);
@@ -153,7 +155,9 @@ CREATE TABLE IF NOT EXISTS distribution_groups (
     tags TEXT DEFAULT '[]',
     raw_data TEXT,
     synced_at INTEGER NOT NULL,
-    FOREIGN KEY (room_id) REFERENCES rooms(id)
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_distgroups_room ON distribution_groups(room_id);
