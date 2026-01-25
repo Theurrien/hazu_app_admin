@@ -35,6 +35,8 @@ interface SyncProgress {
   roomsProcessed: number;
   personsProcessed: number;
   assignmentsProcessed: number;
+  userTypesProcessed: number;
+  distributionGroupsProcessed: number;
   errors: string[];
 }
 
@@ -44,6 +46,8 @@ let syncProgress: SyncProgress = {
   roomsProcessed: 0,
   personsProcessed: 0,
   assignmentsProcessed: 0,
+  userTypesProcessed: 0,
+  distributionGroupsProcessed: 0,
   errors: [],
 };
 
@@ -59,6 +63,8 @@ function resetProgress(): void {
     roomsProcessed: 0,
     personsProcessed: 0,
     assignmentsProcessed: 0,
+    userTypesProcessed: 0,
+    distributionGroupsProcessed: 0,
     errors: [],
   };
 }
@@ -568,6 +574,8 @@ export async function runFullSync(): Promise<SyncProgress> {
       roomsProcessed: 0,
       personsProcessed: 0,
       assignmentsProcessed: 0,
+      userTypesProcessed: 0,
+      distributionGroupsProcessed: 0,
       errors: ["API not configured"],
     };
   }
