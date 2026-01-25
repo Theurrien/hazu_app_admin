@@ -47,6 +47,12 @@ export const IPC_CHANNELS = {
   PROFILE_CATEGORIES_FETCH: 'profileCategories:fetch',
   PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
 
+  // User Types (for assignment workflow)
+  USER_TYPES_GET_ALL: 'userTypes:getAll',
+
+  // Distribution Groups
+  DISTRIBUTION_GROUPS_GET: 'distributionGroups:get',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
