@@ -22,6 +22,8 @@ const mappingLabels: Record<ColumnMapping, string> = {
   templateGroup: 'Template Group',
   verifyEmail: 'Person Email',
   verifyRoomName: 'Room Name',
+  assignEmail: 'Email',
+  assignRoom: 'Room',
 };
 
 export function DataPreviewTable({

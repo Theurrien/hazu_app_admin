@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export type ColumnMapping = 'roomName' | 'firstName' | 'lastName' | 'email' | 'grouping1' | 'grouping2' | 'templateGroup' | 'verifyEmail' | 'verifyRoomName';
+export type ColumnMapping = 'roomName' | 'firstName' | 'lastName' | 'email' | 'grouping1' | 'grouping2' | 'templateGroup' | 'verifyEmail' | 'verifyRoomName' | 'assignEmail' | 'assignRoom';
 
-export type MappingMode = 'room' | 'person' | 'verify';
+export type MappingMode = 'room' | 'person' | 'verify' | 'assignment';
 
 interface ColumnMappingDropdownProps {
   isOpen: boolean;
@@ -25,6 +25,8 @@ const mappingLabels: Record<ColumnMapping, string> = {
   templateGroup: 'Template Group',
   verifyEmail: 'Person Email',
   verifyRoomName: 'Room Name',
+  assignEmail: 'Email',
+  assignRoom: 'Room',
 };
 
 const ColumnMappingDropdown: React.FC<ColumnMappingDropdownProps> = ({
@@ -141,6 +143,35 @@ const ColumnMappingDropdown: React.FC<ColumnMappingDropdownProps> = ({
       >
         <div className="py-1">
           {renderOption('roomName')}
+
+          <div className="border-t border-gray-200 my-1"></div>
+
+          <button
+            type="button"
+            onClick={() => handleSelect(null)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-100 cursor-pointer transition-colors"
+          >
+            <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-gray-500">
+              ✕
+            </span>
+            <span className="text-gray-700">Clear</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Assignment mode: email and room options
+  if (mode === 'assignment') {
+    return (
+      <div
+        ref={dropdownRef}
+        className={`${positionClass} bg-white border border-gray-300 rounded-md shadow-lg z-50 min-w-[200px]`}
+        style={positionStyle}
+      >
+        <div className="py-1">
+          {renderOption('assignEmail')}
+          {renderOption('assignRoom')}
 
           <div className="border-t border-gray-200 my-1"></div>
 
