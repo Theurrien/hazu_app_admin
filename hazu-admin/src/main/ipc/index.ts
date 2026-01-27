@@ -704,11 +704,13 @@ export function registerIpcHandlers(): void {
         console.log('[ASSIGNMENTS_EXECUTE] Sending', users.length, 'users to API');
 
         // Call API
-        const { getApiEndpoint, getApiHeaders } = await import('../services/hazu-api/config');
+        const { getApiEndpoint, getApiKey } = await import('../services/hazu-api/config');
+        const token = getApiKey();
+        const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
         const response = await axios.post(
-          `${getApiEndpoint()}/api-v2-admin/add-users`,
+          `https://${getApiEndpoint()}/api-v2-admin/add-users`,
           { users },
-          { headers: getApiHeaders(), timeout: 120000 }
+          { headers, timeout: 120000 }
         );
 
         console.log('[ASSIGNMENTS_EXECUTE] Response:', response.status, response.data);
