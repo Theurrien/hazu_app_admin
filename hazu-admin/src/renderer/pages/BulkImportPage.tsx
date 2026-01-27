@@ -11,6 +11,9 @@ import { RoomAssignmentPanel, RoomAssignment } from '../components/bulk-import/R
 import type { ColumnMapping } from '../components/bulk-import/ColumnMappingDropdown';
 import { VerifyAssignmentsTab } from '../components/bulk-import/VerifyAssignmentsTab';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
+import { AssignmentRoleSelector } from '../components/bulk-import/AssignmentRoleSelector';
+import { PersonMatchingPanel } from '../components/bulk-import/PersonMatchingPanel';
+import { RoomMatchingPanel } from '../components/bulk-import/RoomMatchingPanel';
 
 interface Template {
   id: string;
@@ -82,15 +85,32 @@ function BulkImportPage() {
   const [rooms, setRooms] = useState<Array<{ id: string; title: string; room_type: string; parent_id: string | null }>>([]);
   const [rootHazuId, setRootHazuId] = useState<string | null>(null);
 
-  // Load rooms and root ID on mount
+  // Assignment workflow state
+  const [assignmentEmailColumn, setAssignmentEmailColumn] = useState<string | null>(null);
+  const [assignmentRoomColumn, setAssignmentRoomColumn] = useState<string | null>(null);
+  const [selectedAssignmentRole, setSelectedAssignmentRole] = useState<string | null>(null);
+  const [assignmentColumnMappings, setAssignmentColumnMappings] = useState<Record<string, ColumnMapping>>({});
+
+  // Assignment matching
+  const [personMatches, setPersonMatches] = useState<Map<string, string | null>>(new Map());
+  const [personResolutions, setPersonResolutions] = useState<Map<string, string>>(new Map());
+  const [roomMatches, setRoomMatches] = useState<Map<string, string | null>>(new Map());
+  const [roomResolutions, setRoomResolutions] = useState<Map<string, string>>(new Map());
+
+  // Persons for matching
+  const [persons, setPersons] = useState<Array<{ id: string; email: string | null; display_name: string }>>([]);
+
+  // Load rooms, persons, and root ID on mount
   useEffect(() => {
     const loadData = async () => {
-      const [roomsData, config] = await Promise.all([
+      const [roomsData, config, personsData] = await Promise.all([
         window.electronAPI.getRooms(),
         window.electronAPI.getApiConfig(),
+        window.electronAPI.getPersons(),
       ]);
       setRooms(roomsData);
       setRootHazuId(config.rootHazuId);
+      setPersons(personsData);
     };
     loadData();
   }, []);
@@ -331,6 +351,15 @@ function BulkImportPage() {
     setColumnMappings({});
     setRoomAssignments(new Map());
     setTemplatesByGroup(new Map());
+    // Reset Assignment workflow state
+    setAssignmentEmailColumn(null);
+    setAssignmentRoomColumn(null);
+    setAssignmentColumnMappings({});
+    setPersonMatches(new Map());
+    setPersonResolutions(new Map());
+    setRoomMatches(new Map());
+    setRoomResolutions(new Map());
+    setSelectedAssignmentRole(null);
   }, []);
 
   // Handle column click (Room workflow - old API)
@@ -351,6 +380,213 @@ function BulkImportPage() {
       return newMappings;
     });
   }, []);
+
+  // Handle assignment column mapping change
+  const handleAssignmentColumnMappingChange = useCallback((header: string, mapping: ColumnMapping | null) => {
+    setAssignmentColumnMappings(prev => {
+      const newMappings = { ...prev };
+      if (mapping === null) {
+        delete newMappings[header];
+      } else {
+        newMappings[header] = mapping;
+      }
+      return newMappings;
+    });
+
+    // Update column references
+    if (mapping === 'assignEmail') {
+      setAssignmentEmailColumn(header);
+    } else if (mapping === 'assignRoom') {
+      setAssignmentRoomColumn(header);
+    }
+
+    // Clear if this mapping was previously set and now removed
+    if (mapping === null) {
+      const prevMapping = assignmentColumnMappings[header];
+      if (prevMapping === 'assignEmail') {
+        setAssignmentEmailColumn(null);
+      } else if (prevMapping === 'assignRoom') {
+        setAssignmentRoomColumn(null);
+      }
+    }
+  }, [assignmentColumnMappings]);
+
+  // Compute person matches when email column changes
+  useEffect(() => {
+    if (!fileData || !assignmentEmailColumn) {
+      setPersonMatches(new Map());
+      return;
+    }
+
+    const matches = new Map<string, string | null>();
+    const seenEmails = new Set<string>();
+
+    fileData.rows.forEach((row) => {
+      const email = row[assignmentEmailColumn]?.trim().toLowerCase();
+      if (!email || seenEmails.has(email)) return;
+      seenEmails.add(email);
+
+      const person = persons.find((p) => p.email?.toLowerCase() === email);
+      matches.set(email, person?.id || null);
+    });
+
+    setPersonMatches(matches);
+    setPersonResolutions(new Map()); // Clear resolutions when column changes
+  }, [fileData, assignmentEmailColumn, persons]);
+
+  // Get unique emails from file
+  const uniqueEmails = useMemo(() => {
+    if (!fileData || !assignmentEmailColumn) return [];
+    const emails = new Set<string>();
+    fileData.rows.forEach((row) => {
+      const email = row[assignmentEmailColumn]?.trim().toLowerCase();
+      if (email) emails.add(email);
+    });
+    return Array.from(emails);
+  }, [fileData, assignmentEmailColumn]);
+
+  // Extract unique room values and compute matches
+  const uniqueAssignmentRoomValues = useMemo(() => {
+    if (!fileData || !assignmentRoomColumn) return [];
+    const values = new Set<string>();
+    fileData.rows.forEach((row) => {
+      const value = row[assignmentRoomColumn]?.trim();
+      if (value) values.add(value);
+    });
+    return Array.from(values).sort();
+  }, [fileData, assignmentRoomColumn]);
+
+  // Compute room matches when room column changes
+  useEffect(() => {
+    if (!fileData || !assignmentRoomColumn) {
+      setRoomMatches(new Map());
+      return;
+    }
+
+    const matches = new Map<string, string | null>();
+
+    uniqueAssignmentRoomValues.forEach((value) => {
+      const room = rooms.find(
+        (r) => r.title.toLowerCase() === value.toLowerCase()
+      );
+      matches.set(value, room?.id || null);
+    });
+
+    setRoomMatches(matches);
+    setRoomResolutions(new Map()); // Clear resolutions when column changes
+  }, [fileData, assignmentRoomColumn, rooms, uniqueAssignmentRoomValues]);
+
+  // Get resolved person ID (auto or manual)
+  const getResolvedPersonId = useCallback((email: string): string | null => {
+    return personResolutions.get(email) || personMatches.get(email) || null;
+  }, [personMatches, personResolutions]);
+
+  // Get resolved room ID (auto or manual)
+  const getResolvedRoomId = useCallback((roomValue: string): string | null => {
+    return roomResolutions.get(roomValue) || roomMatches.get(roomValue) || null;
+  }, [roomMatches, roomResolutions]);
+
+  // Count valid assignments
+  const validAssignmentCount = useMemo(() => {
+    if (!fileData || !assignmentEmailColumn || !assignmentRoomColumn) return 0;
+
+    let count = 0;
+    fileData.rows.forEach((row) => {
+      const email = row[assignmentEmailColumn]?.trim().toLowerCase();
+      const roomValue = row[assignmentRoomColumn]?.trim();
+
+      if (email && roomValue) {
+        const personId = getResolvedPersonId(email);
+        const roomId = getResolvedRoomId(roomValue);
+
+        if (personId && roomId) {
+          count++;
+        }
+      }
+    });
+
+    return count;
+  }, [fileData, assignmentEmailColumn, assignmentRoomColumn, getResolvedPersonId, getResolvedRoomId]);
+
+  // Handle assignment execution
+  const handleExecuteAssignments = useCallback(async () => {
+    if (!fileData || !assignmentEmailColumn || !assignmentRoomColumn || !selectedAssignmentRole) {
+      return;
+    }
+
+    const assignments: Array<{
+      personId: string;
+      personEmail: string;
+      firstName: string;
+      lastName: string;
+      roomId: string;
+      role: string;
+    }> = [];
+
+    fileData.rows.forEach((row) => {
+      const email = row[assignmentEmailColumn]?.trim().toLowerCase();
+      const roomValue = row[assignmentRoomColumn]?.trim();
+
+      if (!email || !roomValue) return;
+
+      const personId = getResolvedPersonId(email);
+      const roomId = getResolvedRoomId(roomValue);
+
+      if (!personId || !roomId) return;
+
+      const person = persons.find((p) => p.id === personId);
+      if (!person) return;
+
+      // Extract first and last name from display_name
+      const displayNameParts = person.display_name.split(' ');
+      const firstName = displayNameParts[0] || '';
+      const lastName = displayNameParts.slice(1).join(' ') || '';
+
+      assignments.push({
+        personId,
+        personEmail: person.email || email,
+        firstName,
+        lastName,
+        roomId,
+        role: selectedAssignmentRole,
+      });
+    });
+
+    if (assignments.length === 0) {
+      alert('No valid assignments to execute.');
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.executeAssignments({ assignments });
+
+      if (result.success) {
+        alert(`Successfully assigned ${result.successful} users to rooms!`);
+        // Reset assignment state
+        setAssignmentEmailColumn(null);
+        setAssignmentRoomColumn(null);
+        setAssignmentColumnMappings({});
+        setPersonMatches(new Map());
+        setPersonResolutions(new Map());
+        setRoomMatches(new Map());
+        setRoomResolutions(new Map());
+        setSelectedAssignmentRole(null);
+      } else {
+        alert(`Assignment failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Execute assignments error:', error);
+      alert('Failed to execute assignments. Check console for details.');
+    }
+  }, [
+    fileData,
+    assignmentEmailColumn,
+    assignmentRoomColumn,
+    selectedAssignmentRole,
+    persons,
+    getResolvedPersonId,
+    getResolvedRoomId,
+  ]);
 
   // Handle config change for selected value
   const handleConfigChange = useCallback((config: RoomConfig) => {
@@ -514,6 +750,15 @@ function BulkImportPage() {
     setColumnMappings({});
     setRoomAssignments(new Map());
     setTemplatesByGroup(new Map());
+    // Reset assignment state
+    setAssignmentEmailColumn(null);
+    setAssignmentRoomColumn(null);
+    setAssignmentColumnMappings({});
+    setPersonMatches(new Map());
+    setPersonResolutions(new Map());
+    setRoomMatches(new Map());
+    setRoomResolutions(new Map());
+    setSelectedAssignmentRole(null);
   }, []);
 
   const selectedConfig = selectedValue ? roomConfigs.get(selectedValue) : null;
@@ -700,11 +945,74 @@ function BulkImportPage() {
           </>
         )}
 
-        {/* Assignment workflow placeholder */}
-        {activeWorkflow === 'assignment' && (
-          <div className="text-center py-12 text-gray-500">
-            Assignment workflow coming soon...
-          </div>
+        {/* Assignment workflow */}
+        {activeWorkflow === 'assignment' && fileData && (
+          <>
+            {/* Data preview with assignment column mapping */}
+            <DataPreviewTable
+              headers={fileData.headers}
+              rows={fileData.rows}
+              columnMappings={assignmentColumnMappings}
+              onColumnMappingChange={handleAssignmentColumnMappingChange}
+              mode="assignment"
+            />
+
+            {/* Role selector */}
+            {assignmentEmailColumn && assignmentRoomColumn && (
+              <div className="mt-6">
+                <AssignmentRoleSelector
+                  selectedRole={selectedAssignmentRole}
+                  onRoleChange={setSelectedAssignmentRole}
+                />
+              </div>
+            )}
+
+            {/* Person matching panel */}
+            {assignmentEmailColumn && (
+              <div className="mt-6">
+                <PersonMatchingPanel
+                  emails={uniqueEmails}
+                  persons={persons}
+                  personMatches={personMatches}
+                  personResolutions={personResolutions}
+                  onResolutionChange={(email, personId) => {
+                    setPersonResolutions(prev => {
+                      const next = new Map(prev);
+                      if (personId) {
+                        next.set(email, personId);
+                      } else {
+                        next.delete(email);
+                      }
+                      return next;
+                    });
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Room matching panel */}
+            {assignmentRoomColumn && (
+              <div className="mt-6">
+                <RoomMatchingPanel
+                  uniqueRoomValues={uniqueAssignmentRoomValues}
+                  rooms={rooms}
+                  roomMatches={roomMatches}
+                  roomResolutions={roomResolutions}
+                  onResolutionChange={(roomValue, roomId) => {
+                    setRoomResolutions(prev => {
+                      const next = new Map(prev);
+                      if (roomId) {
+                        next.set(roomValue, roomId);
+                      } else {
+                        next.delete(roomValue);
+                      }
+                      return next;
+                    });
+                  }}
+                />
+              </div>
+            )}
+          </>
         )}
 
         {/* Verify workflow */}
@@ -765,6 +1073,28 @@ function BulkImportPage() {
               Add {personValidation.validCount} Person{personValidation.validCount !== 1 ? 's' : ''} to Queue
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Footer with action button - Assignment workflow */}
+      {activeWorkflow === 'assignment' && fileData && (
+        <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            {validAssignmentCount > 0
+              ? `${validAssignmentCount} assignment${validAssignmentCount !== 1 ? 's' : ''} ready`
+              : 'Map columns and resolve matches to enable assignment'}
+          </div>
+          <button
+            onClick={handleExecuteAssignments}
+            disabled={validAssignmentCount === 0 || !selectedAssignmentRole}
+            className={`px-6 py-2 rounded-lg transition-colors ${
+              validAssignmentCount > 0 && selectedAssignmentRole
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            Assign {validAssignmentCount} Person{validAssignmentCount !== 1 ? 's' : ''} to Rooms
+          </button>
         </div>
       )}
     </div>
