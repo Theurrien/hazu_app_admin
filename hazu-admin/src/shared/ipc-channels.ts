@@ -68,6 +68,12 @@ export const IPC_CHANNELS = {
   // File operations
   FILE_PARSE: 'file:parse',
   FILE_SELECT_DIALOG: 'file:selectDialog',
+
+  // Mission Analysis
+  MISSION_SYNC_START: 'mission:sync:start',
+  MISSION_SYNC_STATUS: 'mission:sync:status',
+  MISSION_GET_DASHBOARD_DATA: 'mission:dashboard:data',
+  MISSION_GET_PROFESSIONS: 'mission:professions:get',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

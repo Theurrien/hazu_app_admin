@@ -119,6 +119,59 @@ export interface HazuEntity {
   snapshot: HazuSnapshot;
 }
 
+// === Mission Analysis Types ===
+
+export type LieuDeFormation = 'entreprise' | 'ecole' | 'cie';
+
+export interface MissionTrackingRow {
+  id: number;
+  person_id: string;
+  mission_name: string;
+  is_official: number; // 0 or 1 (SQLite boolean)
+  lieu_de_formation: LieuDeFormation;
+  item_count: number;
+  total_points: number;
+  synced_at: number;
+}
+
+export interface MissionSyncStatus {
+  status: 'idle' | 'syncing' | 'error';
+  students_processed: number;
+  total_students: number;
+  last_synced_at: number | null;
+}
+
+export interface MissionDashboardRequest {
+  lieu?: LieuDeFormation;
+  professions?: string[];
+  level?: 'afp' | 'cfc';
+  classId?: string;
+}
+
+export interface MissionDistributionRow {
+  profession_icon: string;
+  level: 'AFP' | 'CFC';
+  level_color: string;
+  mission_count: number;
+  student_count: number;
+}
+
+export interface MissionDashboardResponse {
+  distribution: MissionDistributionRow[];
+  summary: {
+    total_students: number;
+    avg_missions: number;
+    avg_reflexions: number;
+    max_missions: number;
+    total_distinct_missions: number;
+  };
+}
+
+export interface MissionProfession {
+  icon: string;
+  student_count: number;
+}
+
 // Template entity
 export interface Template {
   id: string;
