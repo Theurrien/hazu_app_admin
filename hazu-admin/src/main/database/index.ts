@@ -146,6 +146,65 @@ function runMigrations(): void {
   } catch (error) {
     console.error('Migration error (person_room_assignments):', error);
   }
+
+  // Migration: Add icon and color columns to persons table (for mission analysis)
+  try {
+    const personColumns = db.prepare("PRAGMA table_info(persons)").all() as Array<{ name: string }>;
+    const hasIcon = personColumns.some(col => col.name === 'icon');
+    if (!hasIcon) {
+      db.exec("ALTER TABLE persons ADD COLUMN icon TEXT");
+      db.exec("ALTER TABLE persons ADD COLUMN color TEXT");
+      console.log('Migration: Added icon and color columns to persons table');
+    }
+  } catch (error) {
+    console.error('Migration error (persons icon/color):', error);
+  }
+
+  // Migration: Add mission_tracking table
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mission_tracking'").all();
+    if (tables.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mission_tracking (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          person_id TEXT NOT NULL,
+          mission_name TEXT NOT NULL,
+          is_official INTEGER NOT NULL DEFAULT 0,
+          lieu_de_formation TEXT NOT NULL,
+          item_count INTEGER DEFAULT 1,
+          total_points INTEGER DEFAULT 0,
+          synced_at INTEGER,
+          UNIQUE(person_id, mission_name, lieu_de_formation)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_tracking_person ON mission_tracking(person_id);
+        CREATE INDEX IF NOT EXISTS idx_mission_tracking_lieu ON mission_tracking(lieu_de_formation);
+        CREATE INDEX IF NOT EXISTS idx_mission_tracking_official ON mission_tracking(is_official);
+      `);
+      console.log('Migration: Added mission_tracking table');
+    }
+  } catch (error) {
+    console.error('Migration error (mission_tracking):', error);
+  }
+
+  // Migration: Add mission_sync_status table
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mission_sync_status'").all();
+    if (tables.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mission_sync_status (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          last_synced_at INTEGER,
+          students_processed INTEGER DEFAULT 0,
+          total_students INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'idle'
+        );
+        INSERT INTO mission_sync_status (id, status) VALUES (1, 'idle');
+      `);
+      console.log('Migration: Added mission_sync_status table');
+    }
+  } catch (error) {
+    console.error('Migration error (mission_sync_status):', error);
+  }
 }
 
 // Inline schema for development
@@ -179,6 +238,8 @@ function runInlineSchema(): void {
         display_name TEXT NOT NULL,
         person_type TEXT NOT NULL,
         role TEXT,
+        icon TEXT,
+        color TEXT,
         tags TEXT DEFAULT '[]',
         raw_data TEXT,
         synced_at INTEGER NOT NULL,
@@ -258,6 +319,28 @@ function runInlineSchema(): void {
         created_at INTEGER DEFAULT (strftime('%s', 'now')),
         updated_at INTEGER DEFAULT (strftime('%s', 'now')),
         FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL
+    );
+
+    -- Mission tracking (deduplicated per student per lieu)
+    CREATE TABLE IF NOT EXISTS mission_tracking (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        person_id TEXT NOT NULL,
+        mission_name TEXT NOT NULL,
+        is_official INTEGER NOT NULL DEFAULT 0,
+        lieu_de_formation TEXT NOT NULL,
+        item_count INTEGER DEFAULT 1,
+        total_points INTEGER DEFAULT 0,
+        synced_at INTEGER,
+        UNIQUE(person_id, mission_name, lieu_de_formation)
+    );
+
+    -- Mission sync status
+    CREATE TABLE IF NOT EXISTS mission_sync_status (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_synced_at INTEGER,
+        students_processed INTEGER DEFAULT 0,
+        total_students INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'idle'
     );
   `);
 }
