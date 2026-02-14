@@ -60,6 +60,8 @@
     "axios": "^1.13.2",
     "better-sqlite3": "^12.5.0",
     "dotenv": "^17.2.3",
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.6",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "xlsx": "^0.18.5",
