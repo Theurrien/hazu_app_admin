@@ -44,7 +44,8 @@ hazu-admin/
 │   │       │   ├── config.ts   # Environment config
 │   │       │   ├── helpers.ts  # Utilities
 │   │       │   └── interfaces.ts
-│   │       └── sync.service.ts # Hazu → SQLite sync
+│   │       ├── sync.service.ts # Hazu → SQLite sync
+│   │       └── mission-sync.service.ts # Mission data sync
 │   │
 │   ├── renderer/               # React Frontend (Vite)
 │   │   ├── App.tsx            # Main app with routing
@@ -53,11 +54,19 @@ hazu-admin/
 │   │   │   ├── Dashboard.tsx
 │   │   │   ├── RoomsPage.tsx
 │   │   │   ├── PersonsPage.tsx
+│   │   │   ├── MissionAnalysisPage.tsx
 │   │   │   └── SettingsPage.tsx
 │   │   ├── components/
-│   │   │   └── layout/
-│   │   │       ├── Sidebar.tsx
-│   │   │       └── Header.tsx
+│   │   │   ├── layout/
+│   │   │   │   ├── Sidebar.tsx
+│   │   │   │   └── Header.tsx
+│   │   │   └── mission-analysis/
+│   │   │       ├── MissionSyncButton.tsx
+│   │   │       ├── MissionFilterBar.tsx
+│   │   │       ├── MissionTreemap.tsx
+│   │   │       ├── MissionHeatmap.tsx
+│   │   │       ├── MissionSummaryBar.tsx
+│   │   │       └── MissionStudentList.tsx
 │   │   └── styles/
 │   │       └── global.css      # Tailwind imports
 │   │
@@ -103,11 +112,15 @@ const result = await window.electronAPI.runSync();
 
 ### Core Tables
 - `rooms` - Classes, companies, cantons, CIE locations
-- `persons` - Students, teachers, mentors, advisors, guardians
+- `persons` - Students, teachers, mentors, advisors, guardians (includes `icon` and `color` columns for profession/level identification)
 - `person_room_assignments` - Many-to-many relationships
 - `change_log` - Track local modifications for n8n sync
 - `settings` - App configuration (API key, environment, etc.)
 - `tag_mappings` - Hazu tag → semantic type mappings
+
+### Mission Analysis Tables
+- `mission_tracking` - Per-student mission records (person_id, mission_name, is_official, lieu_de_formation, item_count, total_points)
+- `mission_sync_status` - Tracks sync progress (students_processed, total_students, last_synced_at, status)
 
 ### Room Types (identified by tags)
 | Tag | Type |
@@ -211,6 +224,27 @@ Uses new import syntax:
 ```
 With `@tailwindcss/postcss` plugin (not direct tailwindcss).
 
+## Mission Analysis
+
+The Missions tab provides a visual dashboard of student mission (MPE) completion across professions and levels (AFP/CFC).
+
+### How it works
+1. **Sync missions**: Click "Sync Missions" on the Missions tab. This fetches each student's mission data from the Hazu API and stores it locally in `mission_tracking`.
+2. **Visualize**: Two chart views are available:
+   - **Treemap** — Nested rectangles grouped by profession > level > mission count, sized by student count
+   - **Heatmap** — Grid with profession+level on Y-axis, mission count on X-axis, colored by student count
+3. **Filter**: Use the filter bar to narrow by lieu de formation (entreprise/ecole/cie), profession, level (AFP/CFC), or class.
+4. **Drill down**: Click any chart cell to see the matching students with name, enterprise, mission count, and a link to their Hazu profile.
+
+### Key files
+- `src/main/services/mission-sync.service.ts` — Fetches and parses mission data from the API
+- `src/renderer/pages/MissionAnalysisPage.tsx` — Main page with filters, charts, and student list
+- `src/renderer/components/mission-analysis/` — All visualization components
+
+### Prerequisites
+- Run the main sync first (Dashboard > Sync) so persons have `icon` and `color` populated
+- Then run "Sync Missions" on the Missions tab
+
 ## Testing the App
 
 1. Run `npm run build`
@@ -218,6 +252,7 @@ With `@tailwindcss/postcss` plugin (not direct tailwindcss).
 3. Go to Settings → Enter API key and Root Hazu ID
 4. Click "Sync Now" on Dashboard
 5. View synced data in Rooms/Persons pages
+6. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
 
 ## Future Development
 
