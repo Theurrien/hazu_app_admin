@@ -16,6 +16,7 @@ A cross-platform desktop application for managing the Hazu educational platform.
 - **Assignment Matrix**: View all person-room assignments in a matrix view
 - **Bulk Import**: Import rooms and persons from Excel files with column mapping
 - **Task Queue**: Background processing for bulk operations with progress tracking
+- **Mission Analysis**: Dashboard with treemap and heatmap charts showing student mission (MPE) completion by profession and level, with drill-down to individual students
 - **Hazu Design System**: UI aligned with the Hazu platform using Font Awesome icons
 - **Sync from Hazu**: Pull latest data from the Hazu platform API
 
@@ -90,6 +91,14 @@ On first launch, configure the app in **Settings**:
 - Filter by room type or person type
 - Quick overview of who is assigned where
 
+### Mission Analysis
+
+1. Run main sync first (Dashboard > Sync Now) to populate person data
+2. Go to **Missions** tab and click **Sync Missions**
+3. View mission completion distribution as a **Treemap** or **Heatmap**
+4. Filter by lieu de formation (entreprise/ecole/cie), profession, level (AFP/CFC), or class
+5. Click any chart cell to see matching students with name, enterprise, and profile link
+
 ## Tech Stack
 
 | Component | Technology |
@@ -100,6 +109,7 @@ On first launch, configure the app in **Settings**:
 | Icons | Font Awesome 6 |
 | State | Zustand |
 | Database | better-sqlite3 |
+| Charts | ECharts (echarts-for-react) |
 | Bundler | Vite 7 |
 | Packaging | electron-builder |
 
@@ -151,8 +161,9 @@ Data is stored in SQLite at:
 - [x] Phase 2: Room & Person pages with assignments view
 - [x] Phase 3: Assignment Matrix view
 - [x] Phase 4: Bulk Import (Rooms & Persons from Excel)
-- [ ] Phase 5: Bulk Assignment import
-- [ ] Phase 6: n8n webhook integration for change sync
+- [x] Phase 5: Mission Analysis Dashboard
+- [ ] Phase 6: Bulk Assignment import
+- [ ] Phase 7: n8n webhook integration for change sync
 
 ## License
 
