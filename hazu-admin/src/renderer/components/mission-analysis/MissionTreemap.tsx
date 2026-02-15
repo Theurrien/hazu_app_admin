@@ -59,8 +59,10 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
       series: [{
         type: 'treemap',
         data: treemapData,
-        width: '100%',
-        height: '100%',
+        top: 35,
+        left: 0,
+        right: 0,
+        bottom: 0,
         roam: false,
         nodeClick: 'zoomToNode',
         breadcrumb: {
