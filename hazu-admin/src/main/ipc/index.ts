@@ -1367,8 +1367,12 @@ export function registerIpcHandlers(): void {
           ${lieu ? "AND lieu_de_formation = ?" : ""}
         GROUP BY person_id
       ) m ON m.person_id = p.id
-      LEFT JOIN person_room_assignments pra_ent ON pra_ent.person_id = p.id
-      LEFT JOIN rooms ent ON ent.id = pra_ent.room_id AND ent.room_type = 'enterprise'
+      LEFT JOIN (
+        SELECT pra.person_id, r.title
+        FROM person_room_assignments pra
+        INNER JOIN rooms r ON r.id = pra.room_id AND r.room_type = 'enterprise'
+        GROUP BY pra.person_id
+      ) ent ON ent.person_id = p.id
       ${classId ? "INNER JOIN person_room_assignments pra_cls ON pra_cls.person_id = p.id INNER JOIN rooms r_cls ON r_cls.id = pra_cls.room_id AND r_cls.room_type = 'class' AND r_cls.id = ?" : ""}
       WHERE p.person_type = 'student'
         AND p.color IN ('#9AD9EA', '#1A237E')
