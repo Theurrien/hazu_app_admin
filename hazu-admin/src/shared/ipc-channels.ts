@@ -74,6 +74,7 @@ export const IPC_CHANNELS = {
   MISSION_SYNC_STATUS: 'mission:sync:status',
   MISSION_GET_DASHBOARD_DATA: 'mission:dashboard:data',
   MISSION_GET_PROFESSIONS: 'mission:professions:get',
+  MISSION_GET_STUDENTS: 'mission:students:get',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
