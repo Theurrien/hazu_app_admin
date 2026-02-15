@@ -44,6 +44,7 @@ const IPC_CHANNELS = {
   MISSION_SYNC_STATUS: 'mission:sync:status',
   MISSION_GET_DASHBOARD_DATA: 'mission:dashboard:data',
   MISSION_GET_PROFESSIONS: 'mission:professions:get',
+  MISSION_GET_STUDENTS: 'mission:students:get',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -196,6 +197,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.MISSION_GET_DASHBOARD_DATA, filters),
   missionGetProfessions: () =>
     ipcRenderer.invoke(IPC_CHANNELS.MISSION_GET_PROFESSIONS),
+  missionGetStudents: (filters: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_GET_STUDENTS, filters),
 
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
@@ -311,6 +314,14 @@ declare global {
       }>;
       missionGetDashboardData: (filters: any) => Promise<any>;
       missionGetProfessions: () => Promise<Array<{ icon: string; student_count: number }>>;
+      missionGetStudents: (filters: any) => Promise<Array<{
+        id: string;
+        display_name: string;
+        icon: string;
+        color: string;
+        mission_count: number;
+        enterprise_name: string | null;
+      }>>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }

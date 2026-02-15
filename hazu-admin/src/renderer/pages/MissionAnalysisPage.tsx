@@ -6,9 +6,17 @@ import { MissionFilterBar } from '../components/mission-analysis/MissionFilterBa
 import { MissionTreemap } from '../components/mission-analysis/MissionTreemap';
 import { MissionHeatmap } from '../components/mission-analysis/MissionHeatmap';
 import { MissionSummaryBar } from '../components/mission-analysis/MissionSummaryBar';
+import { MissionStudentList } from '../components/mission-analysis/MissionStudentList';
 
 type ViewMode = 'treemap' | 'heatmap';
 type LieuDeFormation = 'entreprise' | 'ecole' | 'cie';
+
+export interface CellSelection {
+  professionIcon: string;
+  level: string;
+  levelColor: string;
+  missionCount: number;
+}
 
 function MissionAnalysisPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('treemap');
@@ -24,6 +32,9 @@ function MissionAnalysisPage() {
   const [classes, setClasses] = useState<Array<{ id: string; title: string }>>([]);
   const [distribution, setDistribution] = useState<any[]>([]);
   const [summary, setSummary] = useState({ total_students: 0, avg_missions: 0, max_missions: 0 });
+
+  // Student list selection
+  const [cellSelection, setCellSelection] = useState<CellSelection | null>(null);
 
   // Load filter options
   useEffect(() => {
@@ -48,6 +59,7 @@ function MissionAnalysisPage() {
 
   useEffect(() => {
     fetchData();
+    setCellSelection(null); // Clear selection when filters change
   }, [fetchData]);
 
   const handleToggleProfession = (icon: string) => {
@@ -65,6 +77,10 @@ function MissionAnalysisPage() {
   const handleSyncComplete = () => {
     window.electronAPI.missionGetProfessions().then(setProfessions);
     fetchData();
+  };
+
+  const handleCellClick = (selection: CellSelection) => {
+    setCellSelection(selection);
   };
 
   return (
@@ -135,11 +151,19 @@ function MissionAnalysisPage() {
 
         {/* Chart */}
         {viewMode === 'treemap' ? (
-          <MissionTreemap data={distribution} />
+          <MissionTreemap data={distribution} onCellClick={handleCellClick} />
         ) : (
-          <MissionHeatmap data={distribution} />
+          <MissionHeatmap data={distribution} onCellClick={handleCellClick} />
         )}
       </div>
+
+      {/* Student list */}
+      <MissionStudentList
+        selection={cellSelection}
+        lieu={lieu}
+        classId={classId}
+        onClose={() => setCellSelection(null)}
+      />
 
       {/* Summary bar */}
       <MissionSummaryBar

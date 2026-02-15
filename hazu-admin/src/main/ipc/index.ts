@@ -1347,6 +1347,47 @@ export function registerIpcHandlers(): void {
     };
   });
 
+  ipcMain.handle(IPC_CHANNELS.MISSION_GET_STUDENTS, async (_event, filters: any) => {
+    const { professionIcon, levelColor, missionCount, lieu, classId } = filters || {};
+
+    // Find students matching the criteria
+    const sql = `
+      SELECT DISTINCT
+        p.id,
+        p.display_name,
+        p.icon,
+        p.color,
+        COALESCE(m.mc, 0) AS mission_count,
+        ent.title AS enterprise_name
+      FROM persons p
+      LEFT JOIN (
+        SELECT person_id, COUNT(DISTINCT mission_name) AS mc
+        FROM mission_tracking
+        WHERE is_official = 1
+          ${lieu ? "AND lieu_de_formation = ?" : ""}
+        GROUP BY person_id
+      ) m ON m.person_id = p.id
+      LEFT JOIN person_room_assignments pra_ent ON pra_ent.person_id = p.id
+      LEFT JOIN rooms ent ON ent.id = pra_ent.room_id AND ent.room_type = 'enterprise'
+      ${classId ? "INNER JOIN person_room_assignments pra_cls ON pra_cls.person_id = p.id INNER JOIN rooms r_cls ON r_cls.id = pra_cls.room_id AND r_cls.room_type = 'class' AND r_cls.id = ?" : ""}
+      WHERE p.person_type = 'student'
+        AND p.color IN ('#9AD9EA', '#1A237E')
+        ${professionIcon ? "AND p.icon = ?" : ""}
+        ${levelColor ? "AND p.color = ?" : ""}
+        AND COALESCE(m.mc, 0) = ?
+      ORDER BY p.display_name
+    `;
+
+    const params: any[] = [];
+    if (lieu) params.push(lieu);
+    if (classId) params.push(classId);
+    if (professionIcon) params.push(professionIcon);
+    if (levelColor) params.push(levelColor);
+    params.push(missionCount ?? 0);
+
+    return query(sql, params);
+  });
+
   // ============================================================================
   // SHELL
   // ============================================================================

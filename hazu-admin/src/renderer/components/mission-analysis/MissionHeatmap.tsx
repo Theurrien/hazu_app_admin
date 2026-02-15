@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
+import type { CellSelection } from '../../pages/MissionAnalysisPage';
 
 interface DistributionRow {
   profession_icon: string;
@@ -11,9 +12,10 @@ interface DistributionRow {
 
 interface MissionHeatmapProps {
   data: DistributionRow[];
+  onCellClick?: (selection: CellSelection) => void;
 }
 
-export function MissionHeatmap({ data }: MissionHeatmapProps) {
+export function MissionHeatmap({ data, onCellClick }: MissionHeatmapProps) {
   const option = useMemo(() => {
     if (data.length === 0) return {};
 
@@ -107,6 +109,38 @@ export function MissionHeatmap({ data }: MissionHeatmapProps) {
     };
   }, [data]);
 
+  const handleClick = useCallback((params: any) => {
+    if (!onCellClick) return;
+    const [xIndex, yIndex, val] = params.data;
+    if (val === 0) return; // Ignore empty cells
+
+    // Parse yLabel to extract profession icon and level
+    const yLabels: string[] = [];
+    const ySet = new Set<string>();
+    for (const row of data) {
+      const label = `${row.profession_icon} ${row.level}`;
+      if (!ySet.has(label)) {
+        ySet.add(label);
+        yLabels.push(label);
+      }
+    }
+
+    const yLabel = yLabels[yIndex];
+    if (!yLabel) return;
+
+    // Split "icon LEVEL" — last word is level, rest is icon
+    const parts = yLabel.split(' ');
+    const level = parts[parts.length - 1];
+    const professionIcon = parts.slice(0, -1).join(' ');
+    const levelColor = level === 'AFP' ? '#9AD9EA' : '#1A237E';
+
+    onCellClick({ professionIcon, level, levelColor, missionCount: xIndex });
+  }, [onCellClick, data]);
+
+  const onEvents = useMemo(() => ({
+    click: handleClick,
+  }), [handleClick]);
+
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center h-96" style={{ color: 'var(--hazu-text-muted)' }}>
@@ -120,6 +154,7 @@ export function MissionHeatmap({ data }: MissionHeatmapProps) {
       option={option}
       style={{ height: Math.max(300, data.length * 40 + 120) + 'px', width: '100%' }}
       notMerge
+      onEvents={onEvents}
     />
   );
 }

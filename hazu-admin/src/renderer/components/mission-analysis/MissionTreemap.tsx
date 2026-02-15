@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
+import type { CellSelection } from '../../pages/MissionAnalysisPage';
 
 interface DistributionRow {
   profession_icon: string;
@@ -11,12 +12,13 @@ interface DistributionRow {
 
 interface MissionTreemapProps {
   data: DistributionRow[];
+  onCellClick?: (selection: CellSelection) => void;
 }
 
-export function MissionTreemap({ data }: MissionTreemapProps) {
+export function MissionTreemap({ data, onCellClick }: MissionTreemapProps) {
   const option = useMemo(() => {
     // Group by profession -> level -> mission count
-    const professionMap = new Map<string, Map<string, Array<{ mission_count: number; student_count: number }>>>();
+    const professionMap = new Map<string, Map<string, Array<{ mission_count: number; student_count: number; level_color: string }>>>();
 
     for (const row of data) {
       if (!professionMap.has(row.profession_icon)) {
@@ -29,6 +31,7 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
       levelMap.get(row.level)!.push({
         mission_count: row.mission_count,
         student_count: row.student_count,
+        level_color: row.level_color,
       });
     }
 
@@ -39,6 +42,8 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
         children: entries.map(e => ({
           name: `${e.mission_count} MPE`,
           value: e.student_count,
+          _missionCount: e.mission_count,
+          _levelColor: e.level_color,
         })),
       })),
     }));
@@ -64,7 +69,7 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
         right: 0,
         bottom: 0,
         roam: false,
-        nodeClick: 'zoomToNode',
+        nodeClick: false,
         breadcrumb: {
           show: true,
           top: 5,
@@ -72,7 +77,6 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
         },
         levels: [
           {
-            // Level 0: profession
             itemStyle: {
               borderColor: '#fff',
               borderWidth: 3,
@@ -90,7 +94,6 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
             },
           },
           {
-            // Level 1: AFP / CFC
             itemStyle: {
               borderColor: '#fff',
               borderWidth: 2,
@@ -110,7 +113,6 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
             color: ['#9AD9EA', '#1A237E'],
           },
           {
-            // Level 2: mission count leaves
             itemStyle: {
               borderColor: 'rgba(255,255,255,0.5)',
               borderWidth: 1,
@@ -132,6 +134,23 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
     };
   }, [data]);
 
+  const handleClick = useCallback((params: any) => {
+    if (!onCellClick) return;
+    const { treePathInfo, data: nodeData } = params;
+    // Only handle leaf clicks (depth 3: root > profession > level > leaf)
+    if (treePathInfo && treePathInfo.length === 4) {
+      const professionIcon = treePathInfo[1]?.name || '';
+      const level = treePathInfo[2]?.name || '';
+      const levelColor = level === 'AFP' ? '#9AD9EA' : '#1A237E';
+      const missionCount = nodeData?._missionCount ?? 0;
+      onCellClick({ professionIcon, level, levelColor, missionCount });
+    }
+  }, [onCellClick]);
+
+  const onEvents = useMemo(() => ({
+    click: handleClick,
+  }), [handleClick]);
+
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center h-96" style={{ color: 'var(--hazu-text-muted)' }}>
@@ -145,6 +164,7 @@ export function MissionTreemap({ data }: MissionTreemapProps) {
       option={option}
       style={{ height: '500px', width: '100%' }}
       notMerge
+      onEvents={onEvents}
     />
   );
 }
