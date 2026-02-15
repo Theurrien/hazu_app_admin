@@ -40,6 +40,11 @@ const IPC_CHANNELS = {
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
   FILE_PARSE: 'file:parse',
   FILE_SELECT_DIALOG: 'file:selectDialog',
+  MISSION_SYNC_START: 'mission:sync:start',
+  MISSION_SYNC_STATUS: 'mission:sync:status',
+  MISSION_GET_DASHBOARD_DATA: 'mission:dashboard:data',
+  MISSION_GET_PROFESSIONS: 'mission:professions:get',
+  MISSION_GET_STUDENTS: 'mission:students:get',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -183,6 +188,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   parseFile: (filePath: string, hasHeaders: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILE_PARSE, filePath, hasHeaders),
 
+  // Mission Analysis
+  missionSyncStart: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_SYNC_START),
+  missionSyncStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_SYNC_STATUS),
+  missionGetDashboardData: (filters: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_GET_DASHBOARD_DATA, filters),
+  missionGetProfessions: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_GET_PROFESSIONS),
+  missionGetStudents: (filters: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MISSION_GET_STUDENTS, filters),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -288,6 +305,23 @@ declare global {
         data?: { headers: string[]; rows: Record<string, string>[] };
         error?: string;
       }>;
+      missionSyncStart: () => Promise<{ success: boolean; error?: string }>;
+      missionSyncStatus: () => Promise<{
+        status: 'idle' | 'syncing' | 'error';
+        students_processed: number;
+        total_students: number;
+        last_synced_at: number | null;
+      }>;
+      missionGetDashboardData: (filters: any) => Promise<any>;
+      missionGetProfessions: () => Promise<Array<{ icon: string; student_count: number }>>;
+      missionGetStudents: (filters: any) => Promise<Array<{
+        id: string;
+        display_name: string;
+        icon: string;
+        color: string;
+        mission_count: number;
+        enterprise_name: string | null;
+      }>>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }

@@ -5,6 +5,7 @@ import { query, run, get } from '../database';
 import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
 import { runFullSync, getSyncProgress } from '../services/sync.service';
 import { sendApiRequestList } from '../services/hazu-api/api';
+import { runMissionSync, getMissionSyncStatus } from '../services/mission-sync.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -1221,6 +1222,175 @@ export function registerIpcHandlers(): void {
       }
     }
   );
+
+  // ============================================================================
+  // MISSION ANALYSIS
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.MISSION_SYNC_START, async () => {
+    try {
+      // Run async — don't await (the renderer polls status)
+      runMissionSync().catch(err => {
+        console.error('[IPC] Mission sync error:', err);
+        run('UPDATE mission_sync_status SET status = ? WHERE id = 1', ['error']);
+      });
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MISSION_SYNC_STATUS, async () => {
+    return getMissionSyncStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MISSION_GET_PROFESSIONS, async () => {
+    return query(`
+      SELECT DISTINCT p.icon, COUNT(*) as student_count
+      FROM persons p
+      WHERE p.person_type = 'student'
+        AND p.color IN ('#9AD9EA', '#1A237E')
+        AND p.icon IS NOT NULL
+      GROUP BY p.icon
+      ORDER BY student_count DESC
+    `);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MISSION_GET_DASHBOARD_DATA, async (_event, filters: any) => {
+    const { lieu, professions, level, classId } = filters || {};
+
+    // Map level to color
+    const levelColor = level === 'afp' ? '#9AD9EA' : level === 'cfc' ? '#1A237E' : null;
+
+    // Build profession filter
+    let professionFilter = '';
+    if (professions && professions.length > 0) {
+      const placeholders = professions.map(() => '?').join(',');
+      professionFilter = `AND p.icon IN (${placeholders})`;
+    }
+
+    // Build complete query
+    const sql = `
+      SELECT
+        p.icon AS profession_icon,
+        CASE p.color
+          WHEN '#9AD9EA' THEN 'AFP'
+          WHEN '#1A237E' THEN 'CFC'
+        END AS level,
+        p.color AS level_color,
+        COALESCE(m.mission_count, 0) AS mission_count,
+        COUNT(*) AS student_count
+      FROM persons p
+      LEFT JOIN (
+        SELECT
+          person_id,
+          COUNT(DISTINCT mission_name) AS mission_count
+        FROM mission_tracking
+        WHERE is_official = 1
+          ${lieu ? "AND lieu_de_formation = ?" : ""}
+        GROUP BY person_id
+      ) m ON m.person_id = p.id
+      ${classId ? "INNER JOIN person_room_assignments pra ON pra.person_id = p.id INNER JOIN rooms r ON r.id = pra.room_id AND r.room_type = 'class' AND r.id = ?" : ""}
+      WHERE p.person_type = 'student'
+        AND p.color IN ('#9AD9EA', '#1A237E')
+        ${professionFilter}
+        ${levelColor ? "AND p.color = ?" : ""}
+      GROUP BY p.icon, p.color, mission_count
+      ORDER BY p.icon, p.color, mission_count
+    `;
+
+    // Build params array in order matching the SQL placeholders
+    const queryParams: any[] = [];
+    if (lieu) queryParams.push(lieu);
+    if (classId) queryParams.push(classId);
+    if (professions && professions.length > 0) queryParams.push(...professions);
+    if (levelColor) queryParams.push(levelColor);
+
+    const distribution = query(sql, queryParams);
+
+    // Summary stats
+    const summaryResult = query<any>(`
+      SELECT
+        COUNT(DISTINCT p.id) as total_students,
+        MAX(COALESCE(m.mc, 0)) as max_missions
+      FROM persons p
+      LEFT JOIN (
+        SELECT person_id, COUNT(DISTINCT mission_name) as mc
+        FROM mission_tracking WHERE is_official = 1
+        ${lieu ? "AND lieu_de_formation = ?" : ""}
+        GROUP BY person_id
+      ) m ON m.person_id = p.id
+      WHERE p.person_type = 'student'
+        AND p.color IN ('#9AD9EA', '#1A237E')
+    `, lieu ? [lieu] : []);
+
+    const totalStudents = summaryResult[0]?.total_students || 0;
+    const maxMissions = summaryResult[0]?.max_missions || 0;
+
+    // Calculate averages from distribution
+    let totalMissionCount = 0;
+    let studentSum = 0;
+    for (const row of distribution) {
+      totalMissionCount += (row as any).mission_count * (row as any).student_count;
+      studentSum += (row as any).student_count;
+    }
+
+    return {
+      distribution,
+      summary: {
+        total_students: totalStudents,
+        avg_missions: studentSum > 0 ? Math.round((totalMissionCount / studentSum) * 10) / 10 : 0,
+        avg_reflexions: 0,
+        max_missions: maxMissions,
+        total_distinct_missions: 0,
+      },
+    };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MISSION_GET_STUDENTS, async (_event, filters: any) => {
+    const { professionIcon, levelColor, missionCount, lieu, classId } = filters || {};
+
+    // Find students matching the criteria
+    const sql = `
+      SELECT DISTINCT
+        p.id,
+        p.display_name,
+        p.icon,
+        p.color,
+        COALESCE(m.mc, 0) AS mission_count,
+        ent.title AS enterprise_name
+      FROM persons p
+      LEFT JOIN (
+        SELECT person_id, COUNT(DISTINCT mission_name) AS mc
+        FROM mission_tracking
+        WHERE is_official = 1
+          ${lieu ? "AND lieu_de_formation = ?" : ""}
+        GROUP BY person_id
+      ) m ON m.person_id = p.id
+      LEFT JOIN (
+        SELECT pra.person_id, r.title
+        FROM person_room_assignments pra
+        INNER JOIN rooms r ON r.id = pra.room_id AND r.room_type = 'enterprise'
+        GROUP BY pra.person_id
+      ) ent ON ent.person_id = p.id
+      ${classId ? "INNER JOIN person_room_assignments pra_cls ON pra_cls.person_id = p.id INNER JOIN rooms r_cls ON r_cls.id = pra_cls.room_id AND r_cls.room_type = 'class' AND r_cls.id = ?" : ""}
+      WHERE p.person_type = 'student'
+        AND p.color IN ('#9AD9EA', '#1A237E')
+        ${professionIcon ? "AND p.icon = ?" : ""}
+        ${levelColor ? "AND p.color = ?" : ""}
+        AND COALESCE(m.mc, 0) = ?
+      ORDER BY p.display_name
+    `;
+
+    const params: any[] = [];
+    if (lieu) params.push(lieu);
+    if (classId) params.push(classId);
+    if (professionIcon) params.push(professionIcon);
+    if (levelColor) params.push(levelColor);
+    params.push(missionCount ?? 0);
+
+    return query(sql, params);
+  });
 
   // ============================================================================
   // SHELL

@@ -48,3 +48,6 @@ yarn-error.log*
 
 # Test coverage
 coverage/
+
+# Git worktrees
+.worktrees/

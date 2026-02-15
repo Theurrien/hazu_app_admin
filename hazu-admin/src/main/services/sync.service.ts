@@ -333,8 +333,8 @@ async function findAndSyncPersonContainers(parentId: string): Promise<void> {
           const lastName = nameParts.slice(1).join(" ") || "";
 
           const stmt = db.prepare(`
-            INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, role, tags, raw_data, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, role, icon, color, tags, raw_data, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `);
 
           stmt.run(
@@ -345,6 +345,8 @@ async function findAndSyncPersonContainers(parentId: string): Promise<void> {
             displayName,              // Title of the Hazu
             personType,               // Type comes from parent category
             "reader",
+            personSnapshot.icon || null,
+            personSnapshot.color || null,
             JSON.stringify(personTags),
             JSON.stringify(personSnapshot),
             Date.now()
@@ -469,8 +471,8 @@ async function syncPersonsRecursive(parentId: string): Promise<void> {
         for (const entry of aclEntries) {
           if (!entry.isGroup && entry.key) {
             const stmt = db.prepare(`
-              INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, role, tags, raw_data, synced_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, role, icon, color, tags, raw_data, synced_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
             const displayName = entry.displayName || "";
@@ -486,6 +488,8 @@ async function syncPersonsRecursive(parentId: string): Promise<void> {
               displayName,
               personType,
               entry.role || "reader",
+              null,
+              null,
               JSON.stringify(tags),
               JSON.stringify(entry),
               Date.now()
