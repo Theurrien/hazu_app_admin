@@ -41,5 +41,8 @@ coverage/
 *.temp
 .cache/
 
+# Debug/test HTML exports (may contain real data)
+*.html
+
 # Git worktrees
 .worktrees/

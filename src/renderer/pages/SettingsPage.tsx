@@ -109,7 +109,7 @@ function SettingsPage() {
               type="text"
               value={rootHazuId}
               onChange={(e) => setRootHazuId(e.target.value)}
-              placeholder="e.g., YznyEHgCGlZp9NueGJ1B"
+              placeholder="e.g., abc123XYZ..."
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="mt-1 text-sm text-gray-500">
@@ -128,7 +128,7 @@ function SettingsPage() {
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              placeholder="e.g., eixzjfiXYSYj3mpRDc9h8GKFPSq1"
+              placeholder="e.g., uid123abc..."
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="mt-1 text-sm text-gray-500">
