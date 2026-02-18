@@ -1,175 +1,166 @@
 # Hazu Admin
 
-A cross-platform desktop application for managing the Hazu educational platform. Built with Electron, React, and SQLite for offline-first data management.
+A desktop application for managing the Hazu educational platform — sync rooms, persons, and assignments from the Hazu API, visualize mission completion, and run bulk operations from a fast offline-first interface.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
 ![Electron](https://img.shields.io/badge/electron-39+-blue)
 ![React](https://img.shields.io/badge/react-19-61dafb)
 ![TypeScript](https://img.shields.io/badge/typescript-5.9-3178c6)
 
-## Features
+---
 
-- **Offline-First**: All data synced locally to SQLite for fast, offline access
-- **Cross-Platform**: Single codebase for macOS and Windows
-- **Room Management**: View and manage classes, companies, cantons, and CIE locations
-- **Person Management**: Manage students, teachers, mentors, advisors, and guardians
-- **Assignment Matrix**: View all person-room assignments in a matrix view
-- **Bulk Import**: Import rooms and persons from Excel files with column mapping
-- **Task Queue**: Background processing for bulk operations with progress tracking
-- **Mission Analysis**: Dashboard with treemap and heatmap charts showing student mission (MPE) completion by profession and level, with drill-down to individual students
-- **Hazu Design System**: UI aligned with the Hazu platform using Font Awesome icons
-- **Sync from Hazu**: Pull latest data from the Hazu platform API
+## What it does
 
-## Installation
+Hazu Admin connects to the Hazu platform API, mirrors your data into a local SQLite database, and gives you a set of management tools:
+
+- **Sync** — pull rooms, persons, and assignments from your Hazu environment on demand
+- **Room & Person pages** — browse and inspect all synced entities
+- **Assignment Matrix** — a grid view of every person–room assignment, filterable by type
+- **Bulk Import** — upload an Excel file to create rooms, create persons, or assign existing persons to rooms, with live preview and per-row control
+- **Mission Analysis** — treemap and heatmap dashboards showing student MPE completion by profession, level, and lieu de formation, with drill-down to individual students
+- **Task Queue** — all API writes run through a background queue with per-task status, error reporting, and retry
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
 - npm 9+
 
-### Setup
+### Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/Theurrien/hazu_app_admin.git
-cd hazu-admin
-
-# Install dependencies
-npm install
-
-# Rebuild native modules for Electron
-npx @electron/rebuild
-
-# Build the application
+cd hazu_app_admin
+npm install       # also rebuilds native modules for Electron automatically
 npm run build
-
-# Start the application
 npm start
 ```
 
-## Development
+### Configure
 
-```bash
-# Run in development mode (hot reload)
-npm run dev
+On first launch, open **Settings** and fill in:
 
-# Build for production
-npm run build
+| Setting | What to enter |
+|---------|---------------|
+| API Key | Your Hazu platform API key |
+| Environment | `swiss` (production), `io`, or `dev` |
+| Root Hazu ID | The ID of the root Hazu to sync from |
 
-# Package for distribution
-npm run dist
-```
+Then go to **Dashboard → Sync Now** to pull your data.
 
-## Configuration
-
-On first launch, configure the app in **Settings**:
-
-1. **API Key**: Your Hazu platform API key
-2. **Environment**: Select swiss (production), io, or dev
-3. **Root Hazu ID**: The ID of the root Hazu to sync from
+---
 
 ## Usage
 
-### Syncing Data
+### Rooms & Persons
 
-1. Configure your API settings in the Settings page
-2. Go to Dashboard and click "Sync Now"
-3. View synced rooms and persons in their respective pages
+After syncing, the **Rooms** and **Persons** pages list all entities pulled from your Hazu environment.
+
+Rooms are grouped by type:
+
+| Type | Description |
+|------|-------------|
+| State | Cantons / geographic regions |
+| Class | School classes |
+| Enterprise | Training companies |
+| CIE | Inter-company course locations |
+
+Persons are grouped by role: Student, School Teacher, Course Teacher, Company Mentor, State Advisor, Guardian.
 
 ### Bulk Import
 
-1. Go to **Bulk Import** page
-2. Select workflow: **Create Rooms** or **Create Persons**
-3. Upload an Excel file
-4. Map columns to fields (Room Name, First Name, Last Name, Email, etc.)
-5. Configure options (room category, person role, template)
-6. Review and execute - tasks run in background via Task Queue
+Go to **Bulk Import** and pick a workflow tab:
+
+**Create Rooms** — upload a file with room names, pick a room type and template, and queue creation tasks.
+
+**Create Persons** — upload a file with first name, last name, and email columns. Map columns, select a role and profile template, optionally assign grouping columns to link persons to rooms automatically on creation.
+
+**Assign Persons to Rooms** — upload a file with email and room columns. Map columns and pick a role. The app:
+
+1. Resolves each email to a known person and each room name to a known room
+2. Flags unresolved entries for manual matching
+3. Shows a preview table before you execute — rows already assigned are flagged with their current role and unchecked by default, per-row roles can be changed inline, any row can be unchecked to skip it
+4. Queues all included rows into the Task Queue when you click **Assign**
+
+**Verify** — cross-check your file against current assignments to spot gaps or duplicates before importing.
+
+All operations flow through the **Task Queue** panel (top-right) so you can monitor progress, inspect errors, and retry individual failed items without re-importing the file.
 
 ### Assignment Matrix
 
-- View all assignments in a grid format
-- Filter by room type or person type
-- Quick overview of who is assigned where
+A grid with persons on one axis and rooms on the other. Filter by room type and person type to focus on a specific segment — useful for a quick cross-check of who is assigned where.
 
 ### Mission Analysis
 
-1. Run main sync first (Dashboard > Sync Now) to populate person data
-2. Go to **Missions** tab and click **Sync Missions**
-3. View mission completion distribution as a **Treemap** or **Heatmap**
-4. Filter by lieu de formation (entreprise/ecole/cie), profession, level (AFP/CFC), or class
-5. Click any chart cell to see matching students with name, enterprise, and profile link
+1. Run a full sync first (**Dashboard → Sync Now**) so person data is fully populated
+2. Go to **Missions → Sync Missions** to fetch per-student mission records from Hazu
+3. Choose **Treemap** or **Heatmap** view
+4. Filter by lieu de formation, profession, level (AFP / CFC), or class
+5. Click any chart cell to see matching students with name, enterprise, mission count, and a direct link to their Hazu profile
 
-## Tech Stack
+---
 
-| Component | Technology |
-|-----------|------------|
+## For Developers
+
+### Dev setup
+
+```bash
+npm install
+npm run dev     # Vite + Electron with hot reload
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Development mode with hot reload |
+| `npm run build` | Production build |
+| `npm start` | Run the built app |
+| `npm run dist` | Package for distribution |
+
+### Project structure
+
+```
+├── src/
+│   ├── main/                  # Electron main process (Node.js)
+│   │   ├── database/          # SQLite initialisation & schema
+│   │   ├── ipc/               # All IPC handlers
+│   │   └── services/          # Hazu API client & sync logic
+│   ├── renderer/              # React frontend (Vite)
+│   │   ├── pages/             # One file per app page
+│   │   ├── components/        # Shared UI components
+│   │   └── contexts/          # TaskQueue context
+│   └── shared/                # Types & IPC channel constants
+├── dist/                      # Build output
+└── release/                   # Packaged distributables
+```
+
+IPC communication: `renderer → preload (contextBridge) → ipcMain handlers → SQLite / Hazu API`
+
+### Tech stack
+
+| Layer | Technology |
+|-------|------------|
 | Runtime | Electron 39 |
 | Frontend | React 19 + TypeScript |
 | Styling | Tailwind CSS 4 |
 | Icons | Font Awesome 6 |
-| State | Zustand |
 | Database | better-sqlite3 |
 | Charts | ECharts (echarts-for-react) |
 | Bundler | Vite 7 |
 | Packaging | electron-builder |
 
-## Project Structure
+### Extending the app
 
-```
-hazu-admin/
-├── src/
-│   ├── main/              # Electron main process
-│   │   ├── database/      # SQLite setup & schema
-│   │   ├── ipc/           # IPC handlers
-│   │   └── services/      # Hazu API & sync
-│   ├── renderer/          # React frontend
-│   │   ├── pages/         # App pages
-│   │   ├── components/    # UI components
-│   │   └── contexts/      # React contexts (TaskQueue)
-│   └── shared/            # Shared types & constants
-├── docs/
-│   └── plans/             # Design documents
-├── dist/                  # Build output
-└── release/               # Packaged apps
-```
+- **New IPC channel** — add a constant to `src/shared/ipc-channels.ts`, a handler to `src/main/ipc/index.ts`, and expose it in `src/main/preload.ts`
+- **New page** — create `src/renderer/pages/NewPage.tsx`, add a route in `App.tsx`, add a nav item in `Sidebar.tsx`
+- **New database column** — update `src/main/database/schema.sql` and the corresponding interface in `src/shared/types.ts`
 
-## Entity Types
-
-### Rooms
-- **State**: Cantons/geographic regions
-- **Class**: School classes
-- **Enterprise**: Training companies
-- **CIE**: Inter-company course locations
-
-### Persons
-- **Student**: Apprentices/students
-- **School Teacher**: School-based instructors
-- **Course Teacher**: Course instructors
-- **Company Mentor**: Workplace supervisors
-- **State Advisor**: Government advisors
-- **Guardian**: Parents/legal guardians
-
-## Database
-
-Data is stored in SQLite at:
-- **macOS**: `~/Library/Application Support/hazu-admin/hazu-admin.db`
-- **Windows**: `%APPDATA%/hazu-admin/hazu-admin.db`
-
-## Roadmap
-
-- [x] Phase 1: Foundation (Electron + React + SQLite + API sync)
-- [x] Phase 2: Room & Person pages with assignments view
-- [x] Phase 3: Assignment Matrix view
-- [x] Phase 4: Bulk Import (Rooms & Persons from Excel)
-- [x] Phase 5: Mission Analysis Dashboard
-- [ ] Phase 6: Bulk Assignment import
-- [ ] Phase 7: n8n webhook integration for change sync
+---
 
 ## License
 
-MIT License
-
-## Acknowledgments
-
-- Built for the [Hazu](https://hazu.ch) educational platform
-- UI design aligned with Hazu platform design language
+MIT — built for the [Hazu](https://hazu.ch) educational platform.
