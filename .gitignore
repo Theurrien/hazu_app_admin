@@ -46,3 +46,4 @@ coverage/
 
 # Git worktrees
 .worktrees/
+docs/
