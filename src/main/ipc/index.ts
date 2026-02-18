@@ -634,103 +634,106 @@ export function registerIpcHandlers(): void {
       }
     ) => {
       try {
-        // Get config from settings
-        const rootHazuIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'root_hazu_id'");
+        // Get admin_id (hz-config-admin hazu) - this is the templateId for update-user-roles
         const adminIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'admin_id'");
-        const rootHazuId = rootHazuIdRow?.value;
-        const adminId = adminIdRow?.value;
+        const templateId = adminIdRow?.value;
 
-        if (!rootHazuId || !adminId) {
-          return { success: false, error: 'Configuration missing. Please run sync first.' };
+        if (!templateId) {
+          return { success: false, error: 'Admin ID not found. Please run sync first.' };
         }
 
-        // Group assignments by person (aggregate classIds)
+        // Group assignments by person (aggregate userTypesInfo)
         const byPerson = new Map<
           string,
           {
             personId: string;
-            personEmail: string;
-            firstName: string;
-            lastName: string;
-            classIds: Array<{ classId: string; userType: string }>;
+            userTypesInfo: Array<{ classId: string; oldUserType: string; newUserType: string }>;
           }
         >();
 
         for (const assignment of payload.assignments) {
-          // Look up distribution group
-          const distGroup = get<{ id: string }>(
-            'SELECT id FROM distribution_groups WHERE room_id = ? AND role = ?',
-            [assignment.roomId, assignment.role]
-          );
-
-          if (!distGroup) {
-            console.warn(
-              `[ASSIGNMENTS_EXECUTE] No distribution group for room ${assignment.roomId} and role ${assignment.role}`
-            );
-            continue;
-          }
-
           const existing = byPerson.get(assignment.personId);
+          const roleEntry = {
+            classId: assignment.roomId,
+            oldUserType: '_',
+            newUserType: assignment.role,
+          };
+
           if (existing) {
-            existing.classIds.push({
-              classId: distGroup.id,
-              userType: assignment.role,
-            });
+            existing.userTypesInfo.push(roleEntry);
           } else {
             byPerson.set(assignment.personId, {
               personId: assignment.personId,
-              personEmail: assignment.personEmail,
-              firstName: assignment.firstName,
-              lastName: assignment.lastName,
-              classIds: [{ classId: distGroup.id, userType: assignment.role }],
+              userTypesInfo: [roleEntry],
             });
           }
         }
 
-        // Build API payload
-        const users = Array.from(byPerson.values()).map((person) => ({
-          sourceId: rootHazuId,
-          adminId: adminId,
-          targetId: person.personId,
-          userEmail: person.personEmail,
-          firstName: person.firstName,
-          lastName: person.lastName,
-          classIds: person.classIds,
-        }));
+        const persons = Array.from(byPerson.values());
 
-        if (users.length === 0) {
+        if (persons.length === 0) {
           return { success: false, error: 'No valid assignments to execute.' };
         }
 
-        console.log('[ASSIGNMENTS_EXECUTE] Sending', users.length, 'users to API');
+        console.log('[ASSIGNMENTS_EXECUTE] Updating roles for', persons.length, 'persons');
 
-        // Call API
         const { getApiEndpoint, getApiKey } = await import('../services/hazu-api/config');
         const token = getApiKey();
         const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
-        const response = await axios.post(
-          `https://${getApiEndpoint()}/api-v2-admin/add-users`,
-          { users },
-          { headers, timeout: 120000 }
-        );
 
-        console.log('[ASSIGNMENTS_EXECUTE] Response:', response.status, response.data);
+        let successful = 0;
+        let failed = 0;
+        const errors: string[] = [];
 
-        // Update local DB with new assignments
-        const now = Date.now();
-        for (const assignment of payload.assignments) {
-          run(
-            `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
-             VALUES (?, ?, ?, ?)`,
-            [assignment.personId, assignment.roomId, assignment.role, now]
-          );
+        // Call update-user-roles for each person
+        for (const person of persons) {
+          try {
+            const body = {
+              templateId: templateId,
+              profileId: person.personId,
+              userTypesInfo: person.userTypesInfo,
+            };
+            console.log(`[ASSIGNMENTS_EXECUTE] Request body:`, JSON.stringify(body, null, 2));
+            console.log(`[ASSIGNMENTS_EXECUTE] Endpoint: https://${getApiEndpoint()}/api-v2-admin/update-user-roles`);
+            const response = await axios.post(
+              `https://${getApiEndpoint()}/api-v2-admin/update-user-roles`,
+              body,
+              { headers, timeout: 120000 }
+            );
+            console.log(`[ASSIGNMENTS_EXECUTE] ${person.personId}: ${response.status}`, response.data);
+            successful++;
+          } catch (err) {
+            failed++;
+            if (axios.isAxiosError(err)) {
+              console.error(`[ASSIGNMENTS_EXECUTE] Failed for ${person.personId}:`, err.response?.status, JSON.stringify(err.response?.data, null, 2));
+            } else {
+              console.error(`[ASSIGNMENTS_EXECUTE] Failed for ${person.personId}:`, err);
+            }
+            const msg = axios.isAxiosError(err)
+              ? err.response?.data?.message || err.response?.data?.error || JSON.stringify(err.response?.data) || err.message
+              : err instanceof Error ? err.message : 'Unknown error';
+            errors.push(`${person.personId}: ${msg}`);
+          }
+        }
+
+        // Update local DB for successful assignments
+        if (successful > 0) {
+          const now = Date.now();
+          for (const assignment of payload.assignments) {
+            run(
+              `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
+               VALUES (?, ?, ?, ?)`,
+              [assignment.personId, assignment.roomId, assignment.role, now]
+            );
+          }
         }
 
         return {
-          success: true,
-          totalUsers: response.data.totalUsers || users.length,
-          successful: response.data.successful || users.length,
-          failed: response.data.failed || 0,
+          success: failed === 0,
+          totalUsers: persons.length,
+          successful,
+          failed,
+          errors: errors.length > 0 ? errors : undefined,
         };
       } catch (error) {
         console.error('Execute assignments error:', error);
@@ -759,45 +762,36 @@ export function registerIpcHandlers(): void {
       newRole: string | null
     ) => {
       try {
-        // Get webhook config - templateId is actually root_hazu_id
-        const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
-        const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
+        const adminIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'admin_id'");
+        const templateId = adminIdRow?.value;
 
-        if (!webhookUrl) {
-          return { success: false, error: 'Webhook not configured. Run sync first.' };
+        if (!templateId) {
+          return { success: false, error: 'Admin ID not found. Please run sync first.' };
         }
 
-        if (!rootHazuId) {
-          return { success: false, error: 'Root Hazu ID not configured. Go to Settings.' };
-        }
+        const { getApiEndpoint, getApiKey } = await import('../services/hazu-api/config');
+        const token = getApiKey();
+        const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
 
-        // Build payload - matches Admin Panel format exactly
-        const payload = {
-          hazu: {
-            env: '',
-          },
-          data: { action: 'update-user-roles' },
-          dataForCloudFunction: {
-            templateId: rootHazuId,
-            profileId: personId,
-            userTypesInfo: [
-              {
-                classId: roomId,
-                // Use '_' to indicate no role (deletion) in webhook payload
-                oldUserType: oldRole || '_',
-                newUserType: newRole || '_',
-              },
-            ],
-          },
+        const apiPayload = {
+          templateId: templateId,
+          profileId: personId,
+          userTypesInfo: [
+            {
+              classId: roomId,
+              oldUserType: oldRole || '_',
+              newUserType: newRole || '_',
+            },
+          ],
         };
 
-        // Call webhook
-        console.log('[WEBHOOK] Sending payload:', JSON.stringify(payload, null, 2));
-        const response = await axios.post(webhookUrl, payload, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 100000,
-        });
-        console.log('[WEBHOOK] Response:', response.status, response.data);
+        console.log('[UPDATE_USER_ROLE] Calling API:', JSON.stringify(apiPayload, null, 2));
+        const response = await axios.post(
+          `https://${getApiEndpoint()}/api-v2-admin/update-user-roles`,
+          apiPayload,
+          { headers, timeout: 120000 }
+        );
+        console.log('[UPDATE_USER_ROLE] Response:', response.status, response.data);
 
         // Update local DB on success
         if (newRole && newRole !== '_') {
@@ -815,9 +809,7 @@ export function registerIpcHandlers(): void {
 
         return { success: true };
       } catch (error) {
-        // Webhooks return error objects instead of throwing
-        // to allow graceful UI handling of network failures
-        console.error('Webhook error:', error);
+        console.error('Update user role error:', error);
         let message = 'Unknown error';
         if (axios.isAxiosError(error)) {
           message = error.response?.data?.message || error.message;
@@ -950,20 +942,9 @@ export function registerIpcHandlers(): void {
       }
     ) => {
       try {
-        // Get webhook config
-        const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value;
-        const adminIdRow = query(`SELECT value FROM settings WHERE key = 'admin_id'`)?.[0]?.value;
-        const rootHazuId = query(`SELECT value FROM settings WHERE key = 'root_hazu_id'`)?.[0]?.value;
-
-        if (!webhookUrl) {
-          return { success: false, error: 'Webhook not configured. Run sync first.' };
-        }
-
-        // Use admin_id if available, fall back to root_hazu_id
-        const adminId = adminIdRow || rootHazuId;
-        if (!adminId) {
-          return { success: false, error: 'Admin ID not configured. Go to Settings.' };
-        }
+        const { getApiEndpoint, getApiKey } = await import('../services/hazu-api/config');
+        const token = getApiKey();
+        const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
 
         // Build classIds array from roomIds
         const classIds = params.roomIds.map(roomId => ({
@@ -971,38 +952,32 @@ export function registerIpcHandlers(): void {
           userType: params.role,
         }));
 
-        // Build payload for add-user action
-        const payload = {
-          data: {
-            action: 'add-user',
-            invitationMail: params.invitationMail,
-          },
-          hazu: {
-            env: '',
-          },
-          dataForCloudFunction: {
-            sourceId: params.sourceId,           // Template to copy from
-            targetId: params.targetId,           // Profile category folder ID
-            adminId: adminId,                    // Admin Hazu ID
-            firstName: params.firstName,
-            lastName: params.lastName,
-            userEmail: params.userEmail,
-            classIds: classIds,                  // Room assignments
-          },
+        // Build payload for add-users endpoint
+        const apiPayload = {
+          users: [
+            {
+              sourceId: params.sourceId,           // Profile template ID
+              targetId: params.targetId,           // Parent container ID (where profiles are stored)
+              firstName: params.firstName,
+              lastName: params.lastName,
+              userEmail: params.userEmail,
+              classIds: classIds,                  // Room assignments
+            },
+          ],
         };
 
-        // Call webhook
-        console.log('[WEBHOOK_CREATE_PERSON] Sending payload:', JSON.stringify(payload, null, 2));
-        const response = await axios.post(webhookUrl, payload, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 100000,
-        });
-        console.log('[WEBHOOK_CREATE_PERSON] Response:', response.status, response.data);
+        console.log('[CREATE_PERSON] Calling API:', JSON.stringify(apiPayload, null, 2));
+        const response = await axios.post(
+          `https://${getApiEndpoint()}/api-v2-admin/add-users`,
+          apiPayload,
+          { headers, timeout: 120000 }
+        );
+        console.log('[CREATE_PERSON] Response:', response.status, response.data);
 
         // Extract person data from response
         const profileSnapshot = response.data?.profileSnapshot?.snapshot;
         if (!profileSnapshot) {
-          return { success: false, error: 'Invalid webhook response: missing profileSnapshot' };
+          return { success: false, error: 'Invalid API response: missing profileSnapshot' };
         }
 
         // Insert into persons table
@@ -1045,10 +1020,10 @@ export function registerIpcHandlers(): void {
           synced_at: now,
         };
 
-        console.log('[WEBHOOK_CREATE_PERSON] Person created successfully:', person.id);
+        console.log('[CREATE_PERSON] Person created successfully:', person.id);
         return { success: true, person };
       } catch (error) {
-        console.error('Webhook create person error:', error);
+        console.error('Create person error:', error);
         let message = 'Unknown error';
         if (axios.isAxiosError(error)) {
           message = error.response?.data?.message || error.message;
