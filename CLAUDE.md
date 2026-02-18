@@ -1,617 +1,273 @@
-# CLAUDE.md - Hazu API Starter Kit
+# CLAUDE.md - Hazu Admin Desktop App
 
-This is the foundation for building integrations with the Hazu platform. This document provides everything you need to understand and work with the Hazu API.
+This is the development guide for Claude and other AI assistants working on the Hazu Admin desktop application.
 
-## Quick Start
+## Project Overview
+
+Cross-platform Electron + React desktop app for managing the Hazu educational platform. Syncs data locally to SQLite for offline management of persons, rooms, and assignments.
+
+## Quick Commands
 
 ```bash
-# 1. Install dependencies
+# Install dependencies
 npm install
 
-# 2. Copy and configure environment
-cp .env.example .env
-# Edit .env with your API keys
+# Development (runs Vite + Electron concurrently)
+npm run dev
 
-# 3. Set your environment in config.ts
-# Change: export const env: "swiss" | "io" | "dev" = "swiss";
+# Build for production
+npm run build
 
-# 4. Run an example
-npx ts-node examples/basic-usage.ts
+# Start built app
+npm start
+
+# Package for distribution
+npm run dist
 ```
 
 ## Project Structure
 
 ```
-hazu_start/
-├── config.ts          # Environment configuration
-├── api.ts             # Core API functions (15+ endpoints)
-├── interfaces.ts      # TypeScript type definitions
-├── helpers.ts         # Utility functions
-├── package.json       # Dependencies
-├── tsconfig.json      # TypeScript config
-├── .env.example       # Environment template
-├── examples/
-│   └── basic-usage.ts # Usage examples
-└── CLAUDE.md          # This documentation
+hazu-admin/
+├── src/
+│   ├── main/                    # Electron Main Process (Node.js)
+│   │   ├── index.ts            # App entry, window creation
+│   │   ├── preload.ts          # IPC bridge (contextBridge)
+│   │   ├── database/
+│   │   │   ├── index.ts        # SQLite initialization
+│   │   │   └── schema.sql      # Database schema
+│   │   ├── ipc/
+│   │   │   └── index.ts        # All IPC handlers
+│   │   └── services/
+│   │       ├── hazu-api/       # Hazu API client
+│   │       │   ├── api.ts      # HTTP functions
+│   │       │   ├── config.ts   # Environment config
+│   │       │   ├── helpers.ts  # Utilities
+│   │       │   └── interfaces.ts
+│   │       ├── sync.service.ts # Hazu → SQLite sync
+│   │       └── mission-sync.service.ts # Mission data sync
+│   │
+│   ├── renderer/               # React Frontend (Vite)
+│   │   ├── App.tsx            # Main app with routing
+│   │   ├── main.tsx           # React entry point
+│   │   ├── pages/
+│   │   │   ├── Dashboard.tsx
+│   │   │   ├── RoomsPage.tsx
+│   │   │   ├── PersonsPage.tsx
+│   │   │   ├── MissionAnalysisPage.tsx
+│   │   │   └── SettingsPage.tsx
+│   │   ├── components/
+│   │   │   ├── layout/
+│   │   │   │   ├── Sidebar.tsx
+│   │   │   │   └── Header.tsx
+│   │   │   └── mission-analysis/
+│   │   │       ├── MissionSyncButton.tsx
+│   │   │       ├── MissionFilterBar.tsx
+│   │   │       ├── MissionTreemap.tsx
+│   │   │       ├── MissionHeatmap.tsx
+│   │   │       ├── MissionSummaryBar.tsx
+│   │   │       └── MissionStudentList.tsx
+│   │   └── styles/
+│   │       └── global.css      # Tailwind imports
+│   │
+│   └── shared/                 # Shared between main & renderer
+│       ├── types.ts           # TypeScript interfaces
+│       └── ipc-channels.ts    # IPC channel constants
+│
+├── dist/                       # Build output
+├── package.json
+├── tsconfig.json              # Renderer TypeScript config
+├── tsconfig.main.json         # Main process TypeScript config
+├── vite.config.ts             # Vite bundler config
+├── tailwind.config.js
+└── postcss.config.js
 ```
 
-## Understanding Hazu
+## Architecture
 
-### What is a Hazu?
+### Main Process (Electron)
+- Runs in Node.js environment
+- Handles SQLite database operations
+- Makes HTTP requests to Hazu API
+- Communicates with renderer via IPC
 
-Hazu is a hierarchical content platform where:
-- **Hazu** (type: `"hazu"`) = Container that can have children
-- **Item** (type: `"item"`) = Leaf node, cannot have children
+### Renderer Process (React)
+- Runs in Chromium browser context
+- No direct Node.js/filesystem access
+- Uses `window.electronAPI` for all backend operations
+- Styled with Tailwind CSS
 
-Think of it like a file system: Hazus are folders, Items are files.
-
-### Entity Hierarchy
-
-```
-Root Hazu
-├── Child Hazu
-│   ├── Grandchild Hazu
-│   │   └── Item
-│   └── Item
-└── Item
-```
-
-### Entity Properties
-
-Every Hazu/Item has these core properties:
-- `key` / `id` - Unique identifier
-- `title` - Display name
-- `description` - Short description
-- `color` - Hex color code (e.g., "#FF5733")
-- `icon` - Font Awesome class (e.g., "fa-star")
-- `type` - "hazu" or "item"
-- `parentId` - ID of parent entity
-- `tags` - Array of string tags
-- `privacy` - Privacy setting
-- `dateCreated` - Creation timestamp
-
-## Environment Configuration
-
-### Three Environments
-
-| Environment | Endpoint | Use Case |
-|-------------|----------|----------|
-| swiss | europe-west6-hazu-ch.cloudfunctions.net | Production |
-| io | us-central1-blazing-torch-5326.cloudfunctions.net | IO environment |
-| dev | europe-west6-hazu-ch-dev.cloudfunctions.net | Development |
-
-### Setting Up
-
-1. Create `.env` file with your API keys:
-```env
-HAZU_API_KEY_SUPPORT_SWISS=your-key-here
-HAZU_API_KEY_SUPPORT_IO=your-key-here
-HAZU_API_KEY_SUPPORT_DEV=your-key-here
-```
-
-2. Set active environment in `config.ts`:
-```typescript
-export const env: "swiss" | "io" | "dev" = "swiss";
-```
-
-### Authentication
-
-The API uses dual authentication based on key length:
-- **Legacy keys** (≤20 chars): `token` header
-- **Modern keys** (>20 chars): `x-api-key` header
-
-This is handled automatically by `api.ts`.
-
-## Core API Functions
-
-### Read Operations
+### IPC Communication
+All communication between renderer and main uses typed IPC channels:
 
 ```typescript
-import { sendApiRequestRead, sendApiRequestList } from "./api";
+// Renderer calls:
+const rooms = await window.electronAPI.getRooms();
+const result = await window.electronAPI.runSync();
 
-// Read a single entity
-const hazu = await sendApiRequestRead("hazu-id");
-console.log(hazu.snapshot.title);
-
-// List children of a parent
-const children = await sendApiRequestList("parent-id");
-children.forEach(child => console.log(child.snapshot.title));
-
-// List with optional filters
-const filtered = await sendApiRequestList(
-  "parent-id",
-  "filter",      // Filter string
-  "title",       // Title filter
-  "description", // Description filter
-  "fulltext"     // Fulltext search
-);
+// Main handles via ipcMain.handle()
 ```
 
-### Create Operations
+## Database Schema
+
+### Core Tables
+- `rooms` - Classes, companies, cantons, CIE locations
+- `persons` - Students, teachers, mentors, advisors, guardians (includes `icon` and `color` columns for profession/level identification)
+- `person_room_assignments` - Many-to-many relationships
+- `change_log` - Track local modifications for n8n sync
+- `settings` - App configuration (API key, environment, etc.)
+- `tag_mappings` - Hazu tag → semantic type mappings
+
+### Mission Analysis Tables
+- `mission_tracking` - Per-student mission records (person_id, mission_name, is_official, lieu_de_formation, item_count, total_points)
+- `mission_sync_status` - Tracks sync progress (students_processed, total_students, last_synced_at, status)
+
+### Room Types (identified by tags)
+| Tag | Type |
+|-----|------|
+| `hz-config-room-state` | Canton/State |
+| `hz-config-room-class` | School class |
+| `hz-config-room-entreprise` | Training company |
+| `hz-config-room-cie` | CIE location |
+
+### Person Types (identified by tag prefixes)
+| Tag Prefix | Type |
+|------------|------|
+| `hz-share-student-*` | Student |
+| `hz-share-companymentor-*` | Company mentor |
+| `hz-share-schoolteacher-*` | School teacher |
+| `hz-share-courseteacher-*` | Course teacher |
+| `hz-share-stateadvisor-*` | State advisor |
+| `hz-share-guardian-*` | Parent/Guardian |
+
+## Key Files to Know
+
+### When modifying IPC communication:
+1. `src/shared/ipc-channels.ts` - Add channel constant
+2. `src/main/ipc/index.ts` - Add handler
+3. `src/main/preload.ts` - Expose to renderer + update types
+
+### When adding new pages:
+1. Create `src/renderer/pages/NewPage.tsx`
+2. Add route in `src/renderer/App.tsx`
+3. Add nav item in `src/renderer/components/layout/Sidebar.tsx`
+
+### When modifying database:
+1. Update `src/main/database/schema.sql`
+2. Update `src/shared/types.ts` interfaces
+3. Add IPC handlers in `src/main/ipc/index.ts`
+
+## Hazu API
+
+The app integrates with the Hazu platform API. Key functions in `src/main/services/hazu-api/api.ts`:
 
 ```typescript
-import { sendApiRequestCreate } from "./api";
-import { CreateOptions } from "./interfaces";
-
-const options: CreateOptions = {
-  parentId: "parent-id",
-  type: "hazu",              // or "item"
-  title: "My New Hazu",
-  description: "Description here",
-  color: "#FF5733",
-  icon: "fa-star",
-  authorId: "author-id",
-  displayName: "Author Name",
-  privacy: "private",
-  tags: ["tag1", "tag2"],
-};
-
-const result = await sendApiRequestCreate(options);
-console.log("Created:", result.key);
+sendApiRequestRead(id)           // Read single entity
+sendApiRequestList(parentId)     // List children
+sendApiRequestCreate(options)    // Create entity
+sendApiRequestUpdate(id, options)// Update entity
+sendApiRequestGetAclInfo(id)     // Get access control list
+sendApiRequestAddGroup(id, group)// Add group access
 ```
 
-### Update Operations
+### API Configuration
+Stored in SQLite settings table:
+- `api_key` - Hazu API key
+- `environment` - "swiss" | "io" | "dev"
+- `root_hazu_id` - Root Hazu ID to sync from
 
+## Common Tasks
+
+### Adding a new database query
 ```typescript
-import { sendApiRequestUpdate } from "./api";
-
-await sendApiRequestUpdate("hazu-id", {
-  title: "New Title",
-  description: "New description",
-  color: "#00FF00",
-  linkName: "url-friendly-name",
-  importFromHazu: "everybody",  // Permission level
-  importIntoHazu: "reader",     // Permission level
-});
-```
-
-### Delete Operations
-
-```typescript
-import { sendApiRequestRemove } from "./api";
-
-await sendApiRequestRemove("hazu-id");
-```
-
-### Tag Operations
-
-```typescript
-import { sendApiRequestAddTags, sendApiRequestRemoveTags } from "./api";
-
-// Add tags
-await sendApiRequestAddTags("hazu-id", ["important", "reviewed"]);
-
-// Remove tags
-await sendApiRequestRemoveTags("hazu-id", ["obsolete"]);
-```
-
-### Group Operations
-
-```typescript
-import { sendApiRequestAddGroup, sendApiRequestRemoveGroup } from "./api";
-
-// Add group access
-await sendApiRequestAddGroup("hazu-id", "group-identifier");
-
-// Remove group access
-await sendApiRequestRemoveGroup("hazu-id", "group-identifier");
-```
-
-### User Operations
-
-```typescript
-import {
-  sendApiRequestCreateUser,
-  sendApiRequestUpdateRole,
-  sendApiRequestRemoveUser
-} from "./api";
-
-// Create user with class assignments
-await sendApiRequestCreateUser(
-  "source-id",
-  ["class1", "class2"],
-  "John",
-  "Doe",
-  "target-id",
-  "sharing-groups-id",
-  "john@example.com"
-);
-
-// Update user role
-await sendApiRequestUpdateRole("user-id", "hazu-id", "editor");
-
-// Remove user access
-await sendApiRequestRemoveUser("hazu-id", "user-id");
-// or by email:
-await sendApiRequestRemoveUser("hazu-id", undefined, "user@example.com");
-```
-
-### ACL Operations
-
-```typescript
-import { sendApiRequestGetAclInfo, sendApiRequestPropagate } from "./api";
-
-// Get access control list
-const acl = await sendApiRequestGetAclInfo("hazu-id");
-acl.data.forEach(entry => {
-  console.log(`${entry.displayName}: ${entry.role}`);
+// 1. In src/main/ipc/index.ts
+ipcMain.handle('myChannel', async (_event, param) => {
+  return query('SELECT * FROM table WHERE col = ?', [param]);
 });
 
-// Propagate permissions
-await sendApiRequestPropagate({
-  creatorId: "creator-id",
-  currentLang: "en",
-  link: "https://hazu.app/...",
-  type: "all",           // "all", "public", "deleteAll", "deletePublic"
-  userOrGroup: "user",   // "user" or "group"
-  userIdOrEmail: "user@example.com",
-});
+// 2. In src/shared/ipc-channels.ts
+MY_CHANNEL: 'myChannel',
+
+// 3. In src/main/preload.ts
+myMethod: (param: string) => ipcRenderer.invoke(IPC_CHANNELS.MY_CHANNEL, param),
+// Also add to Window interface
 ```
 
-## Permission Levels
-
-Used in import settings and role assignments:
-
-| Level | Description |
-|-------|-------------|
-| `admin` | Full administrative access |
-| `editor` | Can edit content |
-| `reader` | Read-only access |
-| `owner` | Owner of the Hazu |
-| `registered` | Registered users only |
-| `verified` | Verified users only |
-| `everybody` | Public access |
-
-## Helper Functions
-
-### Text Processing
-
-```typescript
-import { removeHTMLTags } from "./helpers";
-
-const clean = removeHTMLTags("<p>Hello <strong>World</strong></p>");
-// Returns: "Hello World"
-```
-
-### Date Utilities
-
-```typescript
-import { parseEuropeanDate, formatEuropeanDate } from "./helpers";
-
-// Parse European format (dd.mm.yy or dd.mm.yyyy)
-const date = parseEuropeanDate("15.03.24");  // March 15, 2024
-
-// Format to European format
-const str = formatEuropeanDate(new Date()); // "19.12.2024"
-```
-
-### Filtering
-
-```typescript
-import { matchesFilters } from "./helpers";
-import { HazuFilterOptions } from "./interfaces";
-
-const filters: HazuFilterOptions = {
-  icon: "fa-book",
-  color: "#FF5733",
-  title: "Chapter",
-  titleMatchType: "contains",  // "exact", "contains", or "regex"
-  createdAfter: "01.01.24",    // European date format
-  createdBefore: "31.12.24",
-};
-
-const result = matchesFilters(hazu, filters);
-if (result.matches) {
-  // Process the hazu
-} else {
-  console.log("Skipped:", result.reason);
-}
-```
-
-### Tag Utilities
-
-```typescript
-import { compareTagArrays, validateTags, normalizeTags } from "./helpers";
-
-// Compare tag arrays (order-independent)
-compareTagArrays(["a", "b"], ["b", "a"]); // true
-
-// Validate tags
-const validation = validateTags(["good-tag", "bad tag"]);
-// { valid: false, invalidTags: ["bad tag"] }
-
-// Normalize tags
-const normalized = normalizeTags(["TAG", "  tag  ", "Tag"]);
-// ["tag"]
-```
-
-## Common Patterns
-
-### Pattern 1: Fetch and Process Children
-
-```typescript
-const children = await sendApiRequestList(parentId);
-
-if (!children) {
-  console.error("Failed to fetch children");
-  return;
-}
-
-for (const child of children) {
-  const { matches, reason } = matchesFilters(child, filters);
-
-  if (!matches) {
-    console.log(`Skipping ${child.snapshot.title}: ${reason}`);
-    continue;
-  }
-
-  // Process matching child
-  await processChild(child);
-}
-```
-
-### Pattern 2: Batch Updates with Results
-
-```typescript
-import { summarizeResults } from "./helpers";
-
-const results: Array<{ success: boolean; id: string; error?: string }> = [];
-
-for (const item of items) {
-  try {
-    await sendApiRequestUpdate(item.id, updateOptions);
-    results.push({ success: true, id: item.id });
-  } catch (error) {
-    results.push({
-      success: false,
-      id: item.id,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-}
-
-const summary = summarizeResults(results);
-console.log(`Processed: ${summary.total}, Success: ${summary.successful}, Failed: ${summary.failed}`);
-```
-
-### Pattern 3: Recursive Hierarchy Traversal
-
-```typescript
-async function traverseHierarchy(hazuId: string, callback: (hazu: any) => Promise<void>) {
-  const hazu = await sendApiRequestRead(hazuId);
-  await callback(hazu);
-
-  if (hazu.snapshot.type === "hazu") {
-    const children = await sendApiRequestList(hazuId);
-    if (children) {
-      for (const child of children) {
-        await traverseHierarchy(child.snapshot.key, callback);
-      }
-    }
-  }
-}
-
-// Usage
-await traverseHierarchy(rootId, async (hazu) => {
-  console.log(hazu.snapshot.title);
-});
-```
-
-### Pattern 4: Two-Level Filtering (Parent → Child → Target)
-
-This pattern is useful when you need to:
-1. Filter which parent children to process
-2. Then filter which items within those children to update
-
-```typescript
-const parentChildren = await sendApiRequestList(parentId);
-
-// First level: filter parent's children
-const filteredChildren = parentChildren.filter(child =>
-  matchesFilters(child, childFilters).matches
-);
-
-for (const child of filteredChildren) {
-  // Get grandchildren
-  const grandchildren = await sendApiRequestList(child.snapshot.key);
-
-  // Second level: filter targets within each child
-  const targets = grandchildren.filter(gc =>
-    matchesFilters(gc, targetFilters).matches
+### Adding a new React component
+```tsx
+// Use Tailwind for styling
+function MyComponent({ title }: { title: string }) {
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <h2 className="text-lg font-semibold">{title}</h2>
+    </div>
   );
-
-  for (const target of targets) {
-    await sendApiRequestUpdate(target.snapshot.key, updateOptions);
-  }
 }
 ```
 
-## API Response Formats
+## Build Notes
 
-### Read Response
-
-```typescript
-{
-  snapshot: {
-    key: "abc123",
-    title: "My Hazu",
-    description: "Description",
-    color: "#FF5733",
-    icon: "fa-star",
-    type: "hazu",
-    parentId: "parent123",
-    tags: ["tag1", "tag2"],
-    dateCreated: 1703001234567,
-    // ... more properties
-  }
-}
-```
-
-### List Response
-
-```typescript
-// Returns array of items with snapshot property
-[
-  { snapshot: { key: "...", title: "...", ... } },
-  { snapshot: { key: "...", title: "...", ... } },
-  // ...
-]
-```
-
-## Error Handling
-
-All API functions follow consistent error handling:
-- Return `null` on error (for functions that return data)
-- Log detailed error messages
-- Include context (IDs, endpoints) in error logs
-
-```typescript
-const result = await sendApiRequestUpdate(id, options);
-
-if (result === null) {
-  console.log("Update failed - check logs for details");
-  return;
-}
-
-// Success
-console.log("Updated successfully");
-```
-
-## Building New Workflows
-
-When creating new workflows, follow this structure:
-
-### 1. Create Interface File (`my-workflow-interfaces.ts`)
-
-```typescript
-export interface MyWorkflowConfig {
-  parentId: string;
-  filters?: HazuFilterOptions;
-  // workflow-specific options
-}
-
-export interface MyWorkflowResult {
-  success: boolean;
-  processed: number;
-  errors: string[];
-}
-```
-
-### 2. Create Main Function File (`my-workflow.ts`)
-
-```typescript
-import { sendApiRequestList, sendApiRequestUpdate } from "./api";
-import { matchesFilters } from "./helpers";
-import { MyWorkflowConfig, MyWorkflowResult } from "./my-workflow-interfaces";
-
-export async function runMyWorkflow(config: MyWorkflowConfig): Promise<MyWorkflowResult> {
-  const results: MyWorkflowResult = {
-    success: true,
-    processed: 0,
-    errors: [],
-  };
-
-  // 1. Fetch children
-  const children = await sendApiRequestList(config.parentId);
-  if (!children) {
-    results.success = false;
-    results.errors.push("Failed to fetch children");
-    return results;
-  }
-
-  // 2. Filter and process
-  for (const child of children) {
-    const { matches, reason } = matchesFilters(child, config.filters);
-    if (!matches) continue;
-
-    try {
-      // 3. Perform operation
-      await sendApiRequestUpdate(child.snapshot.key, {
-        // updates
-      });
-      results.processed++;
-    } catch (error) {
-      results.errors.push(`Failed to update ${child.snapshot.key}`);
-    }
-  }
-
-  return results;
-}
-```
-
-### 3. Create Runner File (`my-workflow-run.ts`)
-
-```typescript
-import { runMyWorkflow } from "./my-workflow";
-import { MyWorkflowConfig } from "./my-workflow-interfaces";
-
-const config: MyWorkflowConfig = {
-  parentId: "your-parent-id",
-  filters: {
-    icon: "fa-file",
-  },
-};
-
-async function main() {
-  console.log("Starting workflow...");
-  const result = await runMyWorkflow(config);
-
-  console.log(`Processed: ${result.processed}`);
-  if (result.errors.length > 0) {
-    console.log("Errors:", result.errors);
-  }
-}
-
-main().catch(console.error);
-```
-
-## Tips for Claude Instances
-
-1. **Always read before write**: Use `sendApiRequestRead()` to understand current state before making updates.
-
-2. **Use dry-run patterns**: When building batch operations, add a `dryRun` option that logs what would happen without making changes.
-
-3. **Preserve existing data**: When updating, only include fields you want to change. Omitted fields are not modified.
-
-4. **Handle API response formats**: List responses may be arrays directly or wrapped in `{ data: [...] }`. Always check both formats.
-
-5. **Colors are uppercased**: The API automatically uppercases colors, so "#ff5733" becomes "#FF5733".
-
-6. **Tags have no spaces**: Tags should not contain whitespace. Use hyphens or underscores instead.
-
-7. **European dates**: The platform uses European date format (dd.mm.yy or dd.mm.yyyy). Use the helper functions.
-
-8. **Type-aware traversal**: Only `"hazu"` type entities have children. `"item"` types are leaf nodes.
-
-9. **Rate limiting**: For large batch operations, consider adding small delays between API calls.
-
-10. **Error recovery**: API functions return `null` on error, so always check return values.
-
-## Useful Commands
-
+### Native Modules
+`better-sqlite3` requires native compilation for Electron. After `npm install`:
 ```bash
-# Run TypeScript directly
-npx ts-node your-script.ts
-
-# Format code
-npm run format
-
-# Install a new dependency
-npm install package-name
-
-# Run the example file
-npm run example
+npx @electron/rebuild
 ```
 
-## Extending This Starter Kit
+### TypeScript Configs
+- `tsconfig.json` - Renderer (React/Vite)
+- `tsconfig.main.json` - Main process (Node.js/CommonJS)
 
-To add new functionality:
+### Tailwind CSS v4
+Uses new import syntax:
+```css
+@import "tailwindcss";
+```
+With `@tailwindcss/postcss` plugin (not direct tailwindcss).
 
-1. Add new interfaces to `interfaces.ts`
-2. Add new API functions to `api.ts`
-3. Add new utilities to `helpers.ts`
-4. Create workflow files in `src/` or at root level
-5. Add examples to `examples/`
-6. Update this CLAUDE.md with documentation
+## Mission Analysis
 
-The goal is to keep this starter kit clean and minimal while providing all the foundational tools needed for Hazu integrations.
+The Missions tab provides a visual dashboard of student mission (MPE) completion across professions and levels (AFP/CFC).
+
+### How it works
+1. **Sync missions**: Click "Sync Missions" on the Missions tab. This fetches each student's mission data from the Hazu API and stores it locally in `mission_tracking`.
+2. **Visualize**: Two chart views are available:
+   - **Treemap** — Nested rectangles grouped by profession > level > mission count, sized by student count
+   - **Heatmap** — Grid with profession+level on Y-axis, mission count on X-axis, colored by student count
+3. **Filter**: Use the filter bar to narrow by lieu de formation (entreprise/ecole/cie), profession, level (AFP/CFC), or class.
+4. **Drill down**: Click any chart cell to see the matching students with name, enterprise, mission count, and a link to their Hazu profile.
+
+### Key files
+- `src/main/services/mission-sync.service.ts` — Fetches and parses mission data from the API
+- `src/renderer/pages/MissionAnalysisPage.tsx` — Main page with filters, charts, and student list
+- `src/renderer/components/mission-analysis/` — All visualization components
+
+### Prerequisites
+- Run the main sync first (Dashboard > Sync) so persons have `icon` and `color` populated
+- Then run "Sync Missions" on the Missions tab
+
+## Testing the App
+
+1. Run `npm run build`
+2. Run `npm start`
+3. Go to Settings → Enter API key and Root Hazu ID
+4. Click "Sync Now" on Dashboard
+5. View synced data in Rooms/Persons pages
+6. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
+
+## Future Development
+
+### Phase 2: Full UI
+- Room detail pages with assigned persons
+- Person detail pages with room assignments
+- Search and filtering
+- Bulk assignment interface
+
+### Phase 3: Change Tracking
+- Local modifications logged to `change_log`
+- Review pending changes before sync
+- n8n webhook integration for pushing changes
+
+### Phase 4: Excel Import
+- Import persons from Excel templates
+- Import bulk assignments
+- Validation preview before processing
