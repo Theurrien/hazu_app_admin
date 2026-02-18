@@ -39,7 +39,7 @@ type Workflow = 'room' | 'person' | 'assignment' | 'verify';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function BulkImportPage() {
-  const { addCreateRoomTask, addCreatePersonTask } = useTaskQueue();
+  const { addCreateRoomTask, addCreatePersonTask, addRoleUpdateTask } = useTaskQueue();
 
   // Workflow state
   const [activeWorkflow, setActiveWorkflow] = useState<Workflow>('room');
@@ -603,84 +603,47 @@ function BulkImportPage() {
     }
   }, [previewAssignments]);
 
-  // Handle assignment execution
-  const handleExecuteAssignments = useCallback(async () => {
-    if (!fileData || !assignmentEmailColumn || !assignmentRoomColumn || !selectedAssignmentRole) {
-      return;
-    }
+  // Handle assignment execution - queues one TaskQueue task per included assignment
+  const handleExecuteAssignments = useCallback(() => {
+    if (!selectedAssignmentRole) return;
 
-    const assignments: Array<{
-      personId: string;
-      personEmail: string;
-      firstName: string;
-      lastName: string;
-      roomId: string;
-      role: string;
-    }> = [];
+    const included = previewAssignments.filter(
+      (a) => !excludedKeys.has(`${a.personId}:${a.roomId}`)
+    );
 
-    fileData.rows.forEach((row) => {
-      const email = row[assignmentEmailColumn]?.trim().toLowerCase();
-      const roomValue = row[assignmentRoomColumn]?.trim();
+    if (included.length === 0) return;
 
-      if (!email || !roomValue) return;
+    for (const a of included) {
+      const key = `${a.personId}:${a.roomId}`;
+      const role = roleOverrides.get(key) || a.role;
 
-      const personId = getResolvedPersonId(email);
-      const roomId = getResolvedRoomId(roomValue);
-
-      if (!personId || !roomId) return;
-
-      const person = persons.find((p) => p.id === personId);
-      if (!person) return;
-
-      // Extract first and last name from display_name
-      const displayNameParts = person.display_name.split(' ');
-      const firstName = displayNameParts[0] || '';
-      const lastName = displayNameParts.slice(1).join(' ') || '';
-
-      assignments.push({
-        personId,
-        personEmail: person.email || email,
-        firstName,
-        lastName,
-        roomId,
-        role: selectedAssignmentRole,
+      addRoleUpdateTask({
+        personName: a.personName,
+        personId: a.personId,
+        roomName: a.roomName,
+        roomId: a.roomId,
+        oldRole: a.existingRole || '_',
+        newRole: role,
       });
-    });
-
-    if (assignments.length === 0) {
-      alert('No valid assignments to execute.');
-      return;
     }
 
-    try {
-      const result = await window.electronAPI.executeAssignments({ assignments });
-
-      if (result.success) {
-        alert(`Successfully assigned ${result.successful} users to rooms!`);
-        // Reset assignment state
-        setAssignmentEmailColumn(null);
-        setAssignmentRoomColumn(null);
-        setAssignmentColumnMappings({});
-        setPersonMatches(new Map());
-        setPersonResolutions(new Map());
-        setRoomMatches(new Map());
-        setRoomResolutions(new Map());
-        setSelectedAssignmentRole(null);
-      } else {
-        alert(`Assignment failed: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('Execute assignments error:', error);
-      alert('Failed to execute assignments. Check console for details.');
-    }
+    // Reset assignment state after queuing
+    setAssignmentEmailColumn(null);
+    setAssignmentRoomColumn(null);
+    setAssignmentColumnMappings({});
+    setPersonMatches(new Map());
+    setPersonResolutions(new Map());
+    setRoomMatches(new Map());
+    setRoomResolutions(new Map());
+    setSelectedAssignmentRole(null);
+    setExcludedKeys(new Set());
+    setRoleOverrides(new Map());
   }, [
-    fileData,
-    assignmentEmailColumn,
-    assignmentRoomColumn,
     selectedAssignmentRole,
-    persons,
-    getResolvedPersonId,
-    getResolvedRoomId,
+    previewAssignments,
+    excludedKeys,
+    roleOverrides,
+    addRoleUpdateTask,
   ]);
 
   // Handle config change for selected value
