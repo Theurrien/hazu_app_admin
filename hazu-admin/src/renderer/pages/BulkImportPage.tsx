@@ -14,6 +14,7 @@ import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { AssignmentRoleSelector } from '../components/bulk-import/AssignmentRoleSelector';
 import { PersonMatchingPanel } from '../components/bulk-import/PersonMatchingPanel';
 import { RoomMatchingPanel } from '../components/bulk-import/RoomMatchingPanel';
+import { AssignmentPreviewPanel, PreviewAssignment } from '../components/bulk-import/AssignmentPreviewPanel';
 
 interface Template {
   id: string;
@@ -97,8 +98,20 @@ function BulkImportPage() {
   const [roomMatches, setRoomMatches] = useState<Map<string, string | null>>(new Map());
   const [roomResolutions, setRoomResolutions] = useState<Map<string, string>>(new Map());
 
+  // Assignment preview state
+  const [existingAssignments, setExistingAssignments] = useState<Array<{ person_id: string; room_id: string; role: string }>>([]);
+  const [excludedKeys, setExcludedKeys] = useState<Set<string>>(new Set());
+  const [roleOverrides, setRoleOverrides] = useState<Map<string, string>>(new Map());
+
   // Persons for matching
   const [persons, setPersons] = useState<Array<{ id: string; email: string | null; display_name: string }>>([]);
+
+  // Load existing assignments when switching to assignment tab
+  useEffect(() => {
+    if (activeWorkflow === 'assignment') {
+      window.electronAPI.getAllAssignments().then(setExistingAssignments);
+    }
+  }, [activeWorkflow]);
 
   // Load rooms, persons, and root ID on mount
   useEffect(() => {
@@ -486,6 +499,60 @@ function BulkImportPage() {
     return roomResolutions.get(roomValue) || roomMatches.get(roomValue) || null;
   }, [roomMatches, roomResolutions]);
 
+  // Compute preview assignments from matched data, cross-referencing existing assignments
+  const previewAssignments = useMemo((): PreviewAssignment[] => {
+    if (!fileData || !assignmentEmailColumn || !assignmentRoomColumn || !selectedAssignmentRole) return [];
+
+    const result: PreviewAssignment[] = [];
+    const seen = new Set<string>();
+
+    fileData.rows.forEach((row) => {
+      const email = row[assignmentEmailColumn]?.trim().toLowerCase();
+      const roomValue = row[assignmentRoomColumn]?.trim();
+      if (!email || !roomValue) return;
+
+      const personId = getResolvedPersonId(email);
+      const roomId = getResolvedRoomId(roomValue);
+      if (!personId || !roomId) return;
+
+      const key = `${personId}:${roomId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      const person = persons.find((p) => p.id === personId);
+      const room = rooms.find((r) => r.id === roomId);
+      if (!person) return;
+
+      const existing = existingAssignments.find(
+        (a) => a.person_id === personId && a.room_id === roomId
+      );
+
+      result.push({
+        personId,
+        personName: person.display_name,
+        personEmail: person.email || email,
+        roomId,
+        roomName: room?.title || roomValue,
+        role: selectedAssignmentRole,
+        existingRole: existing?.role || null,
+      });
+    });
+
+    return result;
+  }, [fileData, assignmentEmailColumn, assignmentRoomColumn, selectedAssignmentRole, persons, rooms, existingAssignments, getResolvedPersonId, getResolvedRoomId]);
+
+  // Auto-exclude already-assigned rows when preview changes
+  useEffect(() => {
+    const excluded = new Set<string>();
+    previewAssignments.forEach((a) => {
+      if (a.existingRole) {
+        excluded.add(`${a.personId}:${a.roomId}`);
+      }
+    });
+    setExcludedKeys(excluded);
+    setRoleOverrides(new Map());
+  }, [previewAssignments]);
+
   // Count valid assignments
   const validAssignmentCount = useMemo(() => {
     if (!fileData || !assignmentEmailColumn || !assignmentRoomColumn) return 0;
@@ -507,6 +574,34 @@ function BulkImportPage() {
 
     return count;
   }, [fileData, assignmentEmailColumn, assignmentRoomColumn, getResolvedPersonId, getResolvedRoomId]);
+
+  const handleToggleExclude = useCallback((key: string) => {
+    setExcludedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const handlePreviewRoleChange = useCallback((key: string, newRole: string) => {
+    setRoleOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(key, newRole);
+      return next;
+    });
+  }, []);
+
+  const handleToggleAll = useCallback((included: boolean) => {
+    if (included) {
+      setExcludedKeys(new Set());
+    } else {
+      setExcludedKeys(new Set(previewAssignments.map((a) => `${a.personId}:${a.roomId}`)));
+    }
+  }, [previewAssignments]);
 
   // Handle assignment execution
   const handleExecuteAssignments = useCallback(async () => {
@@ -620,6 +715,13 @@ function BulkImportPage() {
     });
     return count;
   }, [roomConfigs]);
+
+  // Count selected (non-excluded) assignments from preview
+  const selectedAssignmentCount = useMemo(() => {
+    return previewAssignments.filter(
+      (a) => !excludedKeys.has(`${a.personId}:${a.roomId}`)
+    ).length;
+  }, [previewAssignments, excludedKeys]);
 
   // Handle room creation - adds tasks to queue
   const handleCreateRooms = useCallback(() => {
@@ -1012,6 +1114,21 @@ function BulkImportPage() {
                 />
               </div>
             )}
+
+            {/* Assignment Preview */}
+            {previewAssignments.length > 0 && (
+              <div className="mt-6">
+                <AssignmentPreviewPanel
+                  assignments={previewAssignments}
+                  availableRoles={['student', 'companymentor', 'schoolteacher', 'courseteacher', 'stateadvisor']}
+                  excludedKeys={excludedKeys}
+                  roleOverrides={roleOverrides}
+                  onToggleExclude={handleToggleExclude}
+                  onRoleChange={handlePreviewRoleChange}
+                  onToggleAll={handleToggleAll}
+                />
+              </div>
+            )}
           </>
         )}
 
@@ -1080,20 +1197,20 @@ function BulkImportPage() {
       {activeWorkflow === 'assignment' && fileData && (
         <div className="border-t border-gray-200 px-6 py-4 flex items-center justify-between">
           <div className="text-sm text-gray-500">
-            {validAssignmentCount > 0
-              ? `${validAssignmentCount} assignment${validAssignmentCount !== 1 ? 's' : ''} ready`
+            {selectedAssignmentCount > 0
+              ? `${selectedAssignmentCount} assignment${selectedAssignmentCount !== 1 ? 's' : ''} ready`
               : 'Map columns and resolve matches to enable assignment'}
           </div>
           <button
             onClick={handleExecuteAssignments}
-            disabled={validAssignmentCount === 0 || !selectedAssignmentRole}
+            disabled={selectedAssignmentCount === 0 || !selectedAssignmentRole}
             className={`px-6 py-2 rounded-lg transition-colors ${
-              validAssignmentCount > 0 && selectedAssignmentRole
+              selectedAssignmentCount > 0 && selectedAssignmentRole
                 ? 'bg-blue-600 text-white hover:bg-blue-700'
                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
             }`}
           >
-            Assign {validAssignmentCount} Person{validAssignmentCount !== 1 ? 's' : ''} to Rooms
+            Assign {selectedAssignmentCount} Person{selectedAssignmentCount !== 1 ? 's' : ''} to Rooms
           </button>
         </div>
       )}
