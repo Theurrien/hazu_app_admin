@@ -186,6 +186,17 @@ function runMigrations(): void {
     console.error('Migration error (mission_tracking):', error);
   }
 
+  // Migration: Seed admin_password setting
+  try {
+    const adminPw = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
+    if (!adminPw) {
+      db.prepare("INSERT INTO settings (key, value) VALUES ('admin_password', 'hazu_app_ADMIN_password')").run();
+      console.log('Migration: Seeded admin_password setting');
+    }
+  } catch (error) {
+    console.error('Migration error (admin_password):', error);
+  }
+
   // Migration: Add mission_sync_status table
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mission_sync_status'").all();

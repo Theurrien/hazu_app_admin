@@ -185,4 +185,5 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('webhook_url', ''),
     ('user_id', ''),
     ('user_email', ''),
-    ('user_display_name', '');
+    ('user_display_name', ''),
+    ('admin_password', 'hazu_app_ADMIN_password');
