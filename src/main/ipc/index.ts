@@ -946,22 +946,23 @@ export function registerIpcHandlers(): void {
         const token = getApiKey();
         const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
 
-        // Build classIds array from roomIds
-        const classIds = params.roomIds.map(roomId => ({
-          classId: roomId,
-          userType: params.role,
-        }));
+        // Get adminId from settings (hz-config-admin hazu)
+        const adminIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'admin_id'");
+        const adminId = adminIdRow?.value;
+        if (!adminId) {
+          return { success: false, error: 'Admin ID not found. Please run sync first.' };
+        }
 
-        // Build payload for add-users endpoint
+        // Step 1: Create person via add-users (no classIds — room assignment done separately)
         const apiPayload = {
           users: [
             {
               sourceId: params.sourceId,           // Profile template ID
+              adminId: adminId,                    // Admin Hazu ID (hz-config-admin)
               targetId: params.targetId,           // Parent container ID (where profiles are stored)
               firstName: params.firstName,
               lastName: params.lastName,
               userEmail: params.userEmail,
-              classIds: classIds,                  // Room assignments
             },
           ],
         };
@@ -974,10 +975,22 @@ export function registerIpcHandlers(): void {
         );
         console.log('[CREATE_PERSON] Response:', response.status, response.data);
 
-        // Extract person data from response
-        const profileSnapshot = response.data?.profileSnapshot?.snapshot;
-        if (!profileSnapshot) {
-          return { success: false, error: 'Invalid API response: missing profileSnapshot' };
+        // Parse { totalUsers, successful, failed, results, errors } response format
+        const data = response.data;
+        if (!data?.successful || data.successful < 1 || !data.results?.length) {
+          const apiError = data?.errors?.[0]?.error || 'Unknown API error';
+          return { success: false, error: `Failed to create person: ${apiError}` };
+        }
+
+        // Extract profile snapshot from results[0] — try multiple formats
+        const result = data.results[0];
+        const profileSnapshot = result?.profileSnapshot?.snapshot
+          || result?.profileSnapshot
+          || result?.snapshot
+          || result;
+
+        if (!profileSnapshot?.key) {
+          return { success: false, error: `Invalid API response: cannot extract profile. Raw result: ${JSON.stringify(result)}` };
         }
 
         // Insert into persons table
@@ -998,13 +1011,27 @@ export function registerIpcHandlers(): void {
           ]
         );
 
-        // Insert room assignments
+        // Step 2: Assign rooms via update-user-roles
         for (const roomId of params.roomIds) {
-          run(
-            `INSERT INTO person_room_assignments (person_id, room_id, role, synced_at)
-             VALUES (?, ?, ?, ?)`,
-            [profileSnapshot.key, roomId, params.role, now]
-          );
+          const rolePayload = {
+            templateId: adminId,
+            profileId: profileSnapshot.key,
+            userTypesInfo: [{ classId: roomId, oldUserType: '_', newUserType: params.role }],
+          };
+          try {
+            await axios.post(
+              `https://${getApiEndpoint()}/api-v2-admin/update-user-roles`,
+              rolePayload,
+              { headers, timeout: 120000 }
+            );
+            run(
+              `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
+               VALUES (?, ?, ?, ?)`,
+              [profileSnapshot.key, roomId, params.role, now]
+            );
+          } catch (roleError) {
+            console.error('[CREATE_PERSON] Room assignment failed for', roomId, roleError);
+          }
         }
 
         // Build person object to return
