@@ -982,31 +982,36 @@ export function registerIpcHandlers(): void {
           return { success: false, error: `Failed to create person: ${apiError}` };
         }
 
-        // Extract profile snapshot from results[0] — try multiple formats
+        // Extract the new profile id from results[0].
+        // add-users returns a thin result: { index, profileId, firstName, lastName, userEmail, success }.
+        // Fall back to snapshot shapes in case another endpoint/version returns a full profile object.
         const result = data.results[0];
         const profileSnapshot = result?.profileSnapshot?.snapshot
           || result?.profileSnapshot
           || result?.snapshot
-          || result;
+          || null;
+        const profileId = result?.profileId || profileSnapshot?.key;
 
-        if (!profileSnapshot?.key) {
+        if (!profileId) {
           return { success: false, error: `Invalid API response: cannot extract profile. Raw result: ${JSON.stringify(result)}` };
         }
 
-        // Insert into persons table
+        // Insert into persons table. add-users does not return tags/icon/color —
+        // the next Dashboard sync (INSERT OR REPLACE by id) enriches this record.
         const now = Date.now();
+        const tags = profileSnapshot?.tags || [];
         run(
-          `INSERT INTO persons (id, email, first_name, last_name, display_name, person_type, tags, raw_data, synced_at)
+          `INSERT OR REPLACE INTO persons (id, email, first_name, last_name, display_name, person_type, tags, raw_data, synced_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            profileSnapshot.key,
+            profileId,
             params.userEmail,
             params.firstName,
             params.lastName,
             `${params.firstName} ${params.lastName}`,
             params.role,
-            JSON.stringify(profileSnapshot.tags || []),
-            JSON.stringify(profileSnapshot),
+            JSON.stringify(tags),
+            JSON.stringify(profileSnapshot || result),
             now,
           ]
         );
@@ -1015,7 +1020,7 @@ export function registerIpcHandlers(): void {
         for (const roomId of params.roomIds) {
           const rolePayload = {
             templateId: adminId,
-            profileId: profileSnapshot.key,
+            profileId: profileId,
             userTypesInfo: [{ classId: roomId, oldUserType: '_', newUserType: params.role }],
           };
           try {
@@ -1027,7 +1032,7 @@ export function registerIpcHandlers(): void {
             run(
               `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
                VALUES (?, ?, ?, ?)`,
-              [profileSnapshot.key, roomId, params.role, now]
+              [profileId, roomId, params.role, now]
             );
           } catch (roleError) {
             console.error('[CREATE_PERSON] Room assignment failed for', roomId, roleError);
@@ -1036,14 +1041,14 @@ export function registerIpcHandlers(): void {
 
         // Build person object to return
         const person = {
-          id: profileSnapshot.key,
+          id: profileId,
           email: params.userEmail,
           first_name: params.firstName,
           last_name: params.lastName,
           display_name: `${params.firstName} ${params.lastName}`,
           person_type: params.role,
-          tags: profileSnapshot.tags || [],
-          raw_data: JSON.stringify(profileSnapshot),
+          tags: tags,
+          raw_data: JSON.stringify(profileSnapshot || result),
           synced_at: now,
         };
 

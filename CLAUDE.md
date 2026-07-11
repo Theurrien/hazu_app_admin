@@ -175,6 +175,44 @@ Stored in SQLite settings table:
 - `api_key` - Hazu API key
 - `environment` - "swiss" | "io" | "dev"
 - `root_hazu_id` - Root Hazu ID to sync from
+- `admin_id` - `hz-config-admin` Hazu ID (set by sync; used as `adminId`/`templateId` for user ops)
+- `template_id` - Profile-templates container ID (set by sync)
+
+### Person Creation
+
+Handled by the `WEBHOOK_CREATE_PERSON` IPC handler in `src/main/ipc/index.ts` (the
+channel name is legacy — it calls the Hazu API directly, not a webhook). Requires a
+prior sync so `admin_id` and `template_id` exist in settings.
+
+The modal ([CreatePersonModal.tsx](src/renderer/components/CreatePersonModal.tsx)) first
+populates itself via two fetch handlers:
+- `PROFILE_CATEGORIES_FETCH` — children of `root_hazu_id` tagged `hz-config-profile-*`; each
+  category's `id` is also the **`targetId`** (container) for that role.
+- `PROFILE_TEMPLATES_FETCH` — children of `template_id` with the exact tag
+  `hz-config-profile-{role}`; the chosen template's `id` is the **`sourceId`**.
+
+**Step 1 — create** via `POST /api-v2-admin/add-users` (**plural, batch**):
+```jsonc
+// request
+{ "users": [ { "sourceId", "adminId", "targetId", "firstName", "lastName", "userEmail" } ] }
+// response — the id is results[i].profileId. There is NO nested snapshot and NO `key` field.
+{ "totalUsers": 1, "successful": 1, "failed": 0,
+  "results": [ { "index": 0, "profileId": "…", "firstName": "…", "lastName": "…",
+                 "userEmail": "…", "success": true } ],
+  "errors": [] }
+```
+Read the new id from `results[0].profileId`. The response carries no tags/icon/color, so the
+local `persons` row is minimal — the next Dashboard sync (`INSERT OR REPLACE` by `id`) enriches it.
+
+**Step 2 — assign rooms** via `POST /api-v2-admin/update-user-roles`, once per selected room:
+```jsonc
+{ "templateId": adminId, "profileId": <new id>,
+  "userTypesInfo": [ { "classId": roomId, "oldUserType": "_", "newUserType": role } ] }
+```
+Room-assignment failures are logged but non-fatal (the person is already created).
+
+> Note: `sendApiRequestCreateUser` in `api.ts` targets the older singular `add-user` endpoint
+> and is **not** used by this flow — editing it will not affect person creation.
 
 ## Common Tasks
 
