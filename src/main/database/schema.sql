@@ -165,6 +165,24 @@ CREATE INDEX IF NOT EXISTS idx_distgroups_role ON distribution_groups(role);
 CREATE INDEX IF NOT EXISTS idx_distgroups_class_id ON distribution_groups(room_class_id);
 
 -- ============================================================================
+-- MEMBERSHIP ISSUES (Unresolved/Unknown Group Members)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS membership_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,          -- 'unresolved' | 'unknown'
+    group_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    uid TEXT NOT NULL,
+    email TEXT,
+    display_name TEXT,
+    synced_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_membership_issues_room ON membership_issues(room_id);
+
+-- ============================================================================
 -- SETTINGS
 -- ============================================================================
 

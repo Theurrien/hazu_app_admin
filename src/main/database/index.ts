@@ -111,6 +111,25 @@ function runMigrations(): void {
     console.error('Migration error (distribution_groups):', error);
   }
 
+  // Migration: Add membership_issues table
+  try {
+    const t = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='membership_issues'").all();
+    if (t.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS membership_issues (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL, group_id TEXT NOT NULL, room_id TEXT NOT NULL,
+          role TEXT NOT NULL, uid TEXT NOT NULL, email TEXT, display_name TEXT,
+          synced_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_membership_issues_room ON membership_issues(room_id);
+      `);
+      console.log('Migration: Added membership_issues table');
+    }
+  } catch (error) {
+    console.error('Migration error (membership_issues):', error);
+  }
+
   // Migration: Recreate person_room_assignments table without CHECK constraint
   // This allows flexible role values (student, companymentor, schoolteacher, etc.)
   try {
