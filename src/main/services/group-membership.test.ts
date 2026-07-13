@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { resolvePerson, isSystemAccount, computeGroupAssignments } from './group-membership';
 
-const student = (authorId: string, description: string) => ({
-  authorId, description, displayName: description, isGroup: false, role: 'reader',
+const student = (authorId: string, description: string, isGroup = false) => ({
+  authorId, description, displayName: description, isGroup, role: 'reader',
 });
 
 describe('isSystemAccount', () => {
@@ -44,5 +44,19 @@ describe('computeGroupAssignments (CUI-C c fixture)', () => {
       { type: 'unknown', groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student', uid: 'Qfv', email: 'student.two@example.invalid', displayName: 'student.two@example.invalid' },
       { type: 'unresolved', groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student', uid: 'K3Zgx', email: null, displayName: 'K3ZgxABxOtcXIzIcRXFzMsYuMh42' },
     ]);
+  });
+
+  it('skips nested-group ACL refs (isGroup) entirely', async () => {
+    const groups = [{ groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student' }];
+    const acl = {
+      data: [
+        student('6Dxet6', 'student.one@example.invalid'),   // -> assigned
+        student('grpX', 'hz-share-student-LkxlSjtb0hnG4TpnvDDr', true), // -> skipped (nested group)
+      ],
+    };
+    const byEmail = new Map([['student.one@example.invalid', '3L0LitHlKovjiK5e3rSN']]);
+    const res = await computeGroupAssignments(groups, async () => acl, byEmail);
+    expect(res.assignments).toEqual([{ personId: '3L0LitHlKovjiK5e3rSN', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student' }]);
+    expect(res.issues).toEqual([]);
   });
 });

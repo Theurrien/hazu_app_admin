@@ -39,6 +39,9 @@ export function isSystemAccount(email: string | null | undefined): boolean {
   return !!email && email.trim().toLowerCase().endsWith('@hazu.io');
 }
 
+// Precondition: `byEmail` keys MUST be lowercased by the caller. This function
+// lowercases the member email before an exact `Map.get`, so non-lowercased keys
+// will silently miss and resolve to `unknown`.
 export function resolvePerson(
   member: AclMember,
   byEmail: Map<string, string>,
@@ -50,6 +53,7 @@ export function resolvePerson(
   return { personId };
 }
 
+// Precondition: `byEmail` keys MUST be lowercased by the caller (see resolvePerson).
 export async function computeGroupAssignments(
   groups: RoleGroup[],
   getAcl: (id: string) => Promise<{ data: AclMember[] }>,
