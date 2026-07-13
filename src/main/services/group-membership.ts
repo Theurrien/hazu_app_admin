@@ -63,7 +63,19 @@ export async function computeGroupAssignments(
   const issues: MembershipIssue[] = [];
 
   for (const g of groups) {
-    const acl = await getAcl(g.groupId);
+    let acl: { data: AclMember[] };
+    try {
+      acl = await getAcl(g.groupId);
+    } catch (err) {
+      // One group's ACL read failing (e.g. an intermittent Hazu 500) must not
+      // abort the whole batch and blank person_room_assignments. Log and skip,
+      // matching syncAssignments/syncPersonsRecursive in sync.service.ts.
+      console.error(
+        `[group-membership] Failed to read ACL for group ${g.groupId} (room ${g.roomId}, role ${g.role}); skipping:`,
+        err,
+      );
+      continue;
+    }
     for (const m of acl?.data || []) {
       if (m.isGroup) continue; // nested group refs are not members
       const rawEmail = (m.description || '').trim();
