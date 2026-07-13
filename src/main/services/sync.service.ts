@@ -8,6 +8,7 @@ import { getDb, run } from "../database";
 import { sendApiRequestList, sendApiRequestGetAclInfo } from "./hazu-api/api";
 import { getRootHazuId, isConfigured } from "./hazu-api/config";
 import { HazuEntity } from "./hazu-api/interfaces";
+import { computeGroupAssignments, RoleGroup } from "./group-membership";
 
 // Tag patterns for identifying entity types
 const ROOM_TAG_PATTERNS = {
@@ -83,6 +84,7 @@ function clearOldData(): void {
   // Clear new tables
   db.exec("DELETE FROM distribution_groups");
   db.exec("DELETE FROM user_types");
+  db.exec("DELETE FROM membership_issues");
 
   console.log('[SYNC] Old data cleared');
 }
@@ -354,9 +356,6 @@ async function findAndSyncPersonContainers(parentId: string): Promise<void> {
 
           personCount++;
           syncProgress.personsProcessed++;
-
-          // Extract room assignments from person's tags
-          syncPersonRoomAssignments(personSnapshot.key, personTags);
         }
 
         console.log(`[SYNC] Found ${personCount} actual persons in ${categoryTitle} (filtered by hz-config-userid-* tag)`);
@@ -736,6 +735,41 @@ async function syncDistributionGroups(): Promise<void> {
   syncProgress.message = `Synced ${syncProgress.distributionGroupsProcessed} distribution groups...`;
 }
 
+async function syncGroupMemberships(): Promise<void> {
+  const db = getDb();
+
+  const groups = db
+    .prepare("SELECT id AS groupId, room_id AS roomId, role FROM distribution_groups WHERE room_id IS NOT NULL")
+    .all() as RoleGroup[];
+
+  const persons = db
+    .prepare("SELECT id, lower(email) AS email FROM persons WHERE email IS NOT NULL AND email <> ''")
+    .all() as Array<{ id: string; email: string }>;
+  const byEmail = new Map<string, string>();
+  for (const p of persons) byEmail.set(p.email, p.id);
+
+  syncProgress.message = `Reading membership of ${groups.length} groups...`;
+  const { assignments, issues } = await computeGroupAssignments(
+    groups,
+    sendApiRequestGetAclInfo,
+    byEmail,
+  );
+
+  const now = Date.now();
+  const insA = db.prepare(
+    "INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at) VALUES (?, ?, ?, ?)",
+  );
+  for (const a of assignments) insA.run(a.personId, a.roomId, a.role, now);
+
+  const insI = db.prepare(
+    "INSERT INTO membership_issues (type, group_id, room_id, role, uid, email, display_name, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  for (const i of issues) insI.run(i.type, i.groupId, i.roomId, i.role, i.uid, i.email, i.displayName, now);
+
+  syncProgress.assignmentsProcessed = assignments.length;
+  console.log(`[SYNC] Group memberships: ${assignments.length} assignments, ${issues.length} issues`);
+}
+
 export async function runFullSync(): Promise<SyncProgress> {
   if (!isConfigured()) {
     return {
@@ -766,11 +800,13 @@ export async function runFullSync(): Promise<SyncProgress> {
     await syncRooms();
 
     // Step 3: Sync persons from their containers
-    // (also syncs assignments by matching person tags to room class_ids)
     await syncPersonsFromContainers();
 
     // Step 4: Sync distribution groups (needs rooms for linking)
     await syncDistributionGroups();
+
+    // Step 5: Assignments from group ACL membership (source of truth)
+    await syncGroupMemberships();
 
     // Update last sync time
     const db = getDb();
