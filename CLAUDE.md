@@ -54,19 +54,33 @@ hazu-admin/
 │   │   │   ├── Dashboard.tsx
 │   │   │   ├── RoomsPage.tsx
 │   │   │   ├── PersonsPage.tsx
+│   │   │   ├── MatrixPage.tsx
 │   │   │   ├── MissionAnalysisPage.tsx
+│   │   │   ├── BulkImportPage.tsx
 │   │   │   └── SettingsPage.tsx
 │   │   ├── components/
 │   │   │   ├── layout/
 │   │   │   │   ├── Sidebar.tsx
 │   │   │   │   └── Header.tsx
-│   │   │   └── mission-analysis/
-│   │   │       ├── MissionSyncButton.tsx
-│   │   │       ├── MissionFilterBar.tsx
-│   │   │       ├── MissionTreemap.tsx
-│   │   │       ├── MissionHeatmap.tsx
-│   │   │       ├── MissionSummaryBar.tsx
-│   │   │       └── MissionStudentList.tsx
+│   │   │   ├── mission-analysis/   # Mission dashboard viz components
+│   │   │   │   ├── MissionSyncButton.tsx
+│   │   │   │   ├── MissionFilterBar.tsx
+│   │   │   │   ├── MissionTreemap.tsx
+│   │   │   │   ├── MissionHeatmap.tsx
+│   │   │   │   ├── MissionSummaryBar.tsx
+│   │   │   │   └── MissionStudentList.tsx
+│   │   │   ├── bulk-import/         # Bulk Import workflow components (uploader, mapping, matching, preview, verify)
+│   │   │   ├── MatrixGrid.tsx       # Virtualized person × room assignment grid
+│   │   │   ├── MatrixFilters.tsx
+│   │   │   ├── CreatePersonModal.tsx
+│   │   │   ├── CreateRoomModal.tsx
+│   │   │   ├── DeleteConfirmationModal.tsx
+│   │   │   ├── RenameRoomModal.tsx
+│   │   │   └── TaskQueuePanel.tsx   # Task Queue UI (sequential writes)
+│   │   ├── hooks/
+│   │   │   └── useMatrixData.ts     # Loads + filters/sorts matrix data
+│   │   ├── contexts/
+│   │   │   └── TaskQueueContext.tsx # Sequential write queue for bulk operations
 │   │   └── styles/
 │   │       └── global.css      # Tailwind imports
 │   │
@@ -283,6 +297,87 @@ The Missions tab provides a visual dashboard of student mission (MPE) completion
 - Run the main sync first (Dashboard > Sync) so persons have `icon` and `color` populated
 - Then run "Sync Missions" on the Missions tab
 
+## Matrix
+
+The Matrix tab ([MatrixPage.tsx](src/renderer/pages/MatrixPage.tsx)) is a spreadsheet-style grid
+for viewing and editing **person × room** assignments directly — persons are rows, rooms are
+columns, and every cell is a role dropdown.
+
+### How it works
+- **Data** — [useMatrixData.ts](src/renderer/hooks/useMatrixData.ts) loads `getPersons()`,
+  `getRooms()`, and `getAllAssignments()` from local SQLite and builds a `personId-roomId → role`
+  lookup. No dedicated IPC — it reuses existing read channels.
+- **Grid** — [MatrixGrid.tsx](src/renderer/components/MatrixGrid.tsx) is **virtualized** (only
+  visible rows/columns rendered, plus a buffer), so it scales to large datasets. The person column
+  and room headers stay pinned while cells scroll both directions.
+- **Edit a cell** — pick a role from the dropdown (`-`, Student, Mentor, Teacher, Course T.,
+  Advisor, Guardian). The change is applied **optimistically** to local state, then enqueued as a
+  `roleUpdate` task — the **same** Task Queue + `updateUserRole` → `POST /api-v2-admin/update-user-roles`
+  path the Bulk Import Assignment tab uses. On failure the cell **reverts** via the task's `onError`.
+- **Filter/search** — [MatrixFilters.tsx](src/renderer/components/MatrixFilters.tsx) toggles person
+  and room types (empty selection = show all) and free-text searches both axes. Rows/columns sort by
+  type then alphabetically; searching one axis "smart-sorts" the other so the top match's assigned
+  rows/columns float to the front.
+- **Delete / rename from headers** — hovering a room header reveals rename + delete; hovering a
+  person row reveals delete. These open confirmation modals
+  ([DeleteConfirmationModal.tsx](src/renderer/components/DeleteConfirmationModal.tsx),
+  [RenameRoomModal.tsx](src/renderer/components/RenameRoomModal.tsx)) and call `deleteRoom` /
+  `deletePerson` / `renameRoom` (`WEBHOOK_DELETE_ROOM` / `WEBHOOK_DELETE_PERSON` / `WEBHOOK_RENAME_ROOM`),
+  then `refetch()` the grid. Unlike cell edits, these run **immediately** — not through the queue.
+
+### Matrix vs. Bulk Import Assignment
+Both write through the same `roleUpdate` task and `update-user-roles` endpoint. Matrix is for
+**manual, one-cell-at-a-time** edits with live optimistic feedback; the Bulk Import **Assignment**
+tab is for **batch** assignment from a spreadsheet. Deleting/renaming rooms and deleting persons is
+Matrix-only.
+
+### Prerequisites
+- Run the main sync first (Dashboard > Sync) — the grid renders entirely from local SQLite.
+
+## Bulk Import
+
+The Bulk Import tab ([BulkImportPage.tsx](src/renderer/pages/BulkImportPage.tsx)) pushes spreadsheet data (CSV/Excel) **into** Hazu. One shared file upload feeds four sub-workflow tabs:
+
+| Tab | Purpose | Writes |
+|-----|---------|--------|
+| **Room Creation** | Create rooms from one column of values, each with a template | Creates rooms |
+| **Person** | Create persons (students, teachers…), optionally assigning rooms at creation (grouped) | Creates persons |
+| **Assignment** | Assign **existing** persons to **existing** rooms with a role | Updates roles |
+| **Verify** | Read-only diff of the spreadsheet vs. Hazu's synced state | Nothing |
+
+### Task Queue (all writes go through it)
+Writes are never called directly — each workflow **enqueues** tasks into the Task Queue
+([TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx), rendered by
+[TaskQueuePanel.tsx](src/renderer/components/TaskQueuePanel.tsx)). Tasks run **one at a time,
+sequentially**, each tracked `queued → processing → success/error` with individual retry. Task
+types: `createRoom`, `createPerson`, `roleUpdate`. The footer buttons only queue tasks; nothing
+hits the API until the queue processes them. Modals (create room/person) call the API directly
+and push a completed `addNotification` into the same panel.
+
+### Assignment workflow (assigns existing persons to existing rooms — creates nothing)
+1. **Map columns** — tag one column as **Email** (`assignEmail`) and one as **Room** (`assignRoom`) in the data preview.
+2. **Pick a role** — from synced user types (`getUserTypes()`): student, companymentor, schoolteacher, courseteacher, stateadvisor. Applies to the batch; overridable per row in the preview.
+3. **Person Matching** ([PersonMatchingPanel.tsx](src/renderer/components/bulk-import/PersonMatchingPanel.tsx)) — unique emails auto-matched to local persons by **exact, case-insensitive email**; unmatched resolved manually (already-used persons filtered out to prevent double-assignment).
+4. **Room Matching** ([RoomMatchingPanel.tsx](src/renderer/components/bulk-import/RoomMatchingPanel.tsx)) — unique room strings auto-matched to local rooms by **exact, case-insensitive title**; unmatched resolved manually. Exact-only (no fuzzy matching — that is Verify-only).
+5. **Preview** ([AssignmentPreviewPanel.tsx](src/renderer/components/bulk-import/AssignmentPreviewPanel.tsx)) — resolved rows deduped by `personId:roomId`; rows already present in local `person_room_assignments` are flagged and **auto-excluded**. Toggle rows in/out; override role per row.
+6. **Execute** — enqueues one `roleUpdate` task per included row.
+
+Each `roleUpdate` → `updateUserRole(personId, roomId, oldRole, newRole)` → `WEBHOOK_UPDATE_USER_ROLE`
+handler → `POST /api-v2-admin/update-user-roles` (same endpoint Person Creation uses for room
+assignment; `templateId` = `admin_id`). On success it also writes local `person_room_assignments`
+(`INSERT OR REPLACE`, or `DELETE` when the new role is `_`), so no full re-sync is needed.
+
+### Verify workflow (read-only)
+[VerifyAssignmentsTab.tsx](src/renderer/components/bulk-import/VerifyAssignmentsTab.tsx) diffs the
+spreadsheet (email + room name) against synced assignments and reports *missing in Hazu*, *extra in
+Hazu*, *unmatched rooms*, and *unknown persons*. Room names are matched via strict/normal/loose
+fuzzy modes ([fuzzyMatch.ts](src/renderer/utils/fuzzyMatch.ts)). Good to run before and after an
+Assignment batch.
+
+### Prerequisites
+- Run the main sync first (Dashboard > Sync). Persons, rooms, roles, and `admin_id` all come from
+  local SQLite — Assignment/Verify only match against already-synced data.
+
 ## Testing the App
 
 1. Run `npm run build`
@@ -290,7 +385,9 @@ The Missions tab provides a visual dashboard of student mission (MPE) completion
 3. Go to Settings → Enter API key and Root Hazu ID
 4. Click "Sync Now" on Dashboard
 5. View synced data in Rooms/Persons pages
-6. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
+6. Open the Matrix tab → edit an assignment cell (optimistic update, runs through the Task Queue)
+7. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
+8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
 
 ## Future Development
 
@@ -298,14 +395,11 @@ The Missions tab provides a visual dashboard of student mission (MPE) completion
 - Room detail pages with assigned persons
 - Person detail pages with room assignments
 - Search and filtering
-- Bulk assignment interface
 
 ### Phase 3: Change Tracking
 - Local modifications logged to `change_log`
 - Review pending changes before sync
 - n8n webhook integration for pushing changes
 
-### Phase 4: Excel Import
-- Import persons from Excel templates
-- Import bulk assignments
-- Validation preview before processing
+> Excel/CSV import (persons, rooms, assignments) with validation preview is **implemented** —
+> see the [Bulk Import](#bulk-import) section above.
