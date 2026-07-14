@@ -89,7 +89,7 @@ export async function computeGroupAssignments(
           groupId: g.groupId,
           roomId: g.roomId,
           role: g.role,
-          uid: m.authorId,
+          uid: m.authorId || '',
           email: EMAIL_RE.test(rawEmail.toLowerCase()) ? rawEmail : null,
           displayName: m.displayName || '',
         });

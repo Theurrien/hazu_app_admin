@@ -759,12 +759,14 @@ async function syncGroupMemberships(): Promise<void> {
   const insA = db.prepare(
     "INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at) VALUES (?, ?, ?, ?)",
   );
-  for (const a of assignments) insA.run(a.personId, a.roomId, a.role, now);
-
   const insI = db.prepare(
     "INSERT INTO membership_issues (type, group_id, room_id, role, uid, email, display_name, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
-  for (const i of issues) insI.run(i.type, i.groupId, i.roomId, i.role, i.uid, i.email, i.displayName, now);
+  const writeAll = db.transaction(() => {
+    for (const a of assignments) insA.run(a.personId, a.roomId, a.role, now);
+    for (const i of issues) insI.run(i.type, i.groupId, i.roomId, i.role, i.uid, i.email, i.displayName, now);
+  });
+  writeAll();
 
   syncProgress.assignmentsProcessed = assignments.length;
   console.log(`[SYNC] Group memberships: ${assignments.length} assignments, ${issues.length} issues`);

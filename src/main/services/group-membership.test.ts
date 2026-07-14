@@ -78,4 +78,14 @@ describe('computeGroupAssignments (CUI-C c fixture)', () => {
     ]);
     expect(res.issues).toEqual([]);
   });
+
+  it('coalesces an empty authorId to "" instead of dropping/crashing', async () => {
+    const groups = [{ groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student' }];
+    const acl = { data: [student('', 'ghost@example.invalid')] }; // valid email, not in byEmail -> unknown
+    const res = await computeGroupAssignments(groups, async () => acl, new Map());
+    expect(res.assignments).toEqual([]);
+    expect(res.issues).toEqual([
+      { type: 'unknown', groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student', uid: '', email: 'ghost@example.invalid', displayName: 'ghost@example.invalid' },
+    ]);
+  });
 });
