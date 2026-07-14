@@ -30,6 +30,8 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         return `+ ${task.roomName}`;
       case 'createPerson':
         return `+ ${task.personName}`;
+      case 'healTag':
+        return `Tag: ${task.displayName || task.personId}`;
     }
   };
 

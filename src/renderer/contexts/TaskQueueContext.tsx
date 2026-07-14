@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 // Task type discriminated union
-export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson';
+export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag';
 
 interface BaseTask {
   id: string;
@@ -49,12 +49,20 @@ export interface CreatePersonTask extends BaseTask {
   onError?: () => void;
 }
 
-export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask;
+export interface HealTagTask extends BaseTask {
+  type: 'healTag';
+  personId: string;
+  tag: string;
+  displayName: string | null;
+}
+
+export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask;
 
 // Input types for adding tasks to queue
 type AddRoleUpdateInput = Omit<RoleUpdateTask, 'id' | 'status' | 'type'>;
 type AddCreateRoomInput = Omit<CreateRoomTask, 'id' | 'status' | 'type' | 'roomId'>;
 type AddCreatePersonInput = Omit<CreatePersonTask, 'id' | 'status' | 'type' | 'personId'>;
+type AddHealTagInput = Omit<HealTagTask, 'id' | 'status' | 'type'>;
 
 // Notification types (for already-completed operations like modal creates)
 type CreateRoomNotification = { type: 'createRoom'; roomName: string; roomId: string };
@@ -67,6 +75,7 @@ interface TaskQueueContextType {
   addRoleUpdateTask: (task: AddRoleUpdateInput) => string;
   addCreateRoomTask: (task: AddCreateRoomInput) => string;
   addCreatePersonTask: (task: AddCreatePersonInput) => string;
+  addHealTagTask: (task: AddHealTagInput) => string;
   // Add already-completed notification (for modals that call API directly)
   addNotification: (notification: NotificationInput) => string;
   dismissTask: (id: string) => void;
@@ -163,6 +172,19 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
           );
           task.onError?.();
         }
+      } else if (nextTask.type === 'healTag') {
+        const task = nextTask as HealTagTask;
+        const result = await window.electronAPI.healTag(task.personId, task.tag);
+
+        if (result.success) {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+          );
+        } else {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
+          );
+        }
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -202,6 +224,14 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
   const addCreatePersonTask = useCallback((taskData: AddCreatePersonInput) => {
     const id = `person-${Date.now()}-${++taskIdCounter.current}`;
     const task: CreatePersonTask = { ...taskData, id, type: 'createPerson', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
+  // Add heal-tag task (S3)
+  const addHealTagTask = useCallback((taskData: AddHealTagInput) => {
+    const id = `heal-${Date.now()}-${++taskIdCounter.current}`;
+    const task: HealTagTask = { ...taskData, id, type: 'healTag', status: 'queued' };
     setTasks((prev) => [...prev, task]);
     return id;
   }, []);
@@ -262,6 +292,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         addRoleUpdateTask,
         addCreateRoomTask,
         addCreatePersonTask,
+        addHealTagTask,
         addNotification,
         dismissTask,
         dismissAllCompleted,

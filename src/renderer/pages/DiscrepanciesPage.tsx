@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
+import { HealConfirmationModal } from '../components/HealConfirmationModal';
 
 type DiscrepancyType = 'orphan-tag' | 'missing-tag' | 'unresolved' | 'unknown';
 
@@ -12,6 +14,21 @@ interface Discrepancy {
   uid?: string;
   displayName?: string | null;
   note?: string;
+}
+
+interface HealPlanItem {
+  personId: string;
+  roomId: string;
+  roomTitle: string | null;
+  role: string;
+  tag: string;
+  displayName: string | null;
+  email: string | null;
+}
+
+interface HealPlan {
+  items: HealPlanItem[];
+  skipped: Array<{ personId: string; roomId: string; role: string; reason: string }>;
 }
 
 const TYPE_LABELS: Record<DiscrepancyType, string> = {
@@ -31,25 +48,37 @@ const TYPE_DESCRIPTIONS: Record<DiscrepancyType, string> = {
 const ORDER: DiscrepancyType[] = ['orphan-tag', 'missing-tag', 'unresolved', 'unknown'];
 
 function DiscrepanciesPage() {
+  const { tasks, addHealTagTask } = useTaskQueue();
   const [items, setItems] = useState<Discrepancy[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | DiscrepancyType>('all');
   const [search, setSearch] = useState('');
+  const [healPlan, setHealPlan] = useState<HealPlan | null>(null);
+  const [watching, setWatching] = useState(false);
+  const enqueuedRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let alive = true;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refetch = useCallback(() => {
     window.electronAPI
       .getDiscrepancies()
       .then((rows) => {
-        if (alive) setItems(rows as Discrepancy[]);
+        if (mountedRef.current) setItems(rows as Discrepancy[]);
       })
       .catch((e) => {
-        if (alive) setError(String(e?.message || e));
+        if (mountedRef.current) setError(String(e?.message || e));
       });
-    return () => {
-      alive = false;
-    };
   }, []);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   const counts = useMemo(() => {
     const c: Record<DiscrepancyType, number> = { 'orphan-tag': 0, 'missing-tag': 0, unresolved: 0, unknown: 0 };
@@ -67,16 +96,64 @@ function DiscrepanciesPage() {
     });
   }, [items, typeFilter, search]);
 
+  const openHeal = useCallback(async () => {
+    try {
+      const plan = await window.electronAPI.getTagHealPlan();
+      setHealPlan(plan);
+    } catch (e) {
+      setError(String((e as any)?.message || e));
+    }
+  }, []);
+
+  const confirmHeal = useCallback(() => {
+    if (!healPlan) return;
+    const ids = new Set<string>();
+    for (const it of healPlan.items) {
+      const id = addHealTagTask({ personId: it.personId, tag: it.tag, displayName: it.displayName });
+      ids.add(id);
+    }
+    enqueuedRef.current = ids;
+    setHealPlan(null);
+    setWatching(ids.size > 0);
+  }, [healPlan, addHealTagTask]);
+
+  // When every enqueued heal task has settled (success/error), refetch so counts drop.
+  useEffect(() => {
+    if (!watching) return;
+    const ids = enqueuedRef.current;
+    const tracked = tasks.filter((t) => ids.has(t.id));
+    if (tracked.length === ids.size && tracked.every((t) => t.status === 'success' || t.status === 'error')) {
+      refetch();
+      setWatching(false);
+      enqueuedRef.current = new Set();
+    }
+  }, [tasks, watching, refetch]);
+
   if (error) return <div className="text-red-600">Failed to load discrepancies: {error}</div>;
   if (!items) return <div className="text-gray-500">Loading discrepancies…</div>;
 
+  const missingCount = counts['missing-tag'];
+
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold text-gray-800">Discrepancies</h2>
-        <p className="text-sm text-gray-500">
-          Where profile tags and group-ACL truth disagree. Read-only — computed from the last sync.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-800">Discrepancies</h2>
+          <p className="text-sm text-gray-500">
+            Where profile tags and group-ACL truth disagree. Read-only — computed from the last sync.
+          </p>
+        </div>
+        <button
+          onClick={openHeal}
+          disabled={missingCount === 0 || watching}
+          className={`px-3 py-1.5 rounded text-sm whitespace-nowrap ${
+            missingCount === 0 || watching
+              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+          }`}
+        >
+          {watching ? 'Healing…' : `Heal all missing-tags (${missingCount})`}
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -135,6 +212,14 @@ function DiscrepanciesPage() {
           </table>
         </div>
       )}
+
+      <HealConfirmationModal
+        isOpen={healPlan !== null}
+        tagCount={healPlan?.items.length ?? 0}
+        skippedCount={healPlan?.skipped.length ?? 0}
+        onConfirm={confirmHeal}
+        onClose={() => setHealPlan(null)}
+      />
     </div>
   );
 }
