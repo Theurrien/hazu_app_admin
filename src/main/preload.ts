@@ -32,7 +32,6 @@ const IPC_CHANNELS = {
   PROFILE_TEMPLATES_FETCH: 'profileTemplates:fetch',
   USER_TYPES_GET_ALL: 'userTypes:getAll',
   DISTRIBUTION_GROUPS_GET: 'distributionGroups:get',
-  ASSIGNMENTS_EXECUTE: 'assignments:execute',
   WEBHOOK_CREATE_PERSON: 'webhook:createPerson',
   WEBHOOK_DELETE_ROOM: 'webhook:deleteRoom',
   WEBHOOK_DELETE_PERSON: 'webhook:deletePerson',
@@ -154,18 +153,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.DISTRIBUTION_GROUPS_GET, roomId, role),
-
-  // Execute assignments
-  executeAssignments: (payload: {
-    assignments: Array<{
-      personId: string;
-      personEmail: string;
-      firstName: string;
-      lastName: string;
-      roomId: string;
-      role: string;
-    }>;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.ASSIGNMENTS_EXECUTE, payload),
 
   // Person creation
   createPerson: (params: {
@@ -301,22 +288,6 @@ declare global {
       }>;
       healTag: (personId: string, tag: string) => Promise<{ success: boolean; error?: string }>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
-      executeAssignments: (payload: {
-        assignments: Array<{
-          personId: string;
-          personEmail: string;
-          firstName: string;
-          lastName: string;
-          roomId: string;
-          role: string;
-        }>;
-      }) => Promise<{
-        success: boolean;
-        totalUsers?: number;
-        successful?: number;
-        failed?: number;
-        error?: string;
-      }>;
       createPerson: (params: {
         sourceId: string;
         targetId: string;

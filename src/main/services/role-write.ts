@@ -136,5 +136,10 @@ export async function runReliableRoleWrite(
     reconciledRole: v.reconciledRole,
     partial: v.partial,
     attempts,
+    error: v.verified
+      ? undefined
+      : v.partial
+        ? 'Write returned OK but the role change is only partially reflected in the role-group membership'
+        : 'Write returned OK but the role-group membership did not reflect the change',
   };
 }

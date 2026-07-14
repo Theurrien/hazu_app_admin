@@ -96,6 +96,13 @@ export async function reliableUpdateUserRole(
 
   const outcome = await runReliableRoleWrite({ oldRole, newRole }, deps);
 
+  console.log(
+    `[role-write] ${personId} @ ${roomId} ${oldRole || '_'}→${newRole || '_'}: ` +
+    `success=${outcome.success} postOk=${outcome.postOk} verifyRan=${outcome.verifyRan} ` +
+    `verified=${outcome.verified} attempts=${outcome.attempts}` +
+    (outcome.error ? ` error=${outcome.error}` : ''),
+  );
+
   // Reconcile local person_room_assignments from truth, only when the write reached 2xx.
   if (outcome.postOk) {
     try {

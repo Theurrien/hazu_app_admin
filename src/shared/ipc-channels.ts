@@ -52,7 +52,6 @@ export const IPC_CHANNELS = {
 
   // Distribution Groups
   DISTRIBUTION_GROUPS_GET: 'distributionGroups:get',
-  ASSIGNMENTS_EXECUTE: 'assignments:execute',
 
   // Discrepancies (S2 report)
   DISCREPANCIES_GET: 'discrepancies:get',

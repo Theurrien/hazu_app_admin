@@ -99,6 +99,8 @@ describe('runReliableRoleWrite', () => {
     const out = await runReliableRoleWrite(assign, deps);
     expect(reads).toBe(3);
     expect(out).toMatchObject({ success: false, postOk: true, verifyRan: true, verified: false, reconciledRole: null });
+    expect(typeof out.error).toBe('string');
+    expect(out.error!.length).toBeGreaterThan(0);
   });
 
   it('trusts the 2xx when truth cannot be read (verifyRan false)', async () => {
