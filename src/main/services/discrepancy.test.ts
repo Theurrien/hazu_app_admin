@@ -1,0 +1,55 @@
+import { describe, it, expect } from 'vitest';
+import { parseClassTag, computeDiscrepancies } from './discrepancy';
+
+describe('parseClassTag', () => {
+  it('splits on the LAST hyphen and validates the role', () => {
+    expect(parseClassTag('hz-config-class-LkxlSjtb0hnG4TpnvDDr-student')).toEqual({
+      classId: 'LkxlSjtb0hnG4TpnvDDr',
+      role: 'student',
+    });
+    expect(parseClassTag('hz-config-class-abc-notarole')).toBeNull(); // unknown role
+    expect(parseClassTag('hz-share-student-abc')).toBeNull();         // wrong prefix
+    expect(parseClassTag('hz-config-class-nohyphen')).toBeNull();     // no role segment
+  });
+});
+
+describe('computeDiscrepancies', () => {
+  const rooms = [
+    { id: 'room1', title: 'CUI-C c', classId: 'class1' },
+    { id: 'room2', title: 'CIE X', classId: 'class2' },
+  ];
+
+  it('flags orphan-tag + missing-tag, carries unresolved/unknown, ignores consistent rows', () => {
+    const persons = [
+      // consistent: tag AND assignment for (room1, student) -> NO discrepancy
+      { id: 'pA', displayName: 'Alice', email: 'alice@example.invalid', tags: ['hz-config-class-class1-student'] },
+      // orphan-tag: tag for (room2, student) but no assignment
+      { id: 'pB', displayName: 'Bob', email: 'bob@example.invalid', tags: ['hz-config-class-class2-student'] },
+      // missing-tag: assigned (room1, schoolteacher) below but no tag
+      { id: 'pC', displayName: 'Carol', email: 'carol@example.invalid', tags: [] },
+    ];
+    const assignments = [
+      { personId: 'pA', roomId: 'room1', role: 'student' },
+      { personId: 'pC', roomId: 'room1', role: 'schoolteacher' },
+    ];
+    const issues = [
+      { type: 'unknown' as const, roomId: 'room1', role: 'student', uid: 'u9', email: 'student.two@example.invalid', displayName: 'Student Two' },
+      { type: 'unresolved' as const, roomId: 'room1', role: 'student', uid: 'uidonly', email: null, displayName: 'uidonly' },
+    ];
+    const res = computeDiscrepancies({ rooms, persons, assignments, issues });
+    expect(res).toEqual([
+      { type: 'orphan-tag', roomId: 'room2', roomTitle: 'CIE X', role: 'student', personId: 'pB', email: 'bob@example.invalid', displayName: 'Bob' },
+      { type: 'missing-tag', roomId: 'room1', roomTitle: 'CUI-C c', role: 'schoolteacher', personId: 'pC', email: 'carol@example.invalid', displayName: 'Carol' },
+      { type: 'unresolved', roomId: 'room1', roomTitle: 'CUI-C c', role: 'student', uid: 'uidonly', email: null, displayName: 'uidonly' },
+      { type: 'unknown', roomId: 'room1', roomTitle: 'CUI-C c', role: 'student', uid: 'u9', email: 'student.two@example.invalid', displayName: 'Student Two' },
+    ]);
+  });
+
+  it('reports a tag whose class is absent from local rooms as orphan-tag (no silent drop)', () => {
+    const persons = [{ id: 'pX', displayName: 'Xavier', email: 'xavier@example.invalid', tags: ['hz-config-class-ghostclass-student'] }];
+    const res = computeDiscrepancies({ rooms, persons, assignments: [], issues: [] });
+    expect(res).toEqual([
+      { type: 'orphan-tag', roomId: 'ghostclass', roomTitle: null, role: 'student', personId: 'pX', email: 'xavier@example.invalid', displayName: 'Xavier', note: 'tag references a class not in local rooms' },
+    ]);
+  });
+});
