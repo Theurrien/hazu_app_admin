@@ -78,6 +78,8 @@ export async function reliableUpdateUserRole(
       }
     },
     readMembership: async (): Promise<GroupMembershipSnapshot | null> => {
+      // Cannot verify without an email to match against role-group ACL entries.
+      if (!email) return null;
       // Cannot verify if a group we need isn't synced locally.
       if (isRealRole(newRole) && !newGroupId) return null;
       if (isRealRole(oldRole) && oldRole !== newRole && !oldGroupId) return null;
@@ -96,12 +98,16 @@ export async function reliableUpdateUserRole(
 
   // Reconcile local person_room_assignments from truth, only when the write reached 2xx.
   if (outcome.postOk) {
-    if (isRealRole(outcome.reconciledRole)) {
-      db.prepare(
-        'INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at) VALUES (?, ?, ?, ?)',
-      ).run(personId, roomId, outcome.reconciledRole, Date.now());
-    } else {
-      db.prepare('DELETE FROM person_room_assignments WHERE person_id = ? AND room_id = ?').run(personId, roomId);
+    try {
+      if (isRealRole(outcome.reconciledRole)) {
+        db.prepare(
+          'INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at) VALUES (?, ?, ?, ?)',
+        ).run(personId, roomId, outcome.reconciledRole, Date.now());
+      } else {
+        db.prepare('DELETE FROM person_room_assignments WHERE person_id = ? AND room_id = ?').run(personId, roomId);
+      }
+    } catch (err) {
+      console.error('[role-write] local reconcile failed for', personId, roomId, err);
     }
   }
 

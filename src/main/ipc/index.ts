@@ -1004,9 +1004,13 @@ export function registerIpcHandlers(): void {
 
         // Step 2: Assign rooms via the hardened write (retry + verify + reconcile local).
         for (const roomId of params.roomIds) {
-          const assignResult = await reliableUpdateUserRole(profileId, roomId, '_', params.role);
-          if (!assignResult.success) {
-            console.error('[CREATE_PERSON] Room assignment failed for', roomId, assignResult.error);
+          try {
+            const assignResult = await reliableUpdateUserRole(profileId, roomId, '_', params.role);
+            if (!assignResult.success) {
+              console.error('[CREATE_PERSON] Room assignment failed for', roomId, assignResult.error);
+            }
+          } catch (err) {
+            console.error('[CREATE_PERSON] Room assignment threw for', roomId, err);
           }
         }
 
