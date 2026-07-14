@@ -8,10 +8,11 @@ import MatrixPage from './pages/MatrixPage';
 import BulkImportPage from './pages/BulkImportPage';
 import SettingsPage from './pages/SettingsPage';
 import MissionAnalysisPage from './pages/MissionAnalysisPage';
+import DiscrepanciesPage from './pages/DiscrepanciesPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'discrepancies' | 'settings';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
@@ -30,6 +31,8 @@ function App() {
         return <BulkImportPage />;
       case 'missions':
         return <MissionAnalysisPage />;
+      case 'discrepancies':
+        return <DiscrepanciesPage />;
       case 'settings':
         return <SettingsPage />;
       default:

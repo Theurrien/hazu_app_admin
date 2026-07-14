@@ -7,11 +7,12 @@ import {
   faTableCells,
   faFileImport,
   faBullseye,
+  faTriangleExclamation,
   faCog,
   IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'settings';
+type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'discrepancies' | 'settings';
 
 interface SidebarProps {
   currentPage: Page;
@@ -32,6 +33,7 @@ const navItems: NavItem[] = [
   { id: 'matrix', label: 'Matrix', icon: faTableCells },
   { id: 'import', label: 'Bulk Import', icon: faFileImport },
   { id: 'missions', label: 'Missions', icon: faBullseye },
+  { id: 'discrepancies', label: 'Discrepancies', icon: faTriangleExclamation },
   { id: 'settings', label: 'Settings', icon: faCog },
 ];
 
