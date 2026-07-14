@@ -54,10 +54,14 @@ export function resolvePerson(
 }
 
 // Precondition: `byEmail` keys MUST be lowercased by the caller (see resolvePerson).
+// `excludeUids` holds account UIDs (ACL authorId) to drop entirely — e.g. super-user
+// group members, who are granted access everywhere without a real role/tag and would
+// otherwise flood assignments/issues as noise. An excluded member yields neither.
 export async function computeGroupAssignments(
   groups: RoleGroup[],
   getAcl: (id: string) => Promise<{ data: AclMember[] }>,
   byEmail: Map<string, string>,
+  excludeUids: Set<string> = new Set(),
 ): Promise<ComputeResult> {
   const assignments: GroupAssignment[] = [];
   const issues: MembershipIssue[] = [];
@@ -78,6 +82,7 @@ export async function computeGroupAssignments(
     }
     for (const m of acl?.data || []) {
       if (m.isGroup) continue; // nested group refs are not members
+      if (m.authorId && excludeUids.has(m.authorId)) continue; // super-user group members: excluded everywhere
       const rawEmail = (m.description || '').trim();
       if (isSystemAccount(rawEmail)) continue;
       const r = resolvePerson(m, byEmail);

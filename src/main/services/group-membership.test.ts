@@ -88,4 +88,26 @@ describe('computeGroupAssignments (CUI-C c fixture)', () => {
       { type: 'unknown', groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student', uid: '', email: 'ghost@example.invalid', displayName: 'ghost@example.invalid' },
     ]);
   });
+
+  it('excludes members whose authorId is in excludeUids (super-user group), before resolving', async () => {
+    const groups = [{ groupId: 'KC5ob7INtmW3uDvBJXqa', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student' }];
+    const acl = {
+      data: [
+        student('6Dxet6', 'student.one@example.invalid'), // -> assigned (normal member)
+        student('SUPER1', 'super.admin@example.invalid'),         // super-user: would otherwise assign
+        student('SUPER2', 'ghost.super@example.invalid'),         // super-user: would otherwise be unknown
+      ],
+    };
+    // super.admin IS a local person too — exclusion must win over resolution.
+    const byEmail = new Map([
+      ['student.one@example.invalid', '3L0LitHlKovjiK5e3rSN'],
+      ['super.admin@example.invalid', 'pSuperAdmin'],
+    ]);
+    const excludeUids = new Set(['SUPER1', 'SUPER2']);
+    const res = await computeGroupAssignments(groups, async () => acl, byEmail, excludeUids);
+    expect(res.assignments).toEqual([
+      { personId: '3L0LitHlKovjiK5e3rSN', roomId: 'LkxlSjtb0hnG4TpnvDDr', role: 'student' },
+    ]);
+    expect(res.issues).toEqual([]);
+  });
 });

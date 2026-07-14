@@ -703,6 +703,19 @@ async function syncDistributionGroups(): Promise<void> {
 
   console.log(`[SYNC] Found ${distGroups.length} distribution groups`);
 
+  // The super-user sharing group (tag hz-config-group-superuser) sits alongside the
+  // room×role groups. Its members are granted access everywhere without a real role/tag,
+  // so they'd flood membership as noise — stash its id so syncGroupMemberships can exclude
+  // them. parseShareTag naturally skips it below (it is not a room×role share tag).
+  const superUserGroup = distGroups.find((g: HazuEntity) =>
+    (g.snapshot.tags || []).includes('hz-config-group-superuser')
+  );
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('superuser_group_id', ?)")
+    .run(superUserGroup?.snapshot.key || '');
+  if (superUserGroup) {
+    console.log('[SYNC] Found super-user group:', superUserGroup.snapshot.key);
+  }
+
   for (const group of distGroups) {
     const tags = group.snapshot.tags || [];
     const parsed = parseShareTag(tags, validRoles);
@@ -748,11 +761,33 @@ async function syncGroupMemberships(): Promise<void> {
   const byEmail = new Map<string, string>();
   for (const p of persons) byEmail.set(p.email, p.id);
 
+  // Super-user group members are granted access everywhere without a real role/tag;
+  // exclude them so they don't flood assignments/issues as noise. The group id was
+  // stashed by syncDistributionGroups; read its ACL once to collect the member UIDs.
+  const excludeUids = new Set<string>();
+  const superRow = db
+    .prepare("SELECT value FROM settings WHERE key = 'superuser_group_id'")
+    .get() as { value: string } | undefined;
+  const superUserGroupId = superRow?.value;
+  if (superUserGroupId) {
+    try {
+      const superAcl = await sendApiRequestGetAclInfo(superUserGroupId);
+      for (const m of superAcl?.data || []) {
+        if (m.isGroup) continue;
+        if (m.authorId) excludeUids.add(m.authorId);
+      }
+      console.log(`[SYNC] Super-user exclusion: ${excludeUids.size} members from group ${superUserGroupId}`);
+    } catch (err) {
+      console.error(`[SYNC] Failed to read super-user group ${superUserGroupId} ACL; proceeding without exclusion:`, err);
+    }
+  }
+
   syncProgress.message = `Reading membership of ${groups.length} groups...`;
   const { assignments, issues } = await computeGroupAssignments(
     groups,
     sendApiRequestGetAclInfo,
     byEmail,
+    excludeUids,
   );
 
   const now = Date.now();
