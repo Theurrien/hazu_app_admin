@@ -121,8 +121,13 @@ function DiscrepanciesPage() {
   useEffect(() => {
     if (!watching) return;
     const ids = enqueuedRef.current;
-    const tracked = tasks.filter((t) => ids.has(t.id));
-    if (tracked.length === ids.size && tracked.every((t) => t.status === 'success' || t.status === 'error')) {
+    // Settle when no enqueued heal task is still in-flight. Robust to a settled
+    // task being dismissed from the queue mid-batch (its id leaves `tasks`) — an
+    // exact-count check would wedge `watching` permanently in that case.
+    const inFlight = tasks.some(
+      (t) => ids.has(t.id) && (t.status === 'queued' || t.status === 'processing'),
+    );
+    if (!inFlight) {
       refetch();
       setWatching(false);
       enqueuedRef.current = new Set();
