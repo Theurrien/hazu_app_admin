@@ -11,6 +11,13 @@ describe('parseClassTag', () => {
     expect(parseClassTag('hz-share-student-abc')).toBeNull();         // wrong prefix
     expect(parseClassTag('hz-config-class-nohyphen')).toBeNull();     // no role segment
   });
+
+  it('keeps hyphens inside the classId (splits on the LAST hyphen only)', () => {
+    expect(parseClassTag('hz-config-class-ab-cd-student')).toEqual({
+      classId: 'ab-cd',
+      role: 'student',
+    });
+  });
 });
 
 describe('computeDiscrepancies', () => {
@@ -50,6 +57,26 @@ describe('computeDiscrepancies', () => {
     const res = computeDiscrepancies({ rooms, persons, assignments: [], issues: [] });
     expect(res).toEqual([
       { type: 'orphan-tag', roomId: 'ghostclass', roomTitle: null, role: 'student', personId: 'pX', email: 'xavier@example.invalid', displayName: 'Xavier', note: 'tag references a class not in local rooms' },
+    ]);
+  });
+
+  it('orders same-type discrepancies by room title, then role, then name', () => {
+    const sortRooms = [
+      { id: 'rA', title: 'Alpha', classId: 'cA' },
+      { id: 'rB', title: 'Beta', classId: 'cB' },
+    ];
+    const persons = [
+      { id: 'p1', displayName: 'P1', email: 'p1@x', tags: ['hz-config-class-cB-student'] },
+      { id: 'p2', displayName: 'P2', email: 'p2@x', tags: ['hz-config-class-cA-student'] },
+      { id: 'p3', displayName: 'P3', email: 'p3@x', tags: ['hz-config-class-cA-courseteacher'] },
+      { id: 'p4', displayName: 'Aaron', email: 'a@x', tags: ['hz-config-class-cA-student'] },
+    ];
+    const res = computeDiscrepancies({ rooms: sortRooms, persons, assignments: [], issues: [] });
+    expect(res).toEqual([
+      { type: 'orphan-tag', roomId: 'rA', roomTitle: 'Alpha', role: 'courseteacher', personId: 'p3', email: 'p3@x', displayName: 'P3' },
+      { type: 'orphan-tag', roomId: 'rA', roomTitle: 'Alpha', role: 'student', personId: 'p4', email: 'a@x', displayName: 'Aaron' },
+      { type: 'orphan-tag', roomId: 'rA', roomTitle: 'Alpha', role: 'student', personId: 'p2', email: 'p2@x', displayName: 'P2' },
+      { type: 'orphan-tag', roomId: 'rB', roomTitle: 'Beta', role: 'student', personId: 'p1', email: 'p1@x', displayName: 'P1' },
     ]);
   });
 });

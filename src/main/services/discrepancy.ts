@@ -85,36 +85,30 @@ export function computeDiscrepancies(input: DiscrepancyInput): Discrepancy[] {
   const asgKeys = new Set<string>();
   for (const a of input.assignments) asgKeys.add(key(a.personId, a.roomId, a.role));
 
-  // orphan-tag: has the breadcrumb but is NOT a group member (tag not in assignments)
-  for (const k of tagKeys) {
-    if (asgKeys.has(k)) continue;
+  // orphan-tag and missing-tag share the same person/room/role projection; they
+  // differ only in the type and which key-set drives them.
+  const emit = (type: DiscrepancyType, k: string): Discrepancy => {
     const [personId, roomId, role] = JSON.parse(k) as [string, string, string];
     const p = personsById.get(personId);
-    out.push({
-      type: 'orphan-tag',
+    return {
+      type,
       roomId,
       roomTitle: roomIdToTitle.get(roomId) ?? null,
       role,
       personId,
       email: p?.email ?? null,
       displayName: p?.displayName ?? null,
-    });
+    };
+  };
+
+  // orphan-tag: has the breadcrumb but is NOT a group member (tag not in assignments)
+  for (const k of tagKeys) {
+    if (!asgKeys.has(k)) out.push(emit('orphan-tag', k));
   }
 
   // missing-tag: IS a group member but lacks the breadcrumb (assignment not in tags) — healable in S3
   for (const k of asgKeys) {
-    if (tagKeys.has(k)) continue;
-    const [personId, roomId, role] = JSON.parse(k) as [string, string, string];
-    const p = personsById.get(personId);
-    out.push({
-      type: 'missing-tag',
-      roomId,
-      roomTitle: roomIdToTitle.get(roomId) ?? null,
-      role,
-      personId,
-      email: p?.email ?? null,
-      displayName: p?.displayName ?? null,
-    });
+    if (!tagKeys.has(k)) out.push(emit('missing-tag', k));
   }
 
   // unresolved / unknown: already computed by S1 — carried through from membership_issues
