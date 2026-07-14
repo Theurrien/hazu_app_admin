@@ -218,12 +218,15 @@ populates itself via two fetch handlers:
 Read the new id from `results[0].profileId`. The response carries no tags/icon/color, so the
 local `persons` row is minimal — the next Dashboard sync (`INSERT OR REPLACE` by `id`) enriches it.
 
-**Step 2 — assign rooms** via `POST /api-v2-admin/update-user-roles`, once per selected room:
+**Step 2 — assign rooms** via the S4 reliable role-write path (`reliableUpdateUserRole`, see
+[Reliable Role Writes (S4)](#reliable-role-writes-s4)), once per selected room. It still posts to
+`POST /api-v2-admin/update-user-roles` with the same payload, now wrapped in retry + verify + local
+reconcile:
 ```jsonc
 { "templateId": adminId, "profileId": <new id>,
   "userTypesInfo": [ { "classId": roomId, "oldUserType": "_", "newUserType": role } ] }
 ```
-Room-assignment failures are logged but non-fatal (the person is already created).
+Each per-room call is wrapped in its own try/catch, so room-assignment failures stay logged-but-non-fatal (the person is already created).
 
 > Note: `sendApiRequestCreateUser` in `api.ts` targets the older singular `add-user` endpoint
 > and is **not** used by this flow — editing it will not affect person creation.
@@ -312,8 +315,11 @@ columns, and every cell is a role dropdown.
   and room headers stay pinned while cells scroll both directions.
 - **Edit a cell** — pick a role from the dropdown (`-`, Student, Mentor, Teacher, Course T.,
   Advisor, Guardian). The change is applied **optimistically** to local state, then enqueued as a
-  `roleUpdate` task — the **same** Task Queue + `updateUserRole` → `POST /api-v2-admin/update-user-roles`
-  path the Bulk Import Assignment tab uses. On failure the cell **reverts** via the task's `onError`.
+  `roleUpdate` task — the **same** Task Queue + `updateUserRole` → `WEBHOOK_UPDATE_USER_ROLE` →
+  S4 reliable role-write path the Bulk Import Assignment tab uses (retry + verify against group-ACL
+  truth + local reconcile; see [Reliable Role Writes (S4)](#reliable-role-writes-s4)). On failure —
+  including a write the server accepted but group truth does **not** confirm — the cell **reverts**
+  via the task's `onError`.
 - **Filter/search** — [MatrixFilters.tsx](src/renderer/components/MatrixFilters.tsx) toggles person
   and room types (empty selection = show all) and free-text searches both axes. Rows/columns sort by
   type then alphabetically; searching one axis "smart-sorts" the other so the top match's assigned
@@ -326,10 +332,11 @@ columns, and every cell is a role dropdown.
   then `refetch()` the grid. Unlike cell edits, these run **immediately** — not through the queue.
 
 ### Matrix vs. Bulk Import Assignment
-Both write through the same `roleUpdate` task and `update-user-roles` endpoint. Matrix is for
-**manual, one-cell-at-a-time** edits with live optimistic feedback; the Bulk Import **Assignment**
-tab is for **batch** assignment from a spreadsheet. Deleting/renaming rooms and deleting persons is
-Matrix-only.
+Both write through the same `roleUpdate` task → `WEBHOOK_UPDATE_USER_ROLE` → S4 reliable role-write
+helper (`reliableUpdateUserRole`; see [Reliable Role Writes (S4)](#reliable-role-writes-s4)). Matrix
+is for **manual, one-cell-at-a-time** edits with live optimistic feedback; the Bulk Import
+**Assignment** tab is for **batch** assignment from a spreadsheet. Deleting/renaming rooms and
+deleting persons is Matrix-only.
 
 ### Prerequisites
 - Run the main sync first (Dashboard > Sync) — the grid renders entirely from local SQLite.
@@ -363,9 +370,13 @@ and push a completed `addNotification` into the same panel.
 6. **Execute** — enqueues one `roleUpdate` task per included row.
 
 Each `roleUpdate` → `updateUserRole(personId, roomId, oldRole, newRole)` → `WEBHOOK_UPDATE_USER_ROLE`
-handler → `POST /api-v2-admin/update-user-roles` (same endpoint Person Creation uses for room
-assignment; `templateId` = `admin_id`). On success it also writes local `person_room_assignments`
-(`INSERT OR REPLACE`, or `DELETE` when the new role is `_`), so no full re-sync is needed.
+handler → the **S4 reliable role-write path** (`reliableUpdateUserRole`; see
+[Reliable Role Writes (S4)](#reliable-role-writes-s4)). It still posts to
+`POST /api-v2-admin/update-user-roles` (same endpoint Person Creation uses; `templateId` = `admin_id`),
+now wrapped in retry + verify-against-group-ACL-truth. On a **confirmed** write it reconciles local
+`person_room_assignments` **from truth** (`INSERT OR REPLACE`, or `DELETE` when the role resolves to
+`_`), so no full re-sync is needed; a write the server accepted but truth contradicts returns
+`success:false` (the task shows an error, and in Matrix the cell reverts).
 
 ### Verify workflow (read-only)
 [VerifyAssignmentsTab.tsx](src/renderer/components/bulk-import/VerifyAssignmentsTab.tsx) diffs the
@@ -378,6 +389,52 @@ Assignment batch.
 - Run the main sync first (Dashboard > Sync). Persons, rooms, roles, and `admin_id` all come from
   local SQLite — Assignment/Verify only match against already-synced data.
 
+## Reliable Role Writes (S4)
+
+Role assign/remove writes — Matrix cell edits, Bulk Import **Assignment**, and person-creation room
+assignment — all go through one hardened helper so a write is **never falsely reported as
+succeeding**. It keeps the designated `POST /api-v2-admin/update-user-roles` endpoint (no ACL/group
+bypass) but wraps it in **retry → verify-against-group-ACL-truth → reconcile-local**.
+
+### Files
+- [role-write.ts](src/main/services/role-write.ts) — **pure core**, all IO injected (no DB/HTTP
+  imports; unit-tested without the native module): `isRetryableError`, `backoffMs`,
+  `evaluateVerification` (the assign/remove/change decision table), and the `runReliableRoleWrite`
+  orchestrator. Tests in [role-write.test.ts](src/main/services/role-write.test.ts).
+- [role-write.service.ts](src/main/services/role-write.service.ts) — **thin IO layer**:
+  `reliableUpdateUserRole(personId, roomId, oldRole, newRole)` gathers `admin_id`, the person's
+  `email`, and the role-group ids from SQLite, builds the real deps (axios POST +
+  `sendApiRequestGetAclInfo` membership reads + `sleep`), runs the orchestrator, then reconciles
+  local `person_room_assignments`.
+
+### Flow (all IO injected into the pure core)
+1. **Write, retrying only transient failures** — POST `update-user-roles`; retry on 5xx / network /
+   timeout with exponential backoff (`500 * 2^n`, up to 3 attempts). A 4xx fails fast.
+2. **Verify against group truth** — re-read the role-GROUP ACL (up to 3 reads, 750 ms apart, to ride
+   out cache lag) and match the person against ACL entries by email (`description`) **or account id
+   (`authorId`)**, skipping `isGroup` entries (`isIdentityInAcl`). The authorId path matters because
+   `persons.email` sometimes holds the account UID rather than an email (a Hazu data quirk) — when it
+   does, it equals the ACL entry's `authorId`, not its `description`. If the local identity is neither
+   a valid email nor a matched account id, verification is treated as **cannot-verify** (trust the 2xx)
+   rather than a false negative. Groups are truth; profile tags are not consulted here.
+3. **Reconcile local from truth** — only after a 2xx, write local `person_room_assignments` to match
+   what the ACL actually shows (`INSERT OR REPLACE`, or `DELETE` when the role resolves to `_`). The
+   reconcile runs in its own try/catch so a local-DB failure can't flip a real API success. On a
+   non-2xx (the write never landed) nothing local changes.
+
+### Success rule
+`success = postOk && !(verifyRan && !verified)`:
+- a 2xx that group truth **contradicts** → `success:false` (the caller shows an error; in Matrix the
+  cell reverts);
+- a 2xx that **cannot be verified** (blank email, role-group not synced locally, or an ACL read
+  error) → **trusts the 2xx** and reconciles optimistically to the intended role.
+
+Each write logs one concise `[role-write] … success=… verified=… attempts=…` line to the
+main-process console. The IPC handler contract is unchanged (`{ success, error? }`), so the
+renderer's Task Queue needs no change; the only behavior change is that an unconfirmed write now
+correctly reports failure instead of a silent success. (The old fire-and-forget `ASSIGNMENTS_EXECUTE`
+handler + its `executeAssignments` preload method were removed — they had no renderer callers.)
+
 ## Testing the App
 
 1. Run `npm run build`
@@ -385,7 +442,7 @@ Assignment batch.
 3. Go to Settings → Enter API key and Root Hazu ID
 4. Click "Sync Now" on Dashboard
 5. View synced data in Rooms/Persons pages
-6. Open the Matrix tab → edit an assignment cell (optimistic update, runs through the Task Queue)
+6. Open the Matrix tab → edit an assignment cell (optimistic update; runs through the reliable role-write path — verified against group truth, reverts if the change isn't confirmed)
 7. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
 

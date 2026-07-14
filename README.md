@@ -18,7 +18,7 @@ Hazu Admin connects to the Hazu platform API, mirrors your data into a local SQL
 - **Assignment Matrix** — a grid view of every person–room assignment, filterable by type
 - **Bulk Import** — upload an Excel file to create rooms, create persons, or assign existing persons to rooms, with live preview and per-row control
 - **Mission Analysis** — treemap and heatmap dashboards showing student MPE completion by profession, level, and lieu de formation, with drill-down to individual students
-- **Task Queue** — all API writes run through a background queue with per-task status, error reporting, and retry
+- **Task Queue** — all API writes run through a background queue with per-task status, error reporting, and retry; role assignments are verified against the server after writing and marked failed (and reverted in the Matrix) if the change didn't actually take effect
 
 ---
 
@@ -91,7 +91,7 @@ All operations flow through the **Task Queue** panel (top-right) so you can moni
 
 ### Assignment Matrix
 
-A grid with persons on one axis and rooms on the other. Filter by room type and person type to focus on a specific segment — useful for a quick cross-check of who is assigned where.
+A grid with persons on one axis and rooms on the other. Filter by room type and person type to focus on a specific segment. Edit any cell's role inline — the change is written through the reliable role-write path, verified against the server, and reverted if it didn't take effect, so the grid reflects the real assignment rather than an optimistic guess.
 
 ### Mission Analysis
 
