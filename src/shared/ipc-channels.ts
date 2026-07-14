@@ -54,6 +54,9 @@ export const IPC_CHANNELS = {
   DISTRIBUTION_GROUPS_GET: 'distributionGroups:get',
   ASSIGNMENTS_EXECUTE: 'assignments:execute',
 
+  // Discrepancies (S2 report)
+  DISCREPANCIES_GET: 'discrepancies:get',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',

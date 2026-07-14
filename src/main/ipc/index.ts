@@ -6,6 +6,7 @@ import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../serv
 import { runFullSync, getSyncProgress } from '../services/sync.service';
 import { sendApiRequestList } from '../services/hazu-api/api';
 import { runMissionSync, getMissionSyncStatus } from '../services/mission-sync.service';
+import { getDiscrepancies } from '../services/discrepancy.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -117,6 +118,19 @@ export function registerIpcHandlers(): void {
       );
     } catch (error) {
       console.error('Get all assignments error:', error);
+      throw error;
+    }
+  });
+
+  // ============================================================================
+  // DISCREPANCIES (S2 report)
+  // ============================================================================
+
+  ipcMain.handle(IPC_CHANNELS.DISCREPANCIES_GET, async () => {
+    try {
+      return getDiscrepancies();
+    } catch (error) {
+      console.error('Get discrepancies error:', error);
       throw error;
     }
   });

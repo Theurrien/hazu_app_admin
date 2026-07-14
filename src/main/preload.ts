@@ -45,6 +45,7 @@ const IPC_CHANNELS = {
   MISSION_GET_DASHBOARD_DATA: 'mission:dashboard:data',
   MISSION_GET_PROFESSIONS: 'mission:professions:get',
   MISSION_GET_STUDENTS: 'mission:students:get',
+  DISCREPANCIES_GET: 'discrepancies:get',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -137,6 +138,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // User Types
   getUserTypes: () =>
     ipcRenderer.invoke(IPC_CHANNELS.USER_TYPES_GET_ALL),
+
+  // Discrepancies (S2 report)
+  getDiscrepancies: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DISCREPANCIES_GET),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -268,6 +273,17 @@ declare global {
         error?: string;
       }>;
       getUserTypes: () => Promise<Array<{ id: string; name: string; title: string }>>;
+      getDiscrepancies: () => Promise<Array<{
+        type: 'orphan-tag' | 'missing-tag' | 'unresolved' | 'unknown';
+        roomId: string;
+        roomTitle: string | null;
+        role: string;
+        personId?: string;
+        email?: string | null;
+        uid?: string;
+        displayName?: string | null;
+        note?: string;
+      }>>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       executeAssignments: (payload: {
         assignments: Array<{
