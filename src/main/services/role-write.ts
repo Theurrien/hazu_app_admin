@@ -45,6 +45,37 @@ function isRealRole(role: string | null): boolean {
   return role != null && role !== '_' && role !== '';
 }
 
+// An ACL member entry as returned by getAclInfo. `isGroup` entries grant access to another
+// group rather than to a person, so they are skipped when matching an individual.
+export interface AclMember {
+  authorId?: string;
+  description?: string;
+  isGroup?: boolean;
+}
+
+// Does `identity` (a person's local `persons.email`) name a member of this ACL?
+// Matches a member by email (`description`, case-insensitive) OR by account id (`authorId`).
+// The authorId path matters because `persons.email` sometimes holds the account UID instead of
+// an email — in which case it equals the ACL entry's authorId, not its description. Emails and
+// UIDs occupy disjoint value spaces (emails contain '@', UIDs do not), so this cannot false-match.
+export function isIdentityInAcl(members: AclMember[], identity: string): boolean {
+  const id = (identity || '').trim().toLowerCase();
+  if (!id) return false;
+  for (const m of members || []) {
+    if (m.isGroup) continue;
+    if ((m.description || '').trim().toLowerCase() === id) return true;
+    if ((m.authorId || '').trim().toLowerCase() === id) return true;
+  }
+  return false;
+}
+
+// Is this string shaped like an email? Used to decide whether a "not a member" reading can be
+// trusted: if the local identity is not an email and was not matched as an account id, we cannot
+// verify and fall back to trusting the write's 2xx.
+export function looksLikeEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
+}
+
 // Retry only transient failures: any 5xx, or a network/timeout error. Never a 4xx (deterministic).
 export function isRetryableError(status: number | undefined, networkOrTimeout: boolean): boolean {
   if (networkOrTimeout) return true;

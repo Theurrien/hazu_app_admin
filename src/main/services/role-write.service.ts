@@ -2,7 +2,7 @@ import axios from 'axios';
 import { getDb } from '../database';
 import { getApiEndpoint, getApiKey } from './hazu-api/config';
 import { sendApiRequestGetAclInfo } from './hazu-api/api';
-import { runReliableRoleWrite, RoleWriteDeps, GroupMembershipSnapshot } from './role-write';
+import { runReliableRoleWrite, isIdentityInAcl, looksLikeEmail, RoleWriteDeps, GroupMembershipSnapshot } from './role-write';
 
 export interface RoleWriteResult {
   success: boolean;
@@ -35,7 +35,9 @@ export async function reliableUpdateUserRole(
   }
 
   const personRow = db.prepare('SELECT email FROM persons WHERE id = ?').get(personId) as { email: string | null } | undefined;
-  const email = (personRow?.email || '').trim().toLowerCase();
+  // NOTE: `persons.email` is usually an email but sometimes holds the account UID (a data quirk in
+  // Hazu profiles). Keep the raw value — isIdentityInAcl matches it against ACL description OR authorId.
+  const emailRaw = (personRow?.email || '').trim();
 
   const groupIdFor = (role: string | null): string | null => {
     if (!isRealRole(role)) return null;
@@ -54,13 +56,10 @@ export async function reliableUpdateUserRole(
   };
 
   const isMember = async (groupId: string | null): Promise<boolean> => {
-    if (!groupId || !email) return false;
+    if (!groupId || !emailRaw) return false;
     const acl = await sendApiRequestGetAclInfo(groupId);
-    for (const m of acl?.data || []) {
-      if (m.isGroup) continue;
-      if ((m.description || '').trim().toLowerCase() === email) return true;
-    }
-    return false;
+    // Match by email (description) OR account id (authorId) — see isIdentityInAcl.
+    return isIdentityInAcl(acl?.data || [], emailRaw);
   };
 
   const deps: RoleWriteDeps = {
@@ -72,20 +71,32 @@ export async function reliableUpdateUserRole(
         if (axios.isAxiosError(error)) {
           const status = error.response?.status;
           const networkOrTimeout = !error.response || error.code === 'ECONNABORTED';
+          // Full failure detail — the generic message ("Internal server error") is not diagnostic;
+          // dump the server's response body and the exact request we sent, for each failed attempt.
+          console.error(
+            '[role-write] update-user-roles POST failed:',
+            'status=', status, 'code=', error.code,
+            '\n  body=', JSON.stringify(error.response?.data),
+            '\n  sent=', JSON.stringify(payload),
+          );
           return { ok: false, status, networkOrTimeout, error: error.response?.data?.message || error.message };
         }
+        console.error('[role-write] update-user-roles POST failed (non-axios):', error);
         return { ok: false, networkOrTimeout: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
     readMembership: async (): Promise<GroupMembershipSnapshot | null> => {
-      // Cannot verify without an email to match against role-group ACL entries.
-      if (!email) return null;
+      // Cannot verify without a local identity to match against role-group ACL entries.
+      if (!emailRaw) return null;
       // Cannot verify if a group we need isn't synced locally.
       if (isRealRole(newRole) && !newGroupId) return null;
       if (isRealRole(oldRole) && oldRole !== newRole && !oldGroupId) return null;
       try {
         const inNewGroup = await isMember(newGroupId);
         const inOldGroup = await isMember(oldGroupId);
+        // If the local identity isn't a real email and we couldn't match it as an account id in
+        // either group, a "not a member" reading is unreliable -> cannot verify, trust the 2xx.
+        if (!looksLikeEmail(emailRaw) && !inNewGroup && !inOldGroup) return null;
         return { inNewGroup, inOldGroup };
       } catch {
         return null; // ACL read failure -> cannot verify

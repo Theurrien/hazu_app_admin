@@ -4,11 +4,50 @@ import {
   backoffMs,
   evaluateVerification,
   runReliableRoleWrite,
+  isIdentityInAcl,
+  looksLikeEmail,
   RoleWriteDeps,
   GroupMembershipSnapshot,
 } from './role-write';
 
 const noSleep = async () => {};
+
+describe('isIdentityInAcl', () => {
+  const members = [
+    { authorId: 'AAA111', description: 'real@example.invalid', isGroup: false },
+    { authorId: 'ACCTUID00000000000000000001', description: 'student.three@example.invalid', isGroup: false },
+    { authorId: 'GRPID', description: 'nested-group', isGroup: true },
+  ];
+
+  it('matches a member by email description (case-insensitive)', () => {
+    expect(isIdentityInAcl(members, 'REAL@example.invalid')).toBe(true);
+  });
+
+  it('matches by authorId when persons.email holds an account UID, not an email', () => {
+    // The Amah case: persons.email is the account UID; the ACL keys the member by that authorId
+    // while description carries the real email. Matching authorId recovers the identity.
+    expect(isIdentityInAcl(members, 'ACCTUID00000000000000000001')).toBe(true);
+  });
+
+  it('skips isGroup entries and returns false for a genuine non-member', () => {
+    expect(isIdentityInAcl(members, 'nested-group')).toBe(false); // group entry, skipped
+    expect(isIdentityInAcl(members, 'nobody@example.invalid')).toBe(false);
+  });
+
+  it('returns false for a blank identity or empty ACL', () => {
+    expect(isIdentityInAcl(members, '')).toBe(false);
+    expect(isIdentityInAcl([], 'real@example.invalid')).toBe(false);
+  });
+});
+
+describe('looksLikeEmail', () => {
+  it('recognises emails and rejects UIDs / blanks / junk', () => {
+    expect(looksLikeEmail('student.three@example.invalid')).toBe(true);
+    expect(looksLikeEmail('ACCTUID00000000000000000001')).toBe(false);
+    expect(looksLikeEmail('')).toBe(false);
+    expect(looksLikeEmail('not an email')).toBe(false);
+  });
+});
 
 describe('isRetryableError', () => {
   it('retries 5xx and network/timeout, not 4xx', () => {
