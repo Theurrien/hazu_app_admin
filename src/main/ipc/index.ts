@@ -8,6 +8,7 @@ import { sendApiRequestList } from '../services/hazu-api/api';
 import { runMissionSync, getMissionSyncStatus } from '../services/mission-sync.service';
 import { getDiscrepancies } from '../services/discrepancy.service';
 import { getTagHealPlan, healPersonTag } from '../services/tag-healing.service';
+import { reliableUpdateUserRole } from '../services/role-write.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -795,61 +796,13 @@ export function registerIpcHandlers(): void {
       newRole: string | null
     ) => {
       try {
-        const adminIdRow = get<{ value: string }>("SELECT value FROM settings WHERE key = 'admin_id'");
-        const templateId = adminIdRow?.value;
-
-        if (!templateId) {
-          return { success: false, error: 'Admin ID not found. Please run sync first.' };
-        }
-
-        const { getApiEndpoint, getApiKey } = await import('../services/hazu-api/config');
-        const token = getApiKey();
-        const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
-
-        const apiPayload = {
-          templateId: templateId,
-          profileId: personId,
-          userTypesInfo: [
-            {
-              classId: roomId,
-              oldUserType: oldRole || '_',
-              newUserType: newRole || '_',
-            },
-          ],
-        };
-
-        console.log('[UPDATE_USER_ROLE] Calling API:', JSON.stringify(apiPayload, null, 2));
-        const response = await axios.post(
-          `https://${getApiEndpoint()}/api-v2-admin/update-user-roles`,
-          apiPayload,
-          { headers, timeout: 120000 }
-        );
-        console.log('[UPDATE_USER_ROLE] Response:', response.status, response.data);
-
-        // Update local DB on success
-        if (newRole && newRole !== '_') {
-          run(
-            `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
-             VALUES (?, ?, ?, ?)`,
-            [personId, roomId, newRole, Date.now()]
-          );
-        } else {
-          run(
-            `DELETE FROM person_room_assignments WHERE person_id = ? AND room_id = ?`,
-            [personId, roomId]
-          );
-        }
-
-        return { success: true };
+        // S4: retry + verify against role-group truth + reconcile local from truth.
+        // Returns success:false when the write can't be confirmed (no more false successes).
+        const result = await reliableUpdateUserRole(personId, roomId, oldRole, newRole);
+        return { success: result.success, error: result.error };
       } catch (error) {
         console.error('Update user role error:', error);
-        let message = 'Unknown error';
-        if (axios.isAxiosError(error)) {
-          message = error.response?.data?.message || error.message;
-        } else if (error instanceof Error) {
-          message = error.message;
-        }
-        return { success: false, error: message };
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
   );
@@ -1049,26 +1002,11 @@ export function registerIpcHandlers(): void {
           ]
         );
 
-        // Step 2: Assign rooms via update-user-roles
+        // Step 2: Assign rooms via the hardened write (retry + verify + reconcile local).
         for (const roomId of params.roomIds) {
-          const rolePayload = {
-            templateId: adminId,
-            profileId: profileId,
-            userTypesInfo: [{ classId: roomId, oldUserType: '_', newUserType: params.role }],
-          };
-          try {
-            await axios.post(
-              `https://${getApiEndpoint()}/api-v2-admin/update-user-roles`,
-              rolePayload,
-              { headers, timeout: 120000 }
-            );
-            run(
-              `INSERT OR REPLACE INTO person_room_assignments (person_id, room_id, role, synced_at)
-               VALUES (?, ?, ?, ?)`,
-              [profileId, roomId, params.role, now]
-            );
-          } catch (roleError) {
-            console.error('[CREATE_PERSON] Room assignment failed for', roomId, roleError);
+          const assignResult = await reliableUpdateUserRole(profileId, roomId, '_', params.role);
+          if (!assignResult.success) {
+            console.error('[CREATE_PERSON] Room assignment failed for', roomId, assignResult.error);
           }
         }
 
