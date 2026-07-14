@@ -57,6 +57,10 @@ export const IPC_CHANNELS = {
   // Discrepancies (S2 report)
   DISCREPANCIES_GET: 'discrepancies:get',
 
+  // Tag healing (S3)
+  TAG_HEAL_PLAN_GET: 'tagHeal:plan',
+  TAG_HEAL: 'tagHeal:apply',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',

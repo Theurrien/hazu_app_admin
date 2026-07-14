@@ -1,7 +1,7 @@
 import { getDb } from '../database';
-import { computeDiscrepancies, Discrepancy } from './discrepancy';
+import { computeDiscrepancies, Discrepancy, DiscrepancyInput } from './discrepancy';
 
-function safeParseTags(raw: string | null): string[] {
+export function safeParseTags(raw: string | null): string[] {
   if (!raw) return [];
   try {
     const v = JSON.parse(raw);
@@ -11,7 +11,9 @@ function safeParseTags(raw: string | null): string[] {
   }
 }
 
-export function getDiscrepancies(): Discrepancy[] {
+// Loads the four tables the discrepancy computation needs. Shared by getDiscrepancies
+// (the S2 report) and getTagHealPlan (S3) so the two can never diverge.
+export function loadDiscrepancyInput(): DiscrepancyInput {
   const db = getDb();
 
   const rooms = db
@@ -43,5 +45,9 @@ export function getDiscrepancies(): Discrepancy[] {
       displayName: string | null;
     }>;
 
-  return computeDiscrepancies({ rooms, persons, assignments, issues });
+  return { rooms, persons, assignments, issues };
+}
+
+export function getDiscrepancies(): Discrepancy[] {
+  return computeDiscrepancies(loadDiscrepancyInput());
 }

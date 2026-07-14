@@ -46,6 +46,8 @@ const IPC_CHANNELS = {
   MISSION_GET_PROFESSIONS: 'mission:professions:get',
   MISSION_GET_STUDENTS: 'mission:students:get',
   DISCREPANCIES_GET: 'discrepancies:get',
+  TAG_HEAL_PLAN_GET: 'tagHeal:plan',
+  TAG_HEAL: 'tagHeal:apply',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -142,6 +144,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Discrepancies (S2 report)
   getDiscrepancies: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DISCREPANCIES_GET),
+
+  // Tag healing (S3)
+  getTagHealPlan: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.TAG_HEAL_PLAN_GET),
+  healTag: (personId: string, tag: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TAG_HEAL, personId, tag),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -284,6 +292,14 @@ declare global {
         displayName?: string | null;
         note?: string;
       }>>;
+      getTagHealPlan: () => Promise<{
+        items: Array<{
+          personId: string; roomId: string; roomTitle: string | null; role: string;
+          tag: string; displayName: string | null; email: string | null;
+        }>;
+        skipped: Array<{ personId: string; roomId: string; role: string; reason: string }>;
+      }>;
+      healTag: (personId: string, tag: string) => Promise<{ success: boolean; error?: string }>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       executeAssignments: (payload: {
         assignments: Array<{

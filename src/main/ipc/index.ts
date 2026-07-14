@@ -7,6 +7,7 @@ import { runFullSync, getSyncProgress } from '../services/sync.service';
 import { sendApiRequestList } from '../services/hazu-api/api';
 import { runMissionSync, getMissionSyncStatus } from '../services/mission-sync.service';
 import { getDiscrepancies } from '../services/discrepancy.service';
+import { getTagHealPlan, healPersonTag } from '../services/tag-healing.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -132,6 +133,24 @@ export function registerIpcHandlers(): void {
     } catch (error) {
       console.error('Get discrepancies error:', error);
       throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TAG_HEAL_PLAN_GET, async () => {
+    try {
+      return getTagHealPlan();
+    } catch (error) {
+      console.error('Get tag heal plan error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TAG_HEAL, async (_event, personId: string, tag: string) => {
+    try {
+      return await healPersonTag(personId, tag);
+    } catch (error) {
+      console.error('Tag heal error:', error);
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 

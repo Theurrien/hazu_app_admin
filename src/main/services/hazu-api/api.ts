@@ -203,6 +203,22 @@ export const sendApiRequestAddTags = async (itemId: string, tags: string[]): Pro
   }
 };
 
+// Checked variant of sendApiRequestAddTags: same POST, but it does NOT swallow errors —
+// a non-2xx rejects so callers (tag healing) can detect failure. The original
+// swallow-and-void sendApiRequestAddTags is left unchanged for its existing callers.
+export const sendApiRequestAddTagsChecked = async (itemId: string, tags: string[]): Promise<void> => {
+  await axios.post(
+    `https://${getApiEndpoint()}/api-v2-items/${itemId}/tags`,
+    { tags },
+    {
+      headers: {
+        "x-api-key": getApiKey(),
+        "Content-Type": "application/json",
+      },
+    }
+  );
+};
+
 export const sendApiRequestRemoveTags = async (itemId: string, tags: string[]): Promise<void> => {
   try {
     await axios({
