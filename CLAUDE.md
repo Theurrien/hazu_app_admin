@@ -2,6 +2,46 @@
 
 This is the development guide for Claude and other AI assistants working on the Hazu Admin desktop application.
 
+## Person Data — Hard Rule
+
+**Never put real person data from the schools into tracked files.** No e-mail addresses, no
+names, no Hazu profile/account IDs of students, teachers, mentors, advisors or guardians —
+not in source, not in tests, not in docs, not in commit messages, not in fixtures, not "just
+for a moment while debugging".
+
+This app manages data about real people, many of them minors. Anything committed is
+effectively permanent: git history survives file deletion, and a repository's visibility can
+change. In December 2025 an app export (`hazu_admin.html`) was committed and sat in public
+history for seven months, exposing 156 addresses. Its removal required rewriting every commit.
+
+**Instead:**
+
+| Need | Do this |
+|---|---|
+| A test fixture / example | Invent one at `@example.invalid` (RFC 2606 — can never resolve) |
+| A generated report with real data | Write it to `output/` — gitignored, never committed |
+| To debug against a real profile | Use the local SQLite DB or a scratch file outside the repo |
+| To document a real case | Describe it structurally ("a student whose tag holds a UID"), no identifiers |
+
+**Enforcement** — two automated guards, both backed by
+[scripts/check-no-person-data.py](scripts/check-no-person-data.py):
+
+- **git pre-commit hook** ([.githooks/pre-commit](.githooks/pre-commit)) blocks any commit whose
+  staged content carries a disallowed address or a `hz-config-userid-<identity>` tag. Enable it
+  once per clone: `git config core.hooksPath .githooks`
+- **Claude Code PreToolUse hook** ([.claude/settings.json](.claude/settings.json)) blocks the
+  `Write`/`Edit` before the data ever reaches disk.
+
+The e-mail check is an **allowlist**: any domain not listed in the script is rejected, so a
+school domain nobody anticipated is still caught the first time it appears. `output/` is exempt —
+that is what it is for. Audit the whole repo any time with:
+
+```bash
+python3 scripts/check-no-person-data.py --all
+```
+
+If a guard fires, fix the data — do not weaken the guard.
+
 ## Project Overview
 
 Cross-platform Electron + React desktop app for managing the Hazu educational platform. Syncs data locally to SQLite for offline management of persons, rooms, and assignments.

@@ -47,3 +47,9 @@ coverage/
 # Git worktrees
 .worktrees/
 docs/
+
+# Generated reports containing real person data - never commit
+output/
+
+# Per-user Claude Code settings
+.claude/settings.local.json
