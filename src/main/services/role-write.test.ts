@@ -128,6 +128,54 @@ describe('runReliableRoleWrite', () => {
     expect(out).toMatchObject({ success: false, postOk: false, verifyRan: false, error: 'bad' });
   });
 
+  // Measured against the endpoint (2026-07-21 retest): two profiles returned HTTP 500 on all
+  // four add attempts while the member actually landed in the group; the original sweep saw 15
+  // of 22 non-responses that had in fact been applied. A transport-level failure therefore says
+  // nothing about whether the write committed — only group truth does. Verification must run on
+  // the failure path too, or Matrix reverts a cell whose change actually took effect.
+  it('reports success when a 5xx write actually landed (truth confirms)', async () => {
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: false, status: 500, networkOrTimeout: false, error: 'server error' }),
+      readMembership: async () => ({ inNewGroup: true, inOldGroup: false }),
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(out).toMatchObject({ success: true, postOk: false, verifyRan: true, verified: true, reconciledRole: 'student' });
+    expect(out.error).toBeUndefined();
+  });
+
+  it('reports success when a timed-out write actually landed', async () => {
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: false, networkOrTimeout: true, error: 'timeout of 120000ms exceeded' }),
+      readMembership: async () => ({ inNewGroup: true, inOldGroup: false }),
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(out).toMatchObject({ success: true, postOk: false, verifyRan: true, verified: true, reconciledRole: 'student' });
+  });
+
+  it('stays failed when a 5xx write did not land, and keeps the transport error', async () => {
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: false, status: 500, networkOrTimeout: false, error: 'server error' }),
+      readMembership: async () => ({ inNewGroup: false, inOldGroup: false }),
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(out).toMatchObject({ success: false, postOk: false, verifyRan: true, verified: false, error: 'server error' });
+    // Truth did not confirm: local state must not be reconciled off the back of a failed write.
+    expect(out.reconciledRole).toBeNull();
+  });
+
+  it('stays failed when the write failed and truth cannot be read', async () => {
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: false, status: 500, networkOrTimeout: false, error: 'server error' }),
+      readMembership: async () => null,
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(out).toMatchObject({ success: false, postOk: false, verifyRan: false, verified: false, reconciledRole: null });
+  });
+
   it('fails when the write is 2xx but truth never confirms', async () => {
     let reads = 0;
     const deps: RoleWriteDeps = {

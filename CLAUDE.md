@@ -457,22 +457,37 @@ bypass) but wraps it in **retry → verify-against-group-ACL-truth → reconcile
    does, it equals the ACL entry's `authorId`, not its `description`. If the local identity is neither
    a valid email nor a matched account id, verification is treated as **cannot-verify** (trust the 2xx)
    rather than a false negative. Groups are truth; profile tags are not consulted here.
-3. **Reconcile local from truth** — only after a 2xx, write local `person_room_assignments` to match
-   what the ACL actually shows (`INSERT OR REPLACE`, or `DELETE` when the role resolves to `_`). The
-   reconcile runs in its own try/catch so a local-DB failure can't flip a real API success. On a
-   non-2xx (the write never landed) nothing local changes.
+   Verification also runs after a **failed** write, for the reason in the success rule below — a
+   4xx is the one exception (rejected at the boundary; a read there could only ever confirm
+   pre-existing state and would mask a malformed request).
+3. **Reconcile local from truth** — write local `person_room_assignments` to match what the ACL
+   actually shows (`INSERT OR REPLACE`, or `DELETE` when the role resolves to `_`) after a 2xx, or
+   after a failed write that truth nonetheless **confirms**. The reconcile runs in its own try/catch
+   so a local-DB failure can't flip a real API success. A failure truth does *not* confirm leaves
+   local state untouched.
 
 ### Success rule
-`success = postOk && !(verifyRan && !verified)`:
+**Group truth outranks the status code, in both directions.** Where truth could be read,
+`success = verified`; where it could not, `success = postOk`. Concretely:
+
 - a 2xx that group truth **contradicts** → `success:false` (the caller shows an error; in Matrix the
   cell reverts);
-- a 2xx that **cannot be verified** (blank email, role-group not synced locally, or an ACL read
-  error) → **trusts the 2xx** and reconciles optimistically to the intended role.
+- a **transport failure (5xx / network / timeout) that truth confirms** → `success:true`, and local
+  state reconciles to truth. This is not defensive coding: measured against this endpoint, two
+  profiles returned HTTP 500 on all four add attempts while the member actually landed in the group,
+  and 15 of 22 non-responses in the full sweep had in fact been applied. **A failure status carries
+  no information about whether the write committed** — only the group ACL does. Without this, Matrix
+  reverts a cell whose change actually took effect.
+- a write that **cannot be verified** (blank email, role-group not synced locally, or an ACL read
+  error) → falls back to the status code: a 2xx is trusted and reconciled optimistically to the
+  intended role; a failure stands as a failure.
 
-Each write logs one concise `[role-write] … success=… verified=… attempts=…` line to the
-main-process console. The IPC handler contract is unchanged (`{ success, error? }`), so the
-renderer's Task Queue needs no change; the only behavior change is that an unconfirmed write now
-correctly reports failure instead of a silent success. (The old fire-and-forget `ASSIGNMENTS_EXECUTE`
+Each write logs one concise `[role-write] … success=… postOk=… verifyRan=… verified=… attempts=…`
+line to the main-process console — a write that landed despite a transport failure reads as
+`success=true postOk=false verified=true`. The IPC handler contract is unchanged
+(`{ success, error? }`), so the renderer's Task Queue needs no change; the behavior changes are that
+an unconfirmed write now correctly reports failure instead of a silent success, and a confirmed
+write now correctly reports success instead of a false failure. (The old fire-and-forget `ASSIGNMENTS_EXECUTE`
 handler + its `executeAssignments` preload method were removed — they had no renderer callers.)
 
 ## Testing the App

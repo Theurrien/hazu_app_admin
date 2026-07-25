@@ -123,6 +123,7 @@ export async function runReliableRoleWrite(
   let attempts = 0;
   let postOk = false;
   let lastError: string | undefined;
+  let lastRetryable = false;
   while (attempts < maxWriteAttempts) {
     attempts += 1;
     const r = await deps.postUpdateRoles();
@@ -131,11 +132,16 @@ export async function runReliableRoleWrite(
       break;
     }
     lastError = r.error;
-    if (!isRetryableError(r.status, r.networkOrTimeout) || attempts >= maxWriteAttempts) break;
+    lastRetryable = isRetryableError(r.status, r.networkOrTimeout);
+    if (!lastRetryable || attempts >= maxWriteAttempts) break;
     await deps.sleep(backoffMs(attempts - 1));
   }
 
-  if (!postOk) {
+  // A transport-level failure says nothing about whether the write committed: measured against
+  // this endpoint, 500s and timeouts routinely land anyway. So verify those against truth too.
+  // A 4xx is excluded — it was rejected at the boundary, and with no evidence it can commit, a
+  // read could only ever "confirm" pre-existing state and would mask a malformed request.
+  if (!postOk && !lastRetryable) {
     return { success: false, postOk: false, verifyRan: false, verified: false, reconciledRole: null, partial: false, attempts, error: lastError };
   }
 
@@ -151,16 +157,37 @@ export async function runReliableRoleWrite(
     if (i < maxVerifyReads - 1) await deps.sleep(verifyDelayMs);
   }
 
-  // 3. Could not verify -> trust the 2xx; reconcile optimistically to intent.
+  // 3. Could not read truth. After a 2xx, trust it and reconcile optimistically to intent; after
+  //    a failed write there is nothing to trust, so the failure stands.
   if (!verifyRan || snapshot === null) {
+    if (!postOk) {
+      return { success: false, postOk: false, verifyRan: false, verified: false, reconciledRole: null, partial: false, attempts, error: lastError };
+    }
     const optimistic = isRealRole(intent.newRole) ? intent.newRole : null;
     return { success: true, postOk: true, verifyRan: false, verified: false, reconciledRole: optimistic, partial: false, attempts };
   }
 
-  // 4. Decide from truth.
+  // 4. Decide from truth. Truth outranks the status code in BOTH directions: a 2xx it contradicts
+  //    is a failure, and a transport failure it confirms is a success — the write landed anyway.
   const v = evaluateVerification(intent, snapshot);
+
+  if (!postOk) {
+    return {
+      success: v.verified,
+      postOk: false,
+      verifyRan: true,
+      verified: v.verified,
+      // Only reconcile local state off a failed write when truth actually confirms the intent;
+      // an unconfirmed failure leaves local state untouched.
+      reconciledRole: v.verified ? v.reconciledRole : null,
+      partial: v.partial,
+      attempts,
+      error: v.verified ? undefined : lastError,
+    };
+  }
+
   return {
-    success: v.verified, // == postOk && !(verifyRan && !verified) when verifyRan
+    success: v.verified, // truth was read, so truth decides — the 2xx does not override it
     postOk: true,
     verifyRan: true,
     verified: v.verified,

@@ -114,8 +114,10 @@ export async function reliableUpdateUserRole(
     (outcome.error ? ` error=${outcome.error}` : ''),
   );
 
-  // Reconcile local person_room_assignments from truth, only when the write reached 2xx.
-  if (outcome.postOk) {
+  // Reconcile local person_room_assignments from truth: after a 2xx, or after a transport-level
+  // failure that group truth nonetheless confirms (measured — 500s and timeouts on this endpoint
+  // often land anyway). An unconfirmed failure leaves local state untouched.
+  if (outcome.postOk || outcome.verified) {
     try {
       if (isRealRole(outcome.reconciledRole)) {
         db.prepare(
