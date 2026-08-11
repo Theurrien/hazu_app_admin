@@ -755,11 +755,19 @@ async function syncGroupMemberships(): Promise<void> {
     .prepare("SELECT id AS groupId, room_id AS roomId, role FROM distribution_groups WHERE room_id IS NOT NULL")
     .all() as RoleGroup[];
 
+  // `persons.email` holds whatever the profile's hz-config-userid-<identity> tag carried —
+  // usually an address, but for a sizeable minority the account UID. Index both ways so an
+  // ACL member resolves whichever form the tag used (see resolvePerson). Emails are keyed
+  // lowercased; UIDs verbatim, as they are case-sensitive.
   const persons = db
-    .prepare("SELECT id, lower(email) AS email FROM persons WHERE email IS NOT NULL AND email <> ''")
-    .all() as Array<{ id: string; email: string }>;
+    .prepare("SELECT id, trim(email) AS identity FROM persons WHERE email IS NOT NULL AND trim(email) <> ''")
+    .all() as Array<{ id: string; identity: string }>;
   const byEmail = new Map<string, string>();
-  for (const p of persons) byEmail.set(p.email, p.id);
+  const byUid = new Map<string, string>();
+  for (const p of persons) {
+    byEmail.set(p.identity.toLowerCase(), p.id);
+    byUid.set(p.identity, p.id);
+  }
 
   // Super-user group members are granted access everywhere without a real role/tag;
   // exclude them so they don't flood assignments/issues as noise. The group id was
@@ -788,6 +796,7 @@ async function syncGroupMemberships(): Promise<void> {
     sendApiRequestGetAclInfo,
     byEmail,
     excludeUids,
+    byUid,
   );
 
   const now = Date.now();
