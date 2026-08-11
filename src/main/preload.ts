@@ -276,6 +276,7 @@ declare global {
         personId?: string;
         email?: string | null;
         uid?: string;
+        groupId?: string;
         displayName?: string | null;
         note?: string;
       }>>;

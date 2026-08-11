@@ -8,6 +8,7 @@ export interface Discrepancy {
   personId?: string;
   email?: string | null;
   uid?: string;
+  groupId?: string;
   displayName?: string | null;
   note?: string;
 }
@@ -21,6 +22,7 @@ export interface DiscrepancyInput {
     roomId: string;
     role: string;
     uid: string;
+    groupId: string;
     email: string | null;
     displayName: string | null;
   }>;
@@ -119,6 +121,7 @@ export function computeDiscrepancies(input: DiscrepancyInput): Discrepancy[] {
       roomTitle: roomIdToTitle.get(i.roomId) ?? null,
       role: i.role,
       uid: i.uid,
+      groupId: i.groupId,
       email: i.email,
       displayName: i.displayName,
     });

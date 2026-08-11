@@ -40,15 +40,15 @@ describe('computeDiscrepancies', () => {
       { personId: 'pC', roomId: 'room1', role: 'schoolteacher' },
     ];
     const issues = [
-      { type: 'unknown' as const, roomId: 'room1', role: 'student', uid: 'u9', email: 'student.two@example.invalid', displayName: 'Student Two' },
-      { type: 'unresolved' as const, roomId: 'room1', role: 'student', uid: 'uidonly', email: null, displayName: 'uidonly' },
+      { type: 'unknown' as const, groupId: 'grpUnknown000000001', roomId: 'room1', role: 'student', uid: 'u9', email: 'student.two@example.invalid', displayName: 'Student Two' },
+      { type: 'unresolved' as const, groupId: 'grpUnresolved000001', roomId: 'room1', role: 'student', uid: 'uidonly', email: null, displayName: 'uidonly' },
     ];
     const res = computeDiscrepancies({ rooms, persons, assignments, issues });
     expect(res).toEqual([
       { type: 'orphan-tag', roomId: 'room2', roomTitle: 'CIE X', role: 'student', personId: 'pB', email: 'bob@example.invalid', displayName: 'Bob' },
       { type: 'missing-tag', roomId: 'room1', roomTitle: 'CUI-C c', role: 'schoolteacher', personId: 'pC', email: 'carol@example.invalid', displayName: 'Carol' },
-      { type: 'unresolved', roomId: 'room1', roomTitle: 'CUI-C c', role: 'student', uid: 'uidonly', email: null, displayName: 'uidonly' },
-      { type: 'unknown', roomId: 'room1', roomTitle: 'CUI-C c', role: 'student', uid: 'u9', email: 'student.two@example.invalid', displayName: 'Student Two' },
+      { type: 'unresolved', roomId: 'room1', roomTitle: 'CUI-C c', role: 'student', uid: 'uidonly', email: null, displayName: 'uidonly', groupId: 'grpUnresolved000001' },
+      { type: 'unknown', roomId: 'room1', roomTitle: 'CUI-C c', role: 'student', uid: 'u9', email: 'student.two@example.invalid', displayName: 'Student Two', groupId: 'grpUnknown000000001' },
     ]);
   });
 
@@ -78,5 +78,24 @@ describe('computeDiscrepancies', () => {
       { type: 'orphan-tag', roomId: 'rA', roomTitle: 'Alpha', role: 'student', personId: 'p2', email: 'p2@x', displayName: 'P2' },
       { type: 'orphan-tag', roomId: 'rB', roomTitle: 'Beta', role: 'student', personId: 'p1', email: 'p1@x', displayName: 'P1' },
     ]);
+  });
+
+  it('carries groupId through from membership_issues onto unknown rows', () => {
+    const res = computeDiscrepancies({
+      rooms: [{ id: 'room1', title: 'Class A', classId: 'cls1' }],
+      persons: [],
+      assignments: [],
+      issues: [{
+        type: 'unknown',
+        groupId: 'grp0000000000000001',
+        roomId: 'room1',
+        role: 'student',
+        uid: 'AcctUid00000000000001',
+        email: 'orphan@example.invalid',
+        displayName: 'Orphan Example',
+      }],
+    });
+    expect(res).toHaveLength(1);
+    expect(res[0].groupId).toBe('grp0000000000000001');
   });
 });
