@@ -1,5 +1,5 @@
 import { getDb } from '../database';
-import { sendApiRequestGetAclInfo, sendApiRequestRemoveUser } from './hazu-api/api';
+import { sendApiRequestGetAclInfo, sendApiRequestRemoveUserChecked } from './hazu-api/api';
 import { runOrphanRemoval, findAccountOnAcl, GrantKind, OrphanGrant, OrphanRemovalDeps } from './orphan-removal';
 import { AclMember } from './role-write';
 
@@ -92,20 +92,10 @@ export async function revokeOrphanAccess(
   }
 
   const deps: OrphanRemovalDeps = {
-    deleteFromItem: async (itemId: string) => {
-      try {
-        const res = await sendApiRequestRemoveUser(itemId, accountId);
-        // sendApiRequestRemoveUser swallows its error and returns null on failure.
-        if (res === null) return { ok: false, networkOrTimeout: true, error: `DELETE /acl failed for ${itemId}` };
-        return { ok: true, networkOrTimeout: false };
-      } catch (error: unknown) {
-        return {
-          ok: false,
-          networkOrTimeout: true,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
+    // sendApiRequestRemoveUserChecked classifies its own failure (real HTTP status vs.
+    // network/timeout) so the pure core's retry predicate can tell a doomed 4xx from a
+    // worth-retrying 5xx/network/timeout, instead of every failure looking transient.
+    deleteFromItem: (itemId: string) => sendApiRequestRemoveUserChecked(itemId, accountId),
     readGroupAcl: () => readAcl(groupId),
     readRoomAcl: () => readAcl(roomId),
     sleep,
