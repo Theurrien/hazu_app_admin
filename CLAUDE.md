@@ -396,10 +396,11 @@ The Bulk Import tab ([BulkImportPage.tsx](src/renderer/pages/BulkImportPage.tsx)
 Writes are never called directly — each workflow **enqueues** tasks into the Task Queue
 ([TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx), rendered by
 [TaskQueuePanel.tsx](src/renderer/components/TaskQueuePanel.tsx)). Tasks run **one at a time,
-sequentially**, each tracked `queued → processing → success/error` with individual retry. Task
-types: `createRoom`, `createPerson`, `roleUpdate`. The footer buttons only queue tasks; nothing
-hits the API until the queue processes them. Modals (create room/person) call the API directly
-and push a completed `addNotification` into the same panel.
+sequentially**, each tracked `queued → processing → success/error` with individual retry. Bulk
+Import queues `createRoom`, `createPerson`, `roleUpdate`; the Discrepancies page queues `healTag`
+(S3) and `revokeOrphanAccess` (S6) — the full `TaskType` union is all five. The footer buttons only
+queue tasks; nothing hits the API until the queue processes them. Modals (create room/person) call
+the API directly and push a completed `addNotification` into the same panel.
 
 ### Assignment workflow (assigns existing persons to existing rooms — creates nothing)
 1. **Map columns** — tag one column as **Email** (`assignEmail`) and one as **Room** (`assignRoom`) in the data preview.
@@ -490,6 +491,89 @@ an unconfirmed write now correctly reports failure instead of a silent success, 
 write now correctly reports success instead of a false failure. (The old fire-and-forget `ASSIGNMENTS_EXECUTE`
 handler + its `executeAssignments` preload method were removed — they had no renderer callers.)
 
+## Orphan Access Removal (S6)
+
+The Discrepancies page ([DiscrepanciesPage.tsx](src/renderer/pages/DiscrepanciesPage.tsx)) reports
+where profile tags and group-ACL truth disagree, computed read-only from the last sync
+(`membership_issues`, populated during sync). One row type, **`unknown`** — a group member with an
+account id but no local Hazu profile at all, an **orphan** — gets a per-row **`Revoke access`**
+button. The rationale: an account with no profile doesn't need room access, so removing it is safe.
+This is the one **destructive** write path in the app; every other Discrepancies action (`healTag`,
+S3) only adds a tag.
+
+### Access lives in two places
+An orphan's access is not just the role-group membership. For roughly two-thirds of measured
+orphan grants, Hazu also carries a **direct entry on the room item itself** — and critically,
+**that direct grant is recorded with `isGroup: true`**. Revocation therefore removes and verifies
+both places: the role group and, when present, the direct room-item ACL entry. Removing only the
+group would make the discrepancy row disappear while the room access stayed live — worse than
+doing nothing, because the report would go quiet.
+
+### The `isGroup` trap — do not reuse `isIdentityInAcl` here
+[role-write.ts](src/main/services/role-write.ts)'s `isIdentityInAcl` **skips entries where
+`isGroup` is true** — correct for S4's role-group verification, where a group is never itself a
+member of the group. But an orphan's direct room-item grant *is* stored with `isGroup: true`, so
+running it through `isIdentityInAcl` would report "absent" for access that is still live, turning a
+failed revocation into a false success. [orphan-removal.ts](src/main/services/orphan-removal.ts)
+therefore has its own predicate, **`findAccountOnAcl`** (and its boolean wrapper `isAccountOnAcl`),
+which matches by account id **without** the `isGroup` skip. If you ever find yourself reaching for
+`isIdentityInAcl` to check a room-item ACL, stop — that is this trap.
+
+### Files
+- [orphan-removal.ts](src/main/services/orphan-removal.ts) — **pure core**, all IO injected:
+  `findAccountOnAcl` / `isAccountOnAcl` (the `isGroup`-safe predicate above), `evaluateRemoval` (the
+  both-ACLs-absent decision), and the `runOrphanRemoval` orchestrator. Reuses `isRetryableError` /
+  `backoffMs` from role-write.ts. Tests in
+  [orphan-removal.test.ts](src/main/services/orphan-removal.test.ts).
+- [orphan-removal.service.ts](src/main/services/orphan-removal.service.ts) — **thin IO layer**:
+  `planOrphanRemoval(accountId, groupId, roomId)` reads both ACLs live and returns the grants found,
+  **throwing** if either ACL can't be read (an unreadable ACL is never treated as an absent grant);
+  `revokeOrphanAccess(accountId, groupId, roomId)` re-plans internally, runs the core with real
+  deps (`sendApiRequestRemoveUserChecked` + `sendApiRequestGetAclInfo` reads + `sleep`), then
+  reconciles `membership_issues` in its own try/catch.
+- `src/main/ipc/index.ts` — `ORPHAN_ACCESS_PLAN` (read-only) and `ORPHAN_ACCESS_REVOKE` (write)
+  handlers, both `(accountId, groupId, roomId)`.
+- [TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx) — `revokeOrphanAccess` task
+  type, alongside `roleUpdate` / `createRoom` / `createPerson` / `healTag`.
+- [RevokeAccessConfirmationModal.tsx](src/renderer/components/RevokeAccessConfirmationModal.tsx) —
+  lists every grant about to be removed (role group, and the room item when present, with its
+  `aclRole`) and states plainly that this is destructive.
+- [DiscrepanciesPage.tsx](src/renderer/pages/DiscrepanciesPage.tsx) — the `Revoke access` button
+  (only on `unknown` rows carrying both `uid` and `groupId`); click calls the plan channel and opens
+  the modal; confirming enqueues one `revokeOrphanAccess` task; `refetch()` once it settles.
+
+### Flow
+1. **Plan** — read the group ACL and the room ACL live; emit one grant per place the account
+   actually appears. Throws if either ACL can't be read, so the modal never under-promises what
+   will be removed.
+2. **Execute, retrying only transient failures** — re-plan internally from the confirmed ids
+   (the IPC call only carries `accountId`/`groupId`/`roomId`, not the grant list the modal showed;
+   re-planning can only shrink the delete set, never grow it), then `DELETE /acl` per grant via
+   `sendApiRequestRemoveUserChecked`, retrying 5xx/network/timeout with backoff. A 4xx fails fast.
+3. **Verify against both ACLs regardless of the plan** — re-read the role-group and room-item ACLs
+   (up to 3 reads, 750 ms apart, to ride out cache lag) with `isAccountOnAcl`. Unlike S4, this still
+   runs after a non-retryable 4xx — a 404 from `DELETE /acl` plausibly means "already absent," and
+   the read answers that directly rather than short-circuiting on the status code.
+4. **Reconcile local from truth** — on a confirmed removal, delete the matching `membership_issues`
+   row, in its own try/catch so a local-DB failure can't flip a real API success. Any survival
+   leaves local state untouched.
+
+### Success rule
+**Truth outranks the status code, in both directions, and a partial removal is always a failure.**
+Success requires an ACL read confirming the account is absent from **both** the role group and the
+room item:
+
+- a delete that returns 2xx but truth still shows the account on either ACL → `success:false`,
+  naming which one survived;
+- a delete that fails (5xx/network/timeout/4xx) but truth confirms the account is gone from both →
+  `success:true`, reconciled locally — the same "don't trust the status code" lesson as S4;
+- one grant gone and the other still present → always `success:false`, never reported as done;
+- truth unreadable (an ACL read error) → falls back to the delete status codes.
+
+Each write logs one line to the main-process console:
+`[orphan-removal] account=… room=… group=…: success=… deleteOk=… verifyRan=… verified=…
+surviving=[…] attempts=…`.
+
 ## Testing the App
 
 1. Run `npm run build`
@@ -500,6 +584,7 @@ handler + its `executeAssignments` preload method were removed — they had no r
 6. Open the Matrix tab → edit an assignment cell (optimistic update; runs through the reliable role-write path — verified against group truth, reverts if the change isn't confirmed)
 7. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
+9. Go to Discrepancies → try "Heal all missing-tags" on a `missing-tag` row, then "Revoke access" on an `unknown` row (confirm the modal lists every grant, then verify against group truth — reverts to an error if not confirmed)
 
 ## Future Development
 
