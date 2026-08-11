@@ -1,4 +1,4 @@
-import { AclMember } from './role-write';
+import { AclMember, isRetryableError, backoffMs } from './role-write';
 
 export type GrantKind = 'group' | 'roomItem';
 
@@ -41,4 +41,115 @@ export function evaluateRemoval(snapshot: RemovalSnapshot): RemovalVerdict {
   if (snapshot.inGroup) surviving.push('group');
   if (snapshot.onRoom) surviving.push('roomItem');
   return { verified: surviving.length === 0, surviving };
+}
+
+export interface OrphanRemovalIntent {
+  accountId: string;
+  groupId: string;
+  roomId: string;
+  grants: OrphanGrant[];
+}
+
+export interface OrphanRemovalDeps {
+  // One DELETE attempt against an item ACL; classifies its own failure for the retry predicate.
+  deleteFromItem: (itemId: string) => Promise<{ ok: boolean; status?: number; networkOrTimeout: boolean; error?: string }>;
+  // Read an ACL; null = could not read (HTTP error).
+  readGroupAcl: () => Promise<AclMember[] | null>;
+  readRoomAcl: () => Promise<AclMember[] | null>;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export interface OrphanRemovalConfig {
+  maxDeleteAttempts?: number;
+  maxVerifyReads?: number;
+  verifyDelayMs?: number;
+}
+
+export interface OrphanRemovalOutcome {
+  success: boolean;
+  deleteOk: boolean;
+  verifyRan: boolean;
+  verified: boolean;
+  surviving: GrantKind[];
+  attempts: number;
+  error?: string;
+}
+
+const DEFAULT_CFG = { maxDeleteAttempts: 3, maxVerifyReads: 3, verifyDelayMs: 750 };
+
+const LABEL: Record<GrantKind, string> = {
+  group: 'role group',
+  roomItem: 'room item',
+};
+
+// Remove an orphan account's access, then confirm it against the ACLs. All IO injected.
+export async function runOrphanRemoval(
+  intent: OrphanRemovalIntent,
+  deps: OrphanRemovalDeps,
+  cfg: OrphanRemovalConfig = {},
+): Promise<OrphanRemovalOutcome> {
+  const { maxDeleteAttempts, maxVerifyReads, verifyDelayMs } = { ...DEFAULT_CFG, ...cfg };
+
+  // 1. Delete each planned grant, retrying transient failures only.
+  let attempts = 0;
+  let deleteOk = true;
+  let lastError: string | undefined;
+  for (const grant of intent.grants) {
+    let grantOk = false;
+    for (let i = 0; i < maxDeleteAttempts; i++) {
+      attempts += 1;
+      const r = await deps.deleteFromItem(grant.itemId);
+      if (r.ok) {
+        grantOk = true;
+        break;
+      }
+      lastError = r.error;
+      if (!isRetryableError(r.status, r.networkOrTimeout) || i === maxDeleteAttempts - 1) break;
+      await deps.sleep(backoffMs(i));
+    }
+    if (!grantOk) deleteOk = false;
+  }
+
+  // 2. Verify against both ACLs, re-reading through cache lag. Always attempt this, even after a
+  //    non-retryable failure: a 404 plausibly means the grant was already absent, and the read
+  //    answers the only question that matters — is the access gone?
+  let snapshot: RemovalSnapshot | null = null;
+  for (let i = 0; i < maxVerifyReads; i++) {
+    const groupAcl = await deps.readGroupAcl();
+    const roomAcl = await deps.readRoomAcl();
+    if (groupAcl === null || roomAcl === null) break; // cannot verify
+    snapshot = {
+      inGroup: isAccountOnAcl(groupAcl, intent.accountId),
+      onRoom: isAccountOnAcl(roomAcl, intent.accountId),
+    };
+    if (evaluateRemoval(snapshot).verified) break;
+    if (i < maxVerifyReads - 1) await deps.sleep(verifyDelayMs);
+  }
+
+  // 3. Truth unreadable: fall back to the delete status codes.
+  if (snapshot === null) {
+    return {
+      success: deleteOk,
+      deleteOk,
+      verifyRan: false,
+      verified: false,
+      surviving: [],
+      attempts,
+      error: deleteOk ? undefined : lastError,
+    };
+  }
+
+  // 4. Truth decides, in both directions.
+  const v = evaluateRemoval(snapshot);
+  return {
+    success: v.verified,
+    deleteOk,
+    verifyRan: true,
+    verified: v.verified,
+    surviving: v.surviving,
+    attempts,
+    error: v.verified
+      ? undefined
+      : `Access was not fully removed — still present on the ${v.surviving.map((k) => LABEL[k]).join(' and the ')}`,
+  };
 }
