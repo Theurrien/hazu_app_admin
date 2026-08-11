@@ -53,6 +53,7 @@ function DiscrepanciesPage() {
   const { tasks, addHealTagTask, addRevokeAccessTask } = useTaskQueue();
   const [items, setItems] = useState<Discrepancy[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | DiscrepancyType>('all');
   const [search, setSearch] = useState('');
   const [healPlan, setHealPlan] = useState<HealPlan | null>(null);
@@ -103,11 +104,12 @@ function DiscrepanciesPage() {
   }, [items, typeFilter, search]);
 
   const openHeal = useCallback(async () => {
+    setActionError(null);
     try {
       const plan = await window.electronAPI.getTagHealPlan();
       setHealPlan(plan);
     } catch (e) {
-      setError(String((e as any)?.message || e));
+      setActionError(String((e as any)?.message || e));
     }
   }, []);
 
@@ -125,11 +127,12 @@ function DiscrepanciesPage() {
 
   const openRevoke = useCallback(async (row: Discrepancy) => {
     if (!row.uid || !row.groupId) return;
+    setActionError(null);
     try {
       const grants = await window.electronAPI.planOrphanRemoval(row.uid, row.groupId, row.roomId);
       if (mountedRef.current) setRevokeTarget({ row, grants });
     } catch (e) {
-      if (mountedRef.current) setError(String((e as any)?.message || e));
+      if (mountedRef.current) setActionError(String((e as any)?.message || e));
     }
   }, []);
 
@@ -192,6 +195,19 @@ function DiscrepanciesPage() {
           {watching ? 'Healing…' : `Heal all missing-tags (${missingCount})`}
         </button>
       </div>
+
+      {actionError ? (
+        <div className="flex items-start justify-between gap-3 rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-600">
+          <span>{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            className="text-red-600 hover:text-red-800 font-medium"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <button
