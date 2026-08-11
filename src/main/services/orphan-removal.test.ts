@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isAccountOnAcl,
+  findAccountOnAcl,
   evaluateRemoval,
   runOrphanRemoval,
   OrphanRemovalDeps,
@@ -9,6 +10,39 @@ import {
 
 const member = (authorId: string, description: string, isGroup = false) => ({
   authorId, description, isGroup,
+});
+
+describe('findAccountOnAcl', () => {
+  it('matches an isGroup=true room-item entry by account id', () => {
+    // Hazu records a person's direct grant on a room item with isGroup=true.
+    const acl = [member('AcctUid00000000000001', 'orphan@example.invalid', true)];
+    expect(findAccountOnAcl(acl, 'AcctUid00000000000001')).toBe(acl[0]);
+  });
+
+  it('matches a plain isGroup=false group member by account id', () => {
+    const acl = [member('AcctUid00000000000001', 'orphan@example.invalid', false)];
+    expect(findAccountOnAcl(acl, 'AcctUid00000000000001')).toBe(acl[0]);
+  });
+
+  it('returns undefined when the account is absent', () => {
+    const acl = [member('SomeoneElse000000001', 'other@example.invalid', true)];
+    expect(findAccountOnAcl(acl, 'AcctUid00000000000001')).toBeUndefined();
+  });
+
+  it('returns undefined for a blank account id, even against a blank ACL entry', () => {
+    expect(findAccountOnAcl([member('', 'x@example.invalid')], '')).toBeUndefined();
+  });
+
+  it('tolerates a null/empty member list', () => {
+    expect(findAccountOnAcl([], 'AcctUid00000000000001')).toBeUndefined();
+  });
+
+  it('returns the actual entry object so a caller can read fields off it', () => {
+    const acl = [member('AcctUid00000000000001', 'orphan@example.invalid', true)];
+    const found = findAccountOnAcl(acl, 'AcctUid00000000000001');
+    expect(found?.description).toBe('orphan@example.invalid');
+    expect(found?.isGroup).toBe(true);
+  });
 });
 
 describe('isAccountOnAcl', () => {

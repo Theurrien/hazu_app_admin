@@ -21,17 +21,25 @@ export interface RemovalVerdict {
   surviving: GrantKind[];
 }
 
-// Does this ACL still carry a grant for `accountId`? Unlike isIdentityInAcl in role-write.ts,
-// this does NOT skip isGroup entries: Hazu records a person's direct grant on a room item with
-// isGroup=true, so skipping them would report absence for access that is still live. Matching is
-// by account id only — an orphan has no profile, so there is no local email to match against.
-export function isAccountOnAcl(members: AclMember[], accountId: string): boolean {
+// Find the ACL entry granting `accountId` access, if any. Unlike isIdentityInAcl in
+// role-write.ts, this does NOT skip isGroup entries: Hazu records a person's direct grant on a
+// room item with isGroup=true, so skipping them would report absence for access that is still
+// live. Matching is by account id only — an orphan has no profile, so there is no local email to
+// match against.
+export function findAccountOnAcl(members: AclMember[], accountId: string): AclMember | undefined {
   const id = (accountId || '').trim().toLowerCase();
-  if (!id) return false;
+  if (!id) return undefined;
   for (const m of members || []) {
-    if ((m.authorId || '').trim().toLowerCase() === id) return true;
+    if ((m.authorId || '').trim().toLowerCase() === id) return m;
   }
-  return false;
+  return undefined;
+}
+
+// Does this ACL still carry a grant for `accountId`? Thin boolean wrapper over findAccountOnAcl
+// so planning (which needs the entry, e.g. to read aclRole) and verification (which only needs
+// yes/no) can never silently disagree about who counts as "on the ACL".
+export function isAccountOnAcl(members: AclMember[], accountId: string): boolean {
+  return findAccountOnAcl(members, accountId) !== undefined;
 }
 
 // Access is revoked only when the account is absent from BOTH ACLs. Anything else names what

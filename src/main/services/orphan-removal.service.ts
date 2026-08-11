@@ -1,6 +1,6 @@
 import { getDb } from '../database';
 import { sendApiRequestGetAclInfo, sendApiRequestRemoveUser } from './hazu-api/api';
-import { runOrphanRemoval, isAccountOnAcl, OrphanGrant, OrphanRemovalDeps } from './orphan-removal';
+import { runOrphanRemoval, findAccountOnAcl, GrantKind, OrphanGrant, OrphanRemovalDeps } from './orphan-removal';
 import { AclMember } from './role-write';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -19,23 +19,34 @@ async function readAcl(itemId: string): Promise<AclMember[] | null> {
   }
 }
 
-// What would be removed. Reads live ACLs so the confirmation modal can never promise to remove
-// a grant that is already gone.
-export async function planOrphanRemoval(
+const ACL_LABEL: Record<GrantKind, string> = {
+  group: 'role group',
+  roomItem: 'room item',
+};
+
+// What would be removed, plus which of the two ACLs (if any) could not be read. Reads live ACLs
+// so the confirmation modal can never promise to remove a grant that is already gone — and so a
+// read failure is reported explicitly rather than silently counted as "nothing to remove".
+async function planOrphanRemovalInternal(
   accountId: string,
   groupId: string,
   roomId: string,
-): Promise<OrphanGrant[]> {
+): Promise<{ grants: OrphanGrant[]; unreadable: GrantKind[] }> {
   const grants: OrphanGrant[] = [];
+  const unreadable: GrantKind[] = [];
 
   const groupAcl = await readAcl(groupId);
-  if (groupAcl && isAccountOnAcl(groupAcl, accountId)) {
+  if (groupAcl === null) {
+    unreadable.push('group');
+  } else if (findAccountOnAcl(groupAcl, accountId)) {
     grants.push({ kind: 'group', itemId: groupId, title: titleFor('distribution_groups', groupId) });
   }
 
   const roomAcl = await readAcl(roomId);
-  if (roomAcl) {
-    const entry = roomAcl.find((m) => (m.authorId || '').trim().toLowerCase() === accountId.trim().toLowerCase());
+  if (roomAcl === null) {
+    unreadable.push('roomItem');
+  } else {
+    const entry = findAccountOnAcl(roomAcl, accountId);
     if (entry) {
       grants.push({
         kind: 'roomItem',
@@ -46,6 +57,21 @@ export async function planOrphanRemoval(
     }
   }
 
+  return { grants, unreadable };
+}
+
+// What would be removed. Reads live ACLs so the confirmation modal can never promise to remove
+// a grant that is already gone. Throws if either ACL could not be read — the modal must never be
+// handed a plan that silently under-counts a grant because a read failed.
+export async function planOrphanRemoval(
+  accountId: string,
+  groupId: string,
+  roomId: string,
+): Promise<OrphanGrant[]> {
+  const { grants, unreadable } = await planOrphanRemovalInternal(accountId, groupId, roomId);
+  if (unreadable.length > 0) {
+    throw new Error(`Could not read the ${unreadable.map((k) => ACL_LABEL[k]).join(' and the ')} ACL`);
+  }
   return grants;
 }
 
@@ -55,7 +81,15 @@ export async function revokeOrphanAccess(
   groupId: string,
   roomId: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const grants = await planOrphanRemoval(accountId, groupId, roomId);
+  const { grants, unreadable } = await planOrphanRemovalInternal(accountId, groupId, roomId);
+  if (unreadable.length > 0) {
+    // Cannot confirm what's actually granted — never attempt a delete, and never touch
+    // membership_issues, for access we couldn't even read.
+    return {
+      success: false,
+      error: `Could not read the ${unreadable.map((k) => ACL_LABEL[k]).join(' and the ')} ACL — refusing to remove access that could not be confirmed`,
+    };
+  }
 
   const deps: OrphanRemovalDeps = {
     deleteFromItem: async (itemId: string) => {
