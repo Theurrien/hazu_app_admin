@@ -9,15 +9,9 @@ import { sendApiRequestList, sendApiRequestGetAclInfo } from "./hazu-api/api";
 import { getRootHazuId, isConfigured } from "./hazu-api/config";
 import { HazuEntity } from "./hazu-api/interfaces";
 import { computeGroupAssignments, RoleGroup } from "./group-membership";
+import { walkRoomTree, DEFAULT_MAX_DEPTH, WalkNote } from "./room-tree";
 
 // Tag patterns for identifying entity types
-const ROOM_TAG_PATTERNS = {
-  state: "hz-config-room-state",
-  class: "hz-config-room-class",
-  enterprise: "hz-config-room-entreprise",
-  cie: "hz-config-room-cie",
-} as const;
-
 const PERSON_TAG_PATTERNS = {
   student: "hz-config-profile-student",
   companymentor: "hz-config-profile-companymentor",
@@ -27,7 +21,6 @@ const PERSON_TAG_PATTERNS = {
   guardian: "hz-config-profile-guardian",
 } as const;
 
-type RoomType = keyof typeof ROOM_TAG_PATTERNS;
 type PersonType = keyof typeof PERSON_TAG_PATTERNS;
 
 interface SyncProgress {
@@ -89,15 +82,6 @@ function clearOldData(): void {
   console.log('[SYNC] Old data cleared');
 }
 
-function identifyRoomType(tags: string[]): RoomType | null {
-  for (const [type, tagPattern] of Object.entries(ROOM_TAG_PATTERNS)) {
-    if (tags.includes(tagPattern)) {
-      return type as RoomType;
-    }
-  }
-  return null;
-}
-
 function identifyPersonType(tags: string[]): PersonType | null {
   for (const [type, tagPattern] of Object.entries(PERSON_TAG_PATTERNS)) {
     // Check for exact match or tag starting with pattern
@@ -112,109 +96,91 @@ async function syncRooms(): Promise<void> {
   const db = getDb();
   const rootId = getRootHazuId();
 
-  console.log('[SYNC] Fetching room categories from root...');
+  console.log('[SYNC] Walking the room tree from root...');
   syncProgress.message = "Fetching rooms from Hazu...";
 
-  // Level 1: Fetch direct children of root - these are CATEGORY folders
-  const categories = await sendApiRequestList(rootId);
-  if (!categories) {
-    throw new Error("Failed to fetch children from root Hazu");
+  // Rooms live at varying depths: directly under a category, and (for CIE) inside year
+  // sub-folders below it. walkRoomTree finds both; it throws if the root listing fails,
+  // which matters because clearOldData() has already emptied the rooms table.
+  const tree = await walkRoomTree(rootId, { listChildren: sendApiRequestList });
+
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, class_id, tags, raw_data, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // Category folders: stored so room creation can find a targetId. They keep rootId as their
+  // parent — CreateRoomModal identifies a category by exactly that predicate.
+  for (const category of tree.categories) {
+    const { node, roomType } = category;
+    stmt.run(
+      node.key,
+      stripHtml(node.title || ""),
+      stripHtml(node.description || ""),
+      node.color || "",
+      node.icon || "",
+      roomType,
+      rootId,
+      null,
+      JSON.stringify(node.tags || []),
+      JSON.stringify(node),
+      Date.now()
+    );
+    syncProgress.roomsProcessed++;
+    console.log(`[SYNC] Room category: ${stripHtml(node.title || "")} (${roomType})`);
   }
 
-  console.log(`[SYNC] Found ${categories.length} direct children of root`);
-
-  // Find room category folders (hz-config-room-*)
-  for (const category of categories) {
-    const categorySnapshot = category.snapshot;
-    const categoryTags = categorySnapshot.tags || [];
-    const roomType = identifyRoomType(categoryTags);
-
-    if (roomType) {
-      const categoryTitle = stripHtml(categorySnapshot.title);
-      console.log(`[SYNC] Found room category: ${categoryTitle} (${roomType})`);
-
-      // Store the category folder itself (needed for room creation targetId lookup)
-      const categoryStmt = db.prepare(`
-        INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, class_id, tags, raw_data, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      categoryStmt.run(
-        categorySnapshot.key,
-        categoryTitle,
-        stripHtml(categorySnapshot.description || ""),
-        categorySnapshot.color || "",
-        categorySnapshot.icon || "",
-        roomType,
-        rootId,  // Category folders have rootId as parent
-        null,    // No class_id for category folders
-        JSON.stringify(categoryTags),
-        JSON.stringify(categorySnapshot),
-        Date.now()
-      );
-
-      syncProgress.roomsProcessed++;
-
-      // Level 2: Fetch children of this category
-      const children = await sendApiRequestList(categorySnapshot.key);
-      if (children) {
-        let roomCount = 0;
-
-        for (const child of children) {
-          const roomSnapshot = child.snapshot;
-          const roomTags = roomSnapshot.tags || [];
-
-          // Only save if it has hz-config-class-* tag (actual room)
-          const classId = extractClassId(roomTags);
-          if (!classId) {
-            continue; // Skip non-room Hazus
-          }
-
-          const stmt = db.prepare(`
-            INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, class_id, tags, raw_data, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `);
-
-          stmt.run(
-            roomSnapshot.key,
-            stripHtml(roomSnapshot.title),
-            stripHtml(roomSnapshot.description || ""),
-            roomSnapshot.color || "",
-            roomSnapshot.icon || "",
-            roomType,  // Type comes from parent category
-            categorySnapshot.key,  // Parent is the category folder
-            classId,  // The ID from hz-config-class-ID tag
-            JSON.stringify(roomTags),
-            JSON.stringify(roomSnapshot),
-            Date.now()
-          );
-
-          syncProgress.roomsProcessed++;
-          roomCount++;
-        }
-
-        console.log(`[SYNC] Found ${roomCount} actual rooms in ${categoryTitle} (filtered by hz-config-class-* tag)`);
-      }
+  let skipped = 0;
+  for (const room of tree.rooms) {
+    if (!room.roomType) {
+      // No room tag of its own and no typed ancestor. Don't guess a type.
+      console.warn(`[SYNC] Skipping room ${room.node.key} — no room type could be resolved`);
+      skipped++;
+      continue;
     }
+    stmt.run(
+      room.node.key,
+      stripHtml(room.node.title || ""),
+      stripHtml(room.node.description || ""),
+      room.node.color || "",
+      room.node.icon || "",
+      room.roomType,
+      room.parentId,
+      room.classId,
+      JSON.stringify(room.node.tags || []),
+      JSON.stringify(room.node),
+      Date.now()
+    );
+    syncProgress.roomsProcessed++;
   }
 
+  // Name what was missed. A bounded sweep must never read as complete coverage — but the
+  // lists can run to dozens of entries, so cap the names and always report the full count.
+  const names = (notes: WalkNote[]): string => {
+    const shown = notes.slice(0, 10).map((n) => `${stripHtml(n.title || "") || n.id} (d${n.depth})`);
+    return notes.length > 10 ? `${shown.join(', ')} … and ${notes.length - 10} more` : shown.join(', ');
+  };
+
+  console.log(
+    `[SYNC] Room tree: ${tree.categories.length} categories, ${tree.rooms.length} rooms, ` +
+    `${tree.calls} listChildren calls`
+  );
+  if (skipped > 0) {
+    console.warn(`[SYNC] ${skipped} room(s) skipped: no resolvable room type`);
+  }
+  if (tree.readFailures.length > 0) {
+    console.warn(
+      `[SYNC] ${tree.readFailures.length} subtree(s) could not be read — treated as unknown, ` +
+      `NOT as empty: ${names(tree.readFailures)}`
+    );
+  }
+  if (tree.truncatedAt.length > 0) {
+    console.warn(
+      `[SYNC] Depth cap ${DEFAULT_MAX_DEPTH} reached — ${tree.truncatedAt.length} folder(s) ` +
+      `left unvisited: ${names(tree.truncatedAt)}`
+    );
+  }
   console.log(`[SYNC] Synced ${syncProgress.roomsProcessed} rooms total`);
-}
-
-// Extract class ID from hz-config-class-* tag
-// Class IDs are alphanumeric only, so we extract only alphanumeric characters
-// This handles inconsistent tags like "hz-config-class-ID-" (trailing hyphen)
-function extractClassId(tags: string[]): string | null {
-  const prefix = "hz-config-class-";
-  for (const tag of tags) {
-    if (tag.startsWith(prefix)) {
-      const remainder = tag.substring(prefix.length);
-      // Extract only alphanumeric characters (the actual ID)
-      const match = remainder.match(/^[a-zA-Z0-9]+/);
-      return match ? match[0] : null;
-    }
-  }
-  return null;
 }
 
 // Helper to strip HTML tags from strings
@@ -237,46 +203,6 @@ function extractWebhookConfig(html: string): { webhookUrl: string; templateId: s
   }
 
   return { webhookUrl, templateId };
-}
-
-async function syncRoomsRecursive(parentId: string): Promise<void> {
-  const db = getDb();
-  const children = await sendApiRequestList(parentId);
-  if (!children) return;
-
-  for (const child of children) {
-    const snapshot = child.snapshot;
-    const tags = snapshot.tags || [];
-    const roomType = identifyRoomType(tags);
-
-    if (roomType) {
-      const stmt = db.prepare(`
-        INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, tags, raw_data, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      stmt.run(
-        snapshot.key,
-        snapshot.title,
-        snapshot.description || "",
-        snapshot.color || "",
-        snapshot.icon || "",
-        roomType,
-        snapshot.parentId,
-        JSON.stringify(tags),
-        JSON.stringify(snapshot),
-        Date.now()
-      );
-
-      syncProgress.roomsProcessed++;
-      syncProgress.message = `Synced ${syncProgress.roomsProcessed} rooms...`;
-    }
-
-    // Continue recursively
-    if (snapshot.type === "hazu") {
-      await syncRoomsRecursive(snapshot.key);
-    }
-  }
 }
 
 async function syncPersonsFromContainers(): Promise<void> {
