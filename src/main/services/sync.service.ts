@@ -9,7 +9,7 @@ import { sendApiRequestList, sendApiRequestGetAclInfo } from "./hazu-api/api";
 import { getRootHazuId, isConfigured } from "./hazu-api/config";
 import { HazuEntity } from "./hazu-api/interfaces";
 import { computeGroupAssignments, RoleGroup } from "./group-membership";
-import { walkRoomTree, DEFAULT_MAX_DEPTH, WalkNote } from "./room-tree";
+import { walkRoomTree, summarizeWalkNotes, DEFAULT_MAX_DEPTH, WalkNote } from "./room-tree";
 
 // Tag patterns for identifying entity types
 const PERSON_TAG_PATTERNS = {
@@ -102,7 +102,18 @@ async function syncRooms(): Promise<void> {
   // Rooms live at varying depths: directly under a category, and (for CIE) inside year
   // sub-folders below it. walkRoomTree finds both; it throws if the root listing fails,
   // which matters because clearOldData() has already emptied the rooms table.
-  const tree = await walkRoomTree(rootId, { listChildren: sendApiRequestList });
+  //
+  // The walk is strictly sequential and runs to ~77 calls on the first sync (vs. 5 under the
+  // old two-level walk), so wrap the injected child-lister to keep syncProgress.message moving
+  // — otherwise the Dashboard sits on one unchanging string for the whole walk. This is the
+  // injected-IO pattern doing its job: room-tree.ts gets no progress callback of its own.
+  let roomListCalls = 0;
+  const listChildrenWithProgress = async (id: string) => {
+    roomListCalls++;
+    syncProgress.message = `Fetching rooms from Hazu... (${roomListCalls} folders read)`;
+    return sendApiRequestList(id);
+  };
+  const tree = await walkRoomTree(rootId, { listChildren: listChildrenWithProgress });
 
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO rooms (id, title, description, color, icon, room_type, parent_id, class_id, tags, raw_data, synced_at)
@@ -154,12 +165,18 @@ async function syncRooms(): Promise<void> {
     syncProgress.roomsProcessed++;
   }
 
-  // Name what was missed. A bounded sweep must never read as complete coverage — but the
-  // lists can run to dozens of entries, so cap the names and always report the full count.
-  const names = (notes: WalkNote[]): string => {
-    const shown = notes.slice(0, 10).map((n) => `${stripHtml(n.title || "") || n.id} (d${n.depth})`);
-    return notes.length > 10 ? `${shown.join(', ')} … and ${notes.length - 10} more` : shown.join(', ');
-  };
+  // Group both read-failure and truncation notes by parent before logging. A flat list of
+  // ~62 names (one per Calendrier scolaire calendar entry, each 401ing when the walk tries to
+  // read ITS children) would be a permanent wall of text that trains the operator to scroll
+  // past it — which defeats the point of surfacing it at all. "62 entries under Calendrier
+  // scolaire" is one actionable line instead. Titles are stripped here, at the IO boundary, so
+  // room-tree.ts's summarizeWalkNotes stays pure (it has no stripHtml to call).
+  const cleaned = (notes: WalkNote[]): WalkNote[] =>
+    notes.map((n) => ({
+      ...n,
+      title: stripHtml(n.title || ""),
+      parentTitle: stripHtml(n.parentTitle || ""),
+    }));
 
   console.log(
     `[SYNC] Room tree: ${tree.categories.length} categories, ${tree.rooms.length} rooms, ` +
@@ -168,16 +185,23 @@ async function syncRooms(): Promise<void> {
   if (skipped > 0) {
     console.warn(`[SYNC] ${skipped} room(s) skipped: no resolvable room type`);
   }
+  if (tree.unexpectedRooms.length > 0) {
+    console.warn(
+      `[SYNC] ${tree.unexpectedRooms.length} room(s) found directly under root (depth 1) — ` +
+      `skipped rather than written, since parent_id === rootId there would collide with the ` +
+      `category predicate CreateRoomModal relies on: ${summarizeWalkNotes(cleaned(tree.unexpectedRooms))}`
+    );
+  }
   if (tree.readFailures.length > 0) {
     console.warn(
       `[SYNC] ${tree.readFailures.length} subtree(s) could not be read — treated as unknown, ` +
-      `NOT as empty: ${names(tree.readFailures)}`
+      `NOT as empty: ${summarizeWalkNotes(cleaned(tree.readFailures))}`
     );
   }
   if (tree.truncatedAt.length > 0) {
     console.warn(
       `[SYNC] Depth cap ${DEFAULT_MAX_DEPTH} reached — ${tree.truncatedAt.length} folder(s) ` +
-      `left unvisited: ${names(tree.truncatedAt)}`
+      `visited but not descended into: ${summarizeWalkNotes(cleaned(tree.truncatedAt))}`
     );
   }
   console.log(`[SYNC] Synced ${syncProgress.roomsProcessed} rooms total`);

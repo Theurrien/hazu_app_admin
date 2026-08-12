@@ -5,9 +5,11 @@ import {
   extractClassId,
   classifyNode,
   walkRoomTree,
+  summarizeWalkNotes,
   DEFAULT_MAX_DEPTH,
   TreeNode,
   RoomTreeDeps,
+  WalkNote,
 } from './room-tree';
 
 const node = (key: string, tags: string[] = [], title = key): TreeNode => ({ key, title, tags });
@@ -194,7 +196,9 @@ describe('walkRoomTree', () => {
       FolderAtCap000000001: [child('RoomBeyond0000000001', roomTags('RoomBeyond0000000001'))],
     });
     const r = await walkRoomTree(ROOT, deps, { maxDepth: 2 });
-    expect(r.truncatedAt).toEqual([{ id: 'FolderAtCap000000001', title: 'Folder At Cap', depth: 2 }]);
+    expect(r.truncatedAt).toEqual([
+      { id: 'FolderAtCap000000001', title: 'Folder At Cap', depth: 2, parentId: CAT, parentTitle: CAT },
+    ]);
     expect(r.rooms).toEqual([]);
     expect(deps.calls).not.toContain('FolderAtCap000000001');
   });
@@ -218,7 +222,9 @@ describe('walkRoomTree', () => {
       OkFolder000000000001: [child('RoomOk00000000000001', roomTags('RoomOk00000000000001'))],
     });
     const r = await walkRoomTree(ROOT, deps);
-    expect(r.readFailures).toEqual([{ id: 'Unreadable0000000001', title: 'Locked Folder', depth: 2 }]);
+    expect(r.readFailures).toEqual([
+      { id: 'Unreadable0000000001', title: 'Locked Folder', depth: 2, parentId: CAT, parentTitle: CAT },
+    ]);
     expect(r.rooms.map((x) => x.node.key)).toEqual(['RoomOk00000000000001']);
   });
 
@@ -273,7 +279,44 @@ describe('walkRoomTree', () => {
 
   it('returns empty collections for a root with no children', async () => {
     const r = await walkRoomTree(ROOT, fakeDeps({ [ROOT]: [] }));
-    expect(r).toEqual({ categories: [], rooms: [], truncatedAt: [], readFailures: [], calls: 1 });
+    expect(r).toEqual({
+      categories: [],
+      rooms: [],
+      truncatedAt: [],
+      readFailures: [],
+      unexpectedRooms: [],
+      calls: 1,
+    });
+  });
+
+  it('records a room found at depth 1 in unexpectedRooms instead of writing it as a room', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child('StrayRoom000000000001', roomTags('StrayRoom000000000001'), 'Stray Room')],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.rooms).toEqual([]);
+    expect(r.categories).toEqual([]);
+    expect(r.unexpectedRooms).toEqual([
+      { id: 'StrayRoom000000000001', title: 'Stray Room', depth: 1, parentId: ROOT, parentTitle: '' },
+    ]);
+    // A depth-1 room has no children to speak of, but confirm the walk doesn't try to descend it.
+    expect(deps.calls).toEqual([ROOT]);
+  });
+
+  it('keeps walking sibling categories when a depth-1 category fails to list its own children', async () => {
+    const CAT2 = 'Cat00000000000000002';
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags, 'Failing Category'), child(CAT2, catTags, 'OK Category')],
+      [CAT]: null,
+      [CAT2]: [child('RoomOk20000000000001', roomTags('RoomOk20000000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.readFailures).toEqual([
+      { id: CAT, title: 'Failing Category', depth: 1, parentId: ROOT, parentTitle: '' },
+    ]);
+    // Both categories are still recorded — the failure is on CAT's own children, not on CAT itself.
+    expect(r.categories.map((c) => c.node.key)).toEqual([CAT, CAT2]);
+    expect(r.rooms.map((x) => x.node.key)).toEqual(['RoomOk20000000000001']);
   });
 
   it('defaults maxDepth to 4', async () => {
@@ -288,5 +331,54 @@ describe('walkRoomTree', () => {
     const r = await walkRoomTree(ROOT, deps);
     expect(r.rooms).toEqual([]);
     expect(r.truncatedAt.map((t) => t.depth)).toEqual([4]);
+  });
+});
+
+// The ~62 Calendrier scolaire calendar entries that 401 on their own children are the one
+// branch guaranteed to fire on every real sync — a pure string function over WalkNote[], so
+// it gets tested here rather than deferred to a syncRooms integration test that needs the
+// native module and a live API.
+describe('summarizeWalkNotes', () => {
+  const noteAt = (id: string, parentId: string, parentTitle = parentId): WalkNote => ({
+    id,
+    title: id,
+    depth: 2,
+    parentId,
+    parentTitle,
+  });
+
+  it('returns an empty string for no notes', () => {
+    expect(summarizeWalkNotes([])).toBe('');
+  });
+
+  it('renders a single entry with its parent and the total', () => {
+    expect(summarizeWalkNotes([noteAt('A', 'P1', 'Parent One')])).toBe('1 under "Parent One" (1 total)');
+  });
+
+  it('collapses several notes under the same parent into one line', () => {
+    const notes = [noteAt('A', 'P1', 'Parent One'), noteAt('B', 'P1', 'Parent One'), noteAt('C', 'P1', 'Parent One')];
+    expect(summarizeWalkNotes(notes)).toBe('3 under "Parent One" (3 total)');
+  });
+
+  it('keeps notes under different parents on separate lines', () => {
+    const notes = [noteAt('A', 'P1', 'Parent One'), noteAt('B', 'P2', 'Parent Two')];
+    expect(summarizeWalkNotes(notes)).toBe('1 under "Parent One", 1 under "Parent Two" (2 total)');
+  });
+
+  it('falls back to the parent id when parentTitle is empty', () => {
+    expect(summarizeWalkNotes([noteAt('A', 'ParentId0000000000001', '')]))
+      .toBe('1 under "ParentId0000000000001" (1 total)');
+  });
+
+  it('shows every group with no overflow marker exactly at the cap', () => {
+    const notes = [noteAt('A', 'P1'), noteAt('B', 'P2')];
+    expect(summarizeWalkNotes(notes, 2)).toBe('1 under "P1", 1 under "P2" (2 total)');
+  });
+
+  it('caps the groups shown and reports the true total in the overflow text', () => {
+    const notes = [noteAt('A', 'P1'), noteAt('B', 'P2'), noteAt('C', 'P3')];
+    const result = summarizeWalkNotes(notes, 2);
+    expect(result).toBe('1 under "P1", 1 under "P2" … and 1 more group(s) (3 total)');
+    expect(result).toContain('(3 total)');
   });
 });

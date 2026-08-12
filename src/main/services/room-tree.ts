@@ -27,7 +27,6 @@ export interface TreeNode {
   description?: string;
   color?: string;
   icon?: string;
-  parentId?: string;
   tags?: string[];
 }
 
@@ -92,14 +91,20 @@ export interface WalkNote {
   id: string;
   title: string;
   depth: number;
+  parentId: string;    // the id of the node's own parent, for grouping log lines
+  parentTitle: string; // the parent's title — '' when unknown (e.g. the parent is root)
 }
 
 export interface WalkResult {
   categories: DiscoveredCategory[];
   rooms: DiscoveredRoom[];
-  truncatedAt: WalkNote[];     // folders left unvisited because the depth cap was reached
-  readFailures: WalkNote[];    // nodes whose children could not be listed
-  calls: number;               // listChildren invocations
+  truncatedAt: WalkNote[];      // folders visited and classified, but not descended into
+                                 // because the depth cap was reached — their children are unread
+  readFailures: WalkNote[];     // nodes whose children could not be listed
+  unexpectedRooms: WalkNote[];  // rooms found at depth 1 — dropped rather than written, since a
+                                 // depth-1 parent_id === rootId would collide with the category
+                                 // predicate CreateRoomModal relies on
+  calls: number;                // listChildren invocations
 }
 
 export interface RoomTreeDeps {
@@ -137,14 +142,21 @@ export async function walkRoomTree(
     rooms: [],
     truncatedAt: [],
     readFailures: [],
+    unexpectedRooms: [],
     calls: 0,
   };
   const visited = new Set<string>([rootId]);
 
-  const note = (node: TreeNode, depth: number): WalkNote => ({
+  // `parentId` is the id of the container this node was found under (in scope at every call
+  // site via `containerId`); `parentTitle` is that container's own title, taken from its note
+  // where one exists — root has no note, so its children get '' (the renderer falls back to
+  // the id, same as it does for a titleless node).
+  const note = (node: TreeNode, depth: number, parentId: string, parentTitle: string): WalkNote => ({
     id: node.key,
     title: node.title || '',
     depth,
+    parentId,
+    parentTitle,
   });
 
   // List the children of `containerId` — which sit at `depth` — and process them.
@@ -173,8 +185,17 @@ export async function walkRoomTree(
       visited.add(node.key);
 
       const classification = classifyNode(node, inheritedType);
+      const parentTitle = containerNote?.title ?? '';
 
       if (classification.kind === 'room') {
+        if (depth === 1) {
+          // A class-tagged node directly under root. Root has no category ancestor here, so
+          // parentId would be rootId — indistinguishable from a category container under
+          // CreateRoomModal's `room_type === type && parent_id === rootHazuId` predicate.
+          // Drop it loudly instead of writing a room that would silently misconfigure creation.
+          result.unexpectedRooms.push(note(node, depth, containerId, parentTitle));
+          continue;
+        }
         result.rooms.push({
           node,
           classId: classification.classId as string,
@@ -194,13 +215,13 @@ export async function walkRoomTree(
       if (depth === 1 && classification.kind !== 'category') continue;
 
       if (depth >= maxDepth) {
-        result.truncatedAt.push(note(node, depth));
+        result.truncatedAt.push(note(node, depth, containerId, parentTitle));
         continue;
       }
 
       await descend(
         node.key,
-        note(node, depth),
+        note(node, depth, containerId, parentTitle),
         depth + 1,
         classification.kind === 'category' ? classification.roomType : inheritedType,
       );
@@ -209,4 +230,48 @@ export async function walkRoomTree(
 
   await descend(rootId, null, 1, null);
   return result;
+}
+
+// How many parent-groups to print before collapsing the rest into an overflow marker. A
+// permanent wall of individual names (e.g. ~62 Calendrier scolaire calendar entries that each
+// 401 on their own children) trains the operator to stop reading it, which is exactly what
+// "truncation/failure is never silent" exists to prevent — so notes are grouped by parent
+// first, and only the resulting group *lines* are capped, not the raw entries.
+export const DEFAULT_NOTE_GROUP_CAP = 10;
+
+/**
+ * Render a list of WalkNotes (readFailures, truncatedAt, or unexpectedRooms) as one log-ready
+ * line: one summary per distinct parent ("<count> under "<parent>""), capped to `maxGroups`
+ * groups with an overflow marker, always closing with the true total count so it can never
+ * read as complete when it isn't.
+ *
+ * Pure and side-effect free — callers strip HTML from `title`/`parentTitle` before handing
+ * notes in, since this module has no stripHtml (and no HTTP/DB) to call.
+ */
+export function summarizeWalkNotes(notes: WalkNote[], maxGroups: number = DEFAULT_NOTE_GROUP_CAP): string {
+  if (notes.length === 0) return '';
+
+  const order: string[] = [];
+  const groups = new Map<string, { label: string; count: number }>();
+  for (const n of notes) {
+    let group = groups.get(n.parentId);
+    if (!group) {
+      group = { label: n.parentTitle || n.parentId, count: 0 };
+      groups.set(n.parentId, group);
+      order.push(n.parentId);
+    }
+    group.count += 1;
+  }
+
+  const lines = order.map((parentId) => {
+    const group = groups.get(parentId) as { label: string; count: number };
+    return `${group.count} under "${group.label}"`;
+  });
+
+  const shown = lines.slice(0, maxGroups);
+  const body = lines.length > maxGroups
+    ? `${shown.join(', ')} … and ${lines.length - maxGroups} more group(s)`
+    : shown.join(', ');
+
+  return `${body} (${notes.length} total)`;
 }
