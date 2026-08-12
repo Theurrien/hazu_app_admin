@@ -236,7 +236,7 @@ No schema change, no IPC change, no renderer change.
 
 ## Manual acceptance
 
-1. Sync. Expect **158 rooms** (127 + 31) and the log naming *CIE 25-26*'s six topic folders under truncation and *Calendrier scolaire*'s entries under read failures.
+1. Sync. Expect **158 rooms** (127 + 31), the *Calendrier scolaire* calendar entries named under read failures (they return 401), and the depth-4 CIE course nodes named under truncation. Note that at `maxDepth = 4` the six *CIE 25-26* topic folders sit at depth 3 and **are** descended into — it is their untagged course-node children at depth 4 that get truncated, not the topic folders themselves.
 2. Matrix shows the 10 *CIE 2024* rooms **with** assignments, and the 21 *CIE 2025* rooms as empty columns.
 3. `distribution_groups` with `room_id` NULL drops **195 → 145**.
 4. Discrepancies: bucket-A orphan tags drop **373 → 277**; the 96 that left appear as legitimate memberships or as bucket B, not as new `unknown` or `unresolved` rows beyond what the newly-read group ACLs genuinely contain.
