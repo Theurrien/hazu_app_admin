@@ -4,7 +4,10 @@ import {
   identifyRoomType,
   extractClassId,
   classifyNode,
+  walkRoomTree,
+  DEFAULT_MAX_DEPTH,
   TreeNode,
+  RoomTreeDeps,
 } from './room-tree';
 
 const node = (key: string, tags: string[] = [], title = key): TreeNode => ({ key, title, tags });
@@ -129,5 +132,161 @@ describe('classifyNode', () => {
   it('prefers room over category when a node carries both tags', () => {
     const n = node('Room0000000000000004', ['hz-config-room-state', 'hz-config-class-Room0000000000000004-']);
     expect(classifyNode(n, null).kind).toBe('room');
+  });
+});
+
+// A fake Hazu tree: parent id -> its children, or null to simulate an unreadable subtree.
+// An id absent from the map has no children.
+type FakeTree = Record<string, Array<{ snapshot: TreeNode }> | null>;
+
+const child = (key: string, tags: string[] = [], title = key) => ({ snapshot: node(key, tags, title) });
+
+function fakeDeps(tree: FakeTree): RoomTreeDeps & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    listChildren: async (id: string) => {
+      calls.push(id);
+      return id in tree ? tree[id] : [];
+    },
+  };
+}
+
+const ROOT = 'Root0000000000000001';
+const CAT = 'Cat00000000000000001';
+const catTags = ['hz-config-room-cie'];
+const roomTags = (id: string) => [`hz-config-class-${id}-`];
+
+describe('walkRoomTree', () => {
+  it('finds a room at depth 2, directly under a category', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('RoomD2000000000000001', roomTags('RoomD2000000000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.categories.map((c) => c.node.key)).toEqual([CAT]);
+    expect(r.rooms.map((x) => [x.node.key, x.parentId, x.depth])).toEqual([
+      ['RoomD2000000000000001', CAT, 2],
+    ]);
+  });
+
+  it('finds rooms at depth 3 and 4, and records the true parent rather than the category', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('FolderD2000000000001')],
+      FolderD2000000000001: [
+        child('RoomD3000000000000001', roomTags('RoomD3000000000000001')),
+        child('FolderD3000000000001'),
+      ],
+      FolderD3000000000001: [child('RoomD4000000000000001', roomTags('RoomD4000000000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.rooms.map((x) => [x.node.key, x.parentId, x.depth])).toEqual([
+      ['RoomD3000000000000001', 'FolderD2000000000001', 3],
+      ['RoomD4000000000000001', 'FolderD3000000000001', 4],
+    ]);
+  });
+
+  it('records a folder sitting at maxDepth in truncatedAt and does not descend into it', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('FolderAtCap000000001', [], 'Folder At Cap')],
+      FolderAtCap000000001: [child('RoomBeyond0000000001', roomTags('RoomBeyond0000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps, { maxDepth: 2 });
+    expect(r.truncatedAt).toEqual([{ id: 'FolderAtCap000000001', title: 'Folder At Cap', depth: 2 }]);
+    expect(r.rooms).toEqual([]);
+    expect(deps.calls).not.toContain('FolderAtCap000000001');
+  });
+
+  it('never descends into a room, even when the fixture gives it children', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('RoomWithKids00000001', roomTags('RoomWithKids00000001'))],
+      RoomWithKids00000001: [child('ContentItem000000001', roomTags('ContentItem000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.rooms.map((x) => x.node.key)).toEqual(['RoomWithKids00000001']);
+    expect(deps.calls).not.toContain('RoomWithKids00000001');
+  });
+
+  it('records an unreadable subtree in readFailures and keeps walking its siblings', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('Unreadable0000000001', [], 'Locked Folder'), child('OkFolder000000000001')],
+      Unreadable0000000001: null,
+      OkFolder000000000001: [child('RoomOk00000000000001', roomTags('RoomOk00000000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.readFailures).toEqual([{ id: 'Unreadable0000000001', title: 'Locked Folder', depth: 2 }]);
+    expect(r.rooms.map((x) => x.node.key)).toEqual(['RoomOk00000000000001']);
+  });
+
+  it('throws when the root listing fails, because the caller has already cleared the rooms table', async () => {
+    const deps = fakeDeps({ [ROOT]: null });
+    await expect(walkRoomTree(ROOT, deps)).rejects.toThrow('Failed to fetch children from root Hazu');
+  });
+
+  it('does not walk root children that are not categories', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags), child('PersonContainer00001', [], 'Apprenties')],
+      [CAT]: [],
+      PersonContainer00001: [child('Person00000000000001')],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(deps.calls).toEqual([ROOT, CAT]);
+    expect(r.truncatedAt).toEqual([]);
+  });
+
+  it('walks a category below depth 1 without recording it, but adopts its type', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, ['hz-config-room-class'])],
+      [CAT]: [child('DeepCat00000000000001', ['hz-config-room-state'])],
+      DeepCat00000000000001: [child('RoomDeep000000000001', roomTags('RoomDeep000000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.categories.map((c) => c.node.key)).toEqual([CAT]);
+    expect(r.rooms[0].roomType).toBe('state');
+  });
+
+  it('visits a cyclic node only once', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('LoopFolder0000000001')],
+      LoopFolder0000000001: [child(CAT, catTags)],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(deps.calls).toEqual([ROOT, CAT, 'LoopFolder0000000001']);
+    expect(r.categories).toHaveLength(1);
+  });
+
+  it('counts listChildren invocations: one for root, one per node descended into, none for a room', async () => {
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('RoomC000000000000001', roomTags('RoomC000000000000001')), child('FolderC00000000000001')],
+      FolderC00000000000001: [],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.calls).toBe(3);
+    expect(deps.calls).toEqual([ROOT, CAT, 'FolderC00000000000001']);
+  });
+
+  it('returns empty collections for a root with no children', async () => {
+    const r = await walkRoomTree(ROOT, fakeDeps({ [ROOT]: [] }));
+    expect(r).toEqual({ categories: [], rooms: [], truncatedAt: [], readFailures: [], calls: 1 });
+  });
+
+  it('defaults maxDepth to 4', async () => {
+    expect(DEFAULT_MAX_DEPTH).toBe(4);
+    const deps = fakeDeps({
+      [ROOT]: [child(CAT, catTags)],
+      [CAT]: [child('F2000000000000000001')],
+      F2000000000000000001: [child('F3000000000000000001')],
+      F3000000000000000001: [child('F4000000000000000001')],
+      F4000000000000000001: [child('RoomD5000000000000001', roomTags('RoomD5000000000000001'))],
+    });
+    const r = await walkRoomTree(ROOT, deps);
+    expect(r.rooms).toEqual([]);
+    expect(r.truncatedAt.map((t) => t.depth)).toEqual([4]);
   });
 });

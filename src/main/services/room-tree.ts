@@ -74,3 +74,139 @@ export function classifyNode(node: TreeNode, inheritedType: RoomType | null): No
   }
   return { kind: 'folder', classId: null, roomType: null };
 }
+
+export interface DiscoveredCategory {
+  node: TreeNode;
+  roomType: RoomType;
+}
+
+export interface DiscoveredRoom {
+  node: TreeNode;
+  classId: string;
+  roomType: RoomType | null;   // null when neither a self-tag nor a typed ancestor gave one
+  parentId: string;            // the TRUE parent: a category or a sub-folder
+  depth: number;
+}
+
+export interface WalkNote {
+  id: string;
+  title: string;
+  depth: number;
+}
+
+export interface WalkResult {
+  categories: DiscoveredCategory[];
+  rooms: DiscoveredRoom[];
+  truncatedAt: WalkNote[];     // folders left unvisited because the depth cap was reached
+  readFailures: WalkNote[];    // nodes whose children could not be listed
+  calls: number;               // listChildren invocations
+}
+
+export interface RoomTreeDeps {
+  // Returns the node's children, or null if they could not be read.
+  listChildren: (id: string) => Promise<Array<{ snapshot: TreeNode }> | null>;
+}
+
+export interface RoomTreeConfig {
+  maxDepth?: number;
+}
+
+// One level beyond where every hidden room sits today, leaving headroom for the CIE
+// year-folder structure without walking the calendar subtree's grandchildren.
+export const DEFAULT_MAX_DEPTH = 4;
+
+/**
+ * Walk the room tree from `rootId`, collecting categories and rooms.
+ *
+ * Depth is counted from root: root's children are depth 1 (the category layer), rooms
+ * directly beneath a category are depth 2. A folder sitting at `maxDepth` is recorded in
+ * `truncatedAt` rather than descended into, so a bounded sweep never reads as complete
+ * coverage. Rooms are never descended into — their children are content, not rooms.
+ *
+ * Throws only if the ROOT listing fails: the caller clears the rooms table before calling
+ * this, so an empty result there would silently wipe every room.
+ */
+export async function walkRoomTree(
+  rootId: string,
+  deps: RoomTreeDeps,
+  config: RoomTreeConfig = {},
+): Promise<WalkResult> {
+  const maxDepth = config.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const result: WalkResult = {
+    categories: [],
+    rooms: [],
+    truncatedAt: [],
+    readFailures: [],
+    calls: 0,
+  };
+  const visited = new Set<string>([rootId]);
+
+  const note = (node: TreeNode, depth: number): WalkNote => ({
+    id: node.key,
+    title: node.title || '',
+    depth,
+  });
+
+  // List the children of `containerId` — which sit at `depth` — and process them.
+  // `containerNote` is null only for the root, which has no note to record.
+  async function descend(
+    containerId: string,
+    containerNote: WalkNote | null,
+    depth: number,
+    inheritedType: RoomType | null,
+  ): Promise<void> {
+    result.calls += 1;
+    const children = await deps.listChildren(containerId);
+
+    if (children === null) {
+      if (containerNote === null) {
+        throw new Error('Failed to fetch children from root Hazu');
+      }
+      // An unreadable subtree is not an empty one.
+      result.readFailures.push(containerNote);
+      return;
+    }
+
+    for (const child of children) {
+      const node = child?.snapshot;
+      if (!node?.key || visited.has(node.key)) continue;
+      visited.add(node.key);
+
+      const classification = classifyNode(node, inheritedType);
+
+      if (classification.kind === 'room') {
+        result.rooms.push({
+          node,
+          classId: classification.classId as string,
+          roomType: classification.roomType,
+          parentId: containerId,
+          depth,
+        });
+        continue;
+      }
+
+      if (classification.kind === 'category' && depth === 1) {
+        result.categories.push({ node, roomType: classification.roomType as RoomType });
+      }
+
+      // Depth 1 is the category layer. Root's other children — person containers,
+      // administration, general information — are not walked, exactly as before.
+      if (depth === 1 && classification.kind !== 'category') continue;
+
+      if (depth >= maxDepth) {
+        result.truncatedAt.push(note(node, depth));
+        continue;
+      }
+
+      await descend(
+        node.key,
+        note(node, depth),
+        depth + 1,
+        classification.kind === 'category' ? classification.roomType : inheritedType,
+      );
+    }
+  }
+
+  await descend(rootId, null, 1, null);
+  return result;
+}
