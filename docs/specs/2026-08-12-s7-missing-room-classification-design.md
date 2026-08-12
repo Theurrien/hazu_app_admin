@@ -14,6 +14,8 @@
 
 **Ships as two plans, one spec.** Stage A (classification) is built and accepted first. Stage B (pruning) is built only after Stage A has been run against live data and the real split is known. Both are designed here so Stage A is shaped to feed Stage B rather than reworked for it.
 
+> **Sequencing — build [S8](2026-08-12-s8-sync-depth-recursion-design.md) first.** S8 makes `syncRooms` walk past level 2 and imports the 31 rooms currently hidden in CIE year sub-folders. That shrinks this spec's subject at the source, so **every census figure below is a pre-S8 measurement and will move**: the probe set is expected to fall from 46 class ids to 36, and bucket A from 373 tags to 277. The design here is unaffected — the classification rules, the storage model, and the deleted-only prune rule all hold whatever the counts turn out to be — but re-measure before quoting a number, and update the Stage A manual-acceptance figures once S8 has run.
+
 ---
 
 ## The problem
