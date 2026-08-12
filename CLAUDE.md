@@ -574,6 +574,84 @@ Each write logs one line to the main-process console:
 `[orphan-removal] account=… room=… group=…: success=… deleteOk=… verifyRan=… verified=…
 surviving=[…] attempts=…`.
 
+## Room Tree Sync (S8)
+
+`syncRooms` (in [sync.service.ts](src/main/services/sync.service.ts)) walks the **whole** Hazu room
+tree instead of stopping two levels below root. The old code assumed every room sat directly under
+its category; in practice CIE rooms live inside year sub-folders, so a fixed-depth walk missed them.
+
+### Files
+- [room-tree.ts](src/main/services/room-tree.ts) — **pure core**, no DB/HTTP/Electron import (only
+  `RoomType` from `shared/types`): tag classification (`classifyNode`, `identifyRoomType`,
+  `extractClassId`), the depth-capped `walkRoomTree` orchestrator, and `summarizeWalkNotes` — the
+  log-line grouping renderer described below. The child-lister (`listChildren`) is injected, so the
+  whole walk runs under vitest without the native SQLite module or the network.
+- [room-tree.test.ts](src/main/services/room-tree.test.ts) — covers classification, walk depth /
+  truncation / read-failure / cycle behavior, and `summarizeWalkNotes` grouping, entirely against
+  fake in-memory trees.
+- `syncRooms` itself supplies the real IO (`sendApiRequestList`, wrapped to bump
+  `syncProgress.message` — see below) and writes the walk's `categories`/`rooms` into SQLite.
+
+### What changed for rooms already in the database
+Nothing observable for the 123 rooms synced under the old two-level walk — same `id`, `class_id`,
+`room_type`, `parent_id`. What changes is what else now shows up:
+
+- **`parent_id` may name a folder that has no row of its own.** A room found three or four levels
+  down (e.g. inside a CIE year sub-folder) is written with `parent_id` set to that sub-folder's Hazu
+  id — a container the walk passed through but never wrote to `rooms`, since only categories and
+  rooms are persisted. Anything that assumes `parent_id` always resolves to a row in `rooms` needs
+  to handle a miss.
+- **`room_type` resolution order changed.** It used to be inherited from the category
+  unconditionally; now it's **self-tag first, nearest typed ancestor as fallback** — a room several
+  folders under an "état" category but itself carrying `hz-config-room-cie` is typed `cie`, not
+  `state`. See `classifyNode` in room-tree.ts.
+- **Category folders still keep `parent_id = root_hazu_id`.**
+  [CreateRoomModal.tsx:86](src/renderer/components/CreateRoomModal.tsx) finds a category container
+  by exactly `room_type === type && parent_id === rootHazuId` — the walk never emits a category at
+  any other depth, and (see below) never emits a *room* at depth 1 either, so that predicate keeps
+  meaning exactly one thing.
+
+### Depth cap and what it never does
+`walkRoomTree` defaults to `maxDepth = 4` (`DEFAULT_MAX_DEPTH`), counted from root: depth 1 is the
+category layer, depth 2 is directly under a category, and so on. Two things it deliberately never
+does, plus one guard:
+
+- **It never descends into a room.** A `hz-config-class-*` node's children are course content
+  (missions, assignments), not rooms — walking into them would misclassify content as rooms.
+- **It never treats an unreadable subtree as empty.** If `listChildren` returns `null` for a
+  container, that container is recorded in `readFailures` and skipped — its absence from `rooms`
+  reads as "unknown", not "confirmed empty". A failed **root** listing is the one exception: it
+  *throws*, because `clearOldData()` has already emptied the `rooms` table before `syncRooms` runs,
+  so swallowing that failure would silently wipe every room in the app.
+- A room found at **depth 1** (directly under root, bypassing the category layer) is recorded in
+  `unexpectedRooms` and dropped rather than written — writing it would give it `parent_id = rootId`,
+  indistinguishable from the category predicate above. Root has 12 children today and none is
+  class-tagged, so this is currently theoretical, but it now fails loudly (a console warning)
+  instead of silently misdirecting `CreateRoomModal`.
+
+### Expect a standing baseline of warnings on every sync
+Two sources of noise are expected on **every** sync, not signs of new breakage:
+- *Calendrier scolaire*'s ~62 calendar-entry children each return 401 when the walk tries to list
+  their own children — they land in `readFailures`.
+- Some CIE course nodes sit exactly at the depth-4 cap and are recorded in `truncatedAt` rather than
+  descended into.
+
+Both are logged **grouped by parent**, via the exported `summarizeWalkNotes(notes, maxGroups?)` —
+e.g. `62 under "Calendrier scolaire" (62 total)` instead of 62 separate lines. A flat per-node list
+at that volume trains the reader to stop scanning it, which is exactly what a *new*, unexpected
+failure needs not to happen to it. `summarizeWalkNotes` is pure — it takes already-HTML-stripped
+`WalkNote[]`, since `room-tree.ts` has no `stripHtml` to call; `syncRooms` strips titles as it
+builds the input. The total count is always printed, capped group lines or not, so the summary can
+never read as complete when a group got collapsed.
+
+### Progress reporting
+The walk is strictly sequential and runs to roughly 77 `listChildren` calls on the first sync
+(vs. 5 under the old two-level walk). `syncRooms` wraps the injected `listChildren` in a closure
+that bumps a counter and updates `syncProgress.message` before delegating to `sendApiRequestList` —
+the same pattern `syncDistributionGroups` and `syncGroupMemberships` use for their own phases — so
+the Dashboard doesn't sit on one unchanging string for a long silent stretch. `room-tree.ts` itself
+gets no progress callback; the injected-IO seam already does that job.
+
 ## Testing the App
 
 1. Run `npm run build`
