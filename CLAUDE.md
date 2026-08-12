@@ -625,9 +625,9 @@ does, plus one guard:
   so swallowing that failure would silently wipe every room in the app.
 - A room found at **depth 1** (directly under root, bypassing the category layer) is recorded in
   `unexpectedRooms` and dropped rather than written — writing it would give it `parent_id = rootId`,
-  indistinguishable from the category predicate above. Root has 12 children today and none is
-  class-tagged, so this is currently theoretical, but it now fails loudly (a console warning)
-  instead of silently misdirecting `CreateRoomModal`.
+  indistinguishable from the category predicate above. No root child was class-tagged when this
+  shipped, so the case is theoretical — but it now fails loudly (a console warning) instead of
+  silently misdirecting `CreateRoomModal`.
 
 ### Expect a standing baseline of warnings on every sync
 Two sources of noise are expected on **every** sync, not signs of new breakage:
