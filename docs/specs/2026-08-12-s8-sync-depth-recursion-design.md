@@ -16,6 +16,8 @@
 
 This spec is built **before** [S7](2026-08-12-s7-missing-room-classification-design.md), reversing the order in which the two were designed. S7 classifies breadcrumb tags whose class id matches no local room; S8 shrinks that population at the source. Running S7 first would measure a number S8 then moves. Concretely, S8 is expected to take S7's probe set from 46 class ids to 36 and its bucket A from 373 tags to 277.
 
+> **Measured (2026-08-16):** 16 ids and 87 tags, well past the estimate — see [Expected impact](#expected-impact). Building in this order mattered more than predicted: S7's `alive` verdict existed *only* because of the gap S8 closed, so S7 collapsed from two shipped stages to one.
+
 ---
 
 ## The problem
