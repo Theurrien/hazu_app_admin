@@ -71,6 +71,8 @@ export interface PruneDeadTagsTask extends BaseTask {
   items: Array<{ classId: string; tags: string[] }>;
   displayName: string | null;
   tagCount: number;
+  deletedCount?: number;
+  skippedCount?: number;
 }
 
 export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask;
@@ -229,7 +231,16 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
 
         if (result.success) {
           setTasks((prev) =>
-            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+            prev.map((t) =>
+              t.id === task.id
+                ? {
+                    ...t,
+                    status: 'success' as const,
+                    deletedCount: result.deletedTags.length,
+                    skippedCount: result.skippedClassIds.length,
+                  }
+                : t
+            )
           );
         } else {
           setTasks((prev) =>
