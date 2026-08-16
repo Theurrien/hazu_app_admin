@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { HealConfirmationModal } from '../components/HealConfirmationModal';
 import { RevokeAccessConfirmationModal } from '../components/RevokeAccessConfirmationModal';
+import { PruneTagsConfirmationModal } from '../components/PruneTagsConfirmationModal';
 
 type DiscrepancyType = 'orphan-tag' | 'missing-tag' | 'unresolved' | 'unknown';
 
@@ -33,6 +34,23 @@ interface HealPlan {
   skipped: Array<{ personId: string; roomId: string; role: string; reason: string }>;
 }
 
+interface PruneSkippedId {
+  classId: string;
+  verdict: 'alive' | 'unreadable';
+  reason: string;
+  title: string | null;
+  parentId: string | null;
+  tagCount: number;
+}
+
+interface PrunePlan {
+  deletions: Array<{ personId: string; items: Array<{ classId: string; tags: string[] }> }>;
+  skipped: PruneSkippedId[];
+  tagCount: number;
+  personCount: number;
+  roomCount: number;
+}
+
 const TYPE_LABELS: Record<DiscrepancyType, string> = {
   'orphan-tag': 'Orphan tag',
   'missing-tag': 'Missing tag',
@@ -50,7 +68,7 @@ const TYPE_DESCRIPTIONS: Record<DiscrepancyType, string> = {
 const ORDER: DiscrepancyType[] = ['orphan-tag', 'missing-tag', 'unresolved', 'unknown'];
 
 function DiscrepanciesPage() {
-  const { tasks, addHealTagTask, addRevokeAccessTask } = useTaskQueue();
+  const { tasks, addHealTagTask, addRevokeAccessTask, addPruneTagsTask } = useTaskQueue();
   const [items, setItems] = useState<Discrepancy[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -61,6 +79,8 @@ function DiscrepanciesPage() {
     row: Discrepancy;
     grants: Array<{ kind: 'group' | 'roomItem'; title: string; aclRole?: string }>;
   } | null>(null);
+  const [prunePlan, setPrunePlan] = useState<PrunePlan | null>(null);
+  const [probing, setProbing] = useState(false);
   const [watching, setWatching] = useState(false);
   const enqueuedRef = useRef<Set<string>>(new Set());
   const mountedRef = useRef(true);
@@ -93,6 +113,16 @@ function DiscrepanciesPage() {
     return c;
   }, [items]);
 
+  // Distinct class ids behind bucket-A orphan tags. For those rows alone, `roomId` holds a
+  // CLASS id rather than a room id, and computeDiscrepancies attaches a note only to them.
+  const unmatchedClassIdCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const d of items || []) {
+      if (d.type === 'orphan-tag' && d.note) ids.add(d.roomId);
+    }
+    return ids.size;
+  }, [items]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (items || []).filter((d) => {
@@ -113,6 +143,18 @@ function DiscrepanciesPage() {
     }
   }, []);
 
+  // Track enqueued ids as a UNION across flows. Previously each flow overwrote a single Set,
+  // so confirming one flow while another was still in flight discarded the other's ids: the
+  // settle effect stopped watching them, refetched early, and left the page stale until the
+  // next batch. Three flows now share this tracker, so it has to accumulate.
+  const watchIds = useCallback((ids: Set<string>) => {
+    if (ids.size === 0) return;
+    const merged = new Set(enqueuedRef.current);
+    for (const id of ids) merged.add(id);
+    enqueuedRef.current = merged;
+    setWatching(true);
+  }, []);
+
   const confirmHeal = useCallback(() => {
     if (!healPlan) return;
     const ids = new Set<string>();
@@ -120,10 +162,9 @@ function DiscrepanciesPage() {
       const id = addHealTagTask({ personId: it.personId, tag: it.tag, displayName: it.displayName });
       ids.add(id);
     }
-    enqueuedRef.current = ids;
+    watchIds(ids);
     setHealPlan(null);
-    setWatching(ids.size > 0);
-  }, [healPlan, addHealTagTask]);
+  }, [healPlan, addHealTagTask, watchIds]);
 
   const openRevoke = useCallback(async (row: Discrepancy) => {
     if (!row.uid || !row.groupId) return;
@@ -147,10 +188,39 @@ function DiscrepanciesPage() {
       roomName: row.roomTitle || row.roomId,
       displayName: row.displayName ?? null,
     });
-    enqueuedRef.current = new Set([id]);
+    watchIds(new Set([id]));
     setRevokeTarget(null);
-    setWatching(true);
-  }, [revokeTarget, addRevokeAccessTask]);
+  }, [revokeTarget, addRevokeAccessTask, watchIds]);
+
+  const openPrune = useCallback(async () => {
+    setActionError(null);
+    setProbing(true);
+    try {
+      const plan = await window.electronAPI.planTagPrune();
+      if (mountedRef.current) setPrunePlan(plan as PrunePlan);
+    } catch (e) {
+      if (mountedRef.current) setActionError(String((e as any)?.message || e));
+    } finally {
+      if (mountedRef.current) setProbing(false);
+    }
+  }, []);
+
+  const confirmPrune = useCallback(() => {
+    if (!prunePlan) return;
+    const ids = new Set<string>();
+    for (const d of prunePlan.deletions) {
+      const person = (items ?? []).find((r) => r.personId === d.personId);
+      const id = addPruneTagsTask({
+        personId: d.personId,
+        items: d.items,
+        displayName: person?.displayName ?? null,
+        tagCount: d.items.reduce((n, i) => n + i.tags.length, 0),
+      });
+      ids.add(id);
+    }
+    watchIds(ids);
+    setPrunePlan(null);
+  }, [prunePlan, items, addPruneTagsTask, watchIds]);
 
   // When every enqueued heal task has settled (success/error), refetch so counts drop.
   useEffect(() => {
@@ -183,17 +253,30 @@ function DiscrepanciesPage() {
             Where profile tags and group-ACL truth disagree. Read-only — computed from the last sync.
           </p>
         </div>
-        <button
-          onClick={openHeal}
-          disabled={missingCount === 0 || watching}
-          className={`px-3 py-1.5 rounded text-sm whitespace-nowrap ${
-            missingCount === 0 || watching
-              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
-          }`}
-        >
-          {watching ? 'Healing…' : `Heal all missing-tags (${missingCount})`}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={openHeal}
+            disabled={missingCount === 0 || watching || probing}
+            className={`px-3 py-1.5 rounded text-sm whitespace-nowrap ${
+              missingCount === 0 || watching || probing
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {watching ? 'Working…' : `Heal all missing-tags (${missingCount})`}
+          </button>
+          <button
+            onClick={openPrune}
+            disabled={unmatchedClassIdCount === 0 || watching || probing}
+            className={`px-3 py-1.5 rounded text-sm whitespace-nowrap ${
+              unmatchedClassIdCount === 0 || watching || probing
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-red-600 text-white hover:bg-red-700'
+            }`}
+          >
+            {probing ? 'Checking rooms…' : `Check & prune missing rooms (${unmatchedClassIdCount})`}
+          </button>
+        </div>
       </div>
 
       {actionError ? (
@@ -297,6 +380,25 @@ function DiscrepanciesPage() {
         grants={revokeTarget?.grants ?? []}
         onConfirm={confirmRevoke}
         onClose={() => setRevokeTarget(null)}
+      />
+
+      <PruneTagsConfirmationModal
+        isOpen={prunePlan !== null}
+        tagCount={prunePlan?.tagCount ?? 0}
+        personCount={prunePlan?.personCount ?? 0}
+        roomCount={prunePlan?.roomCount ?? 0}
+        rooms={
+          prunePlan
+            ? [
+                ...prunePlan.deletions
+                  .flatMap((d) => d.items)
+                  .reduce((m, i) => m.set(i.classId, (m.get(i.classId) ?? 0) + i.tags.length), new Map<string, number>()),
+              ].map(([classId, tagCount]) => ({ classId, tagCount }))
+            : []
+        }
+        skipped={prunePlan?.skipped ?? []}
+        onConfirm={confirmPrune}
+        onClose={() => setPrunePlan(null)}
       />
     </div>
   );
