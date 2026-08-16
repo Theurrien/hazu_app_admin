@@ -240,6 +240,63 @@ export const sendApiRequestRemoveTags = async (itemId: string, tags: string[]): 
   }
 };
 
+export interface RemoveTagsResult {
+  ok: boolean;
+  status?: number;
+  networkOrTimeout: boolean;
+  error?: string;
+}
+
+// Checked variant of sendApiRequestRemoveTags: the same DELETE, but it classifies its own
+// failure (real HTTP status vs. network/timeout) instead of swallowing it, so a caller's retry
+// predicate can tell a doomed 4xx from a worth-retrying 5xx. The original swallow-and-void
+// sendApiRequestRemoveTags is left unchanged, matching how AddTagsChecked (S3) and
+// RemoveUserChecked (S6) were introduced.
+//
+// Authenticates with the literal x-api-key header rather than getAuthHeaders(), matching every
+// other tag endpoint in this file — getAuthHeaders() switches to a `token` header for short
+// keys, and no tag endpoint has ever been exercised that way.
+export const sendApiRequestRemoveTagsChecked = async (
+  itemId: string,
+  tags: string[]
+): Promise<RemoveTagsResult> => {
+  try {
+    await axios({
+      method: "DELETE",
+      url: `https://${getApiEndpoint()}/api-v2-items/${itemId}/tags`,
+      headers: {
+        "x-api-key": getApiKey(),
+        "Content-Type": "application/json",
+      },
+      data: { tags },
+    });
+    return { ok: true, networkOrTimeout: false };
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const networkOrTimeout =
+        !error.response || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+      console.error(
+        "Error removing tags from item:", itemId,
+        "status=", status, "code=", error.code,
+        (error.response?.data as any) ?? error.message,
+      );
+      return {
+        ok: false,
+        status,
+        networkOrTimeout,
+        error: (error.response?.data as any)?.message || error.message,
+      };
+    }
+    console.error("Unexpected error removing tags from item:", itemId, error);
+    return {
+      ok: false,
+      networkOrTimeout: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
 // GROUP OPERATIONS
 
 export const sendApiRequestAddGroup = async (hazuId: string, groupIdentifier: string): Promise<void> => {
