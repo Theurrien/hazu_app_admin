@@ -34,7 +34,7 @@ export interface DiscrepancyInput {
 const VALID_ROLES = ['student', 'companymentor', 'schoolteacher', 'courseteacher', 'stateadvisor', 'guardian'];
 
 // Parse a breadcrumb tag hz-config-class-<classId>-<role> by splitting on the LAST hyphen,
-// mirroring the retired parseAssignmentTag in sync.service.ts.
+// mirroring parseAssignmentTag in sync.service.ts, which syncPersonRoomAssignments still calls.
 export function parseClassTag(tag: string): { classId: string; role: string } | null {
   const prefix = 'hz-config-class-';
   if (!tag.startsWith(prefix)) return null;
