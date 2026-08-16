@@ -47,6 +47,8 @@ const IPC_CHANNELS = {
   DISCREPANCIES_GET: 'discrepancies:get',
   TAG_HEAL_PLAN_GET: 'tagHeal:plan',
   TAG_HEAL: 'tagHeal:apply',
+  ORPHAN_ACCESS_PLAN: 'orphanAccess:plan',
+  ORPHAN_ACCESS_REVOKE: 'orphanAccess:revoke',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -149,6 +151,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.TAG_HEAL_PLAN_GET),
   healTag: (personId: string, tag: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TAG_HEAL, personId, tag),
+
+  // Orphan access removal (S6)
+  planOrphanRemoval: (accountId: string, groupId: string, roomId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ORPHAN_ACCESS_PLAN, accountId, groupId, roomId),
+  revokeOrphanAccess: (accountId: string, groupId: string, roomId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ORPHAN_ACCESS_REVOKE, accountId, groupId, roomId),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -276,6 +284,7 @@ declare global {
         personId?: string;
         email?: string | null;
         uid?: string;
+        groupId?: string;
         displayName?: string | null;
         note?: string;
       }>>;
@@ -287,6 +296,13 @@ declare global {
         skipped: Array<{ personId: string; roomId: string; role: string; reason: string }>;
       }>;
       healTag: (personId: string, tag: string) => Promise<{ success: boolean; error?: string }>;
+      planOrphanRemoval: (accountId: string, groupId: string, roomId: string) => Promise<Array<{
+        kind: 'group' | 'roomItem';
+        itemId: string;
+        title: string;
+        aclRole?: string;
+      }>>;
+      revokeOrphanAccess: (accountId: string, groupId: string, roomId: string) => Promise<{ success: boolean; error?: string }>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;

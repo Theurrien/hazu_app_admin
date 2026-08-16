@@ -9,6 +9,7 @@ import { runMissionSync, getMissionSyncStatus } from '../services/mission-sync.s
 import { getDiscrepancies } from '../services/discrepancy.service';
 import { getTagHealPlan, healPersonTag } from '../services/tag-healing.service';
 import { reliableUpdateUserRole } from '../services/role-write.service';
+import { planOrphanRemoval, revokeOrphanAccess } from '../services/orphan-removal.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -154,6 +155,30 @@ export function registerIpcHandlers(): void {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.ORPHAN_ACCESS_PLAN,
+    async (_event, accountId: string, groupId: string, roomId: string) => {
+      try {
+        return await planOrphanRemoval(accountId, groupId, roomId);
+      } catch (error) {
+        console.error('Orphan access plan error:', error);
+        throw error;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.ORPHAN_ACCESS_REVOKE,
+    async (_event, accountId: string, groupId: string, roomId: string) => {
+      try {
+        return await revokeOrphanAccess(accountId, groupId, roomId);
+      } catch (error) {
+        console.error('Orphan access revoke error:', error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.ASSIGNMENTS_GET_FOR_PERSON, async (_event, personId: string) => {
     try {

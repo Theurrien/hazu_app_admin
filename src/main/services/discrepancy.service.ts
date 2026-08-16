@@ -35,9 +35,10 @@ export function loadDiscrepancyInput(): DiscrepancyInput {
     .all() as Array<{ personId: string; roomId: string; role: string }>;
 
   const issues = db
-    .prepare('SELECT type, room_id AS roomId, role, uid, email, display_name AS displayName FROM membership_issues')
+    .prepare('SELECT type, group_id AS groupId, room_id AS roomId, role, uid, email, display_name AS displayName FROM membership_issues')
     .all() as Array<{
       type: 'unresolved' | 'unknown';
+      groupId: string;
       roomId: string;
       role: string;
       uid: string;

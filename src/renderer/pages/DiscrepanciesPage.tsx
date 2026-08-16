@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { HealConfirmationModal } from '../components/HealConfirmationModal';
+import { RevokeAccessConfirmationModal } from '../components/RevokeAccessConfirmationModal';
 
 type DiscrepancyType = 'orphan-tag' | 'missing-tag' | 'unresolved' | 'unknown';
 
@@ -12,6 +13,7 @@ interface Discrepancy {
   personId?: string;
   email?: string | null;
   uid?: string;
+  groupId?: string;
   displayName?: string | null;
   note?: string;
 }
@@ -48,12 +50,17 @@ const TYPE_DESCRIPTIONS: Record<DiscrepancyType, string> = {
 const ORDER: DiscrepancyType[] = ['orphan-tag', 'missing-tag', 'unresolved', 'unknown'];
 
 function DiscrepanciesPage() {
-  const { tasks, addHealTagTask } = useTaskQueue();
+  const { tasks, addHealTagTask, addRevokeAccessTask } = useTaskQueue();
   const [items, setItems] = useState<Discrepancy[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | DiscrepancyType>('all');
   const [search, setSearch] = useState('');
   const [healPlan, setHealPlan] = useState<HealPlan | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<{
+    row: Discrepancy;
+    grants: Array<{ kind: 'group' | 'roomItem'; title: string; aclRole?: string }>;
+  } | null>(null);
   const [watching, setWatching] = useState(false);
   const enqueuedRef = useRef<Set<string>>(new Set());
   const mountedRef = useRef(true);
@@ -97,11 +104,12 @@ function DiscrepanciesPage() {
   }, [items, typeFilter, search]);
 
   const openHeal = useCallback(async () => {
+    setActionError(null);
     try {
       const plan = await window.electronAPI.getTagHealPlan();
       setHealPlan(plan);
     } catch (e) {
-      setError(String((e as any)?.message || e));
+      setActionError(String((e as any)?.message || e));
     }
   }, []);
 
@@ -116,6 +124,33 @@ function DiscrepanciesPage() {
     setHealPlan(null);
     setWatching(ids.size > 0);
   }, [healPlan, addHealTagTask]);
+
+  const openRevoke = useCallback(async (row: Discrepancy) => {
+    if (!row.uid || !row.groupId) return;
+    setActionError(null);
+    try {
+      const grants = await window.electronAPI.planOrphanRemoval(row.uid, row.groupId, row.roomId);
+      if (mountedRef.current) setRevokeTarget({ row, grants });
+    } catch (e) {
+      if (mountedRef.current) setActionError(String((e as any)?.message || e));
+    }
+  }, []);
+
+  const confirmRevoke = useCallback(() => {
+    if (!revokeTarget) return;
+    const { row } = revokeTarget;
+    if (!row.uid || !row.groupId) return;
+    const id = addRevokeAccessTask({
+      accountId: row.uid,
+      groupId: row.groupId,
+      roomId: row.roomId,
+      roomName: row.roomTitle || row.roomId,
+      displayName: row.displayName ?? null,
+    });
+    enqueuedRef.current = new Set([id]);
+    setRevokeTarget(null);
+    setWatching(true);
+  }, [revokeTarget, addRevokeAccessTask]);
 
   // When every enqueued heal task has settled (success/error), refetch so counts drop.
   useEffect(() => {
@@ -161,6 +196,19 @@ function DiscrepanciesPage() {
         </button>
       </div>
 
+      {actionError ? (
+        <div className="flex items-start justify-between gap-3 rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-600">
+          <span>{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            className="text-red-600 hover:text-red-800 font-medium"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setTypeFilter('all')}
@@ -200,6 +248,7 @@ function DiscrepanciesPage() {
                 <th className="px-3 py-2 font-medium">Person</th>
                 <th className="px-3 py-2 font-medium">Email / UID</th>
                 <th className="px-3 py-2 font-medium">Note</th>
+                <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -211,6 +260,21 @@ function DiscrepanciesPage() {
                   <td className="px-3 py-2">{d.displayName || d.personId || '—'}</td>
                   <td className="px-3 py-2">{d.email || d.uid || '—'}</td>
                   <td className="px-3 py-2 text-gray-500">{d.note || ''}</td>
+                  <td className="px-3 py-2 text-right">
+                    {d.type === 'unknown' && d.uid && d.groupId ? (
+                      <button
+                        onClick={() => openRevoke(d)}
+                        disabled={watching}
+                        className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
+                          watching
+                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-red-600 text-white hover:bg-red-700'
+                        }`}
+                      >
+                        Revoke access
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -224,6 +288,15 @@ function DiscrepanciesPage() {
         skippedCount={healPlan?.skipped.length ?? 0}
         onConfirm={confirmHeal}
         onClose={() => setHealPlan(null)}
+      />
+
+      <RevokeAccessConfirmationModal
+        isOpen={revokeTarget !== null}
+        personLabel={revokeTarget?.row.displayName || revokeTarget?.row.email || revokeTarget?.row.uid || 'this account'}
+        roomTitle={revokeTarget?.row.roomTitle || revokeTarget?.row.roomId || ''}
+        grants={revokeTarget?.grants ?? []}
+        onConfirm={confirmRevoke}
+        onClose={() => setRevokeTarget(null)}
       />
     </div>
   );

@@ -376,6 +376,58 @@ export const sendApiRequestRemoveUser = async (
   }
 };
 
+export interface RemoveUserResult {
+  ok: boolean;
+  status?: number;
+  networkOrTimeout: boolean;
+  error?: string;
+}
+
+// Checked variant of sendApiRequestRemoveUser: same DELETE, but instead of swallowing the
+// error into a bare `null`, it classifies the failure — a real HTTP status (from an axios
+// error with a `response`) vs. a network failure or timeout (no `response`, or
+// ECONNABORTED/ETIMEDOUT) — the same split role-write.service.ts uses for the S4 write path.
+// Callers with a retryable-vs-not predicate (e.g. S6 orphan removal) need this distinction;
+// a 4xx must never be classified as networkOrTimeout or it gets retried like a 5xx.
+// The original swallow-and-return-null sendApiRequestRemoveUser is left unchanged for its
+// existing caller.
+export const sendApiRequestRemoveUserChecked = async (
+  itemId: string,
+  userId?: string,
+  userEmail?: string
+): Promise<RemoveUserResult> => {
+  const body: Record<string, string> = { itemId };
+  if (userId) body.userId = userId;
+  if (userEmail) body.userEmail = userEmail;
+
+  try {
+    await axios({
+      method: "DELETE",
+      url: `https://${getApiEndpoint()}/acl`,
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      data: body,
+    });
+    console.log("User removed successfully from item:", itemId);
+    return { ok: true, networkOrTimeout: false };
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const networkOrTimeout = !error.response || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+      console.error(
+        "Error removing user from item:", itemId,
+        "status=", status, "code=", error.code,
+        (error.response?.data as any) ?? error.message,
+      );
+      return { ok: false, status, networkOrTimeout, error: (error.response?.data as any)?.message || error.message };
+    }
+    console.error("Unexpected error removing user:", error);
+    return { ok: false, networkOrTimeout: false, error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 // ACL & PERMISSION OPERATIONS
 
 export const sendApiRequestGetAclInfo = async (itemId: string): Promise<any> => {

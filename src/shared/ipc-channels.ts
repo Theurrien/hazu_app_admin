@@ -60,6 +60,10 @@ export const IPC_CHANNELS = {
   TAG_HEAL_PLAN_GET: 'tagHeal:plan',
   TAG_HEAL: 'tagHeal:apply',
 
+  // Orphan access removal (S6)
+  ORPHAN_ACCESS_PLAN: 'orphanAccess:plan',
+  ORPHAN_ACCESS_REVOKE: 'orphanAccess:revoke',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
