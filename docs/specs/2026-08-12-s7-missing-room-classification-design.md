@@ -135,6 +135,15 @@ This keeps S6's re-plan-before-destroy at the finest available grain — a task 
 
 ### Pure core — `src/main/services/tag-prune.ts` (new)
 
+> **Post-ship correction.** The signatures below were revised after implementation to match what
+> shipped: `PrunePlan.deletions`, `runTagPrune`'s target, `pruneDeadTags`, and `TagPruneOutcome`
+> all group a person's tags by class id (`PruneItem[]`) instead of the flat `classIds`/`tags`
+> arrays first drafted here. The flat shape cannot express "drop this one id's tags and keep the
+> rest" — exactly what [the re-probe above](#each-task-re-probes-only-its-own-ids) must do when
+> one of a person's ids comes back alive or unreadable while another confirms dead. The spec's own
+> requirement demanded a shape the spec had not declared; the code that was written to satisfy it
+> is correct, and is reproduced here.
+
 ```ts
 export type RoomVerdict = 'deleted' | 'alive' | 'unreadable';
 
@@ -163,8 +172,20 @@ export interface SkippedId {
   tagCount: number;
 }
 
+// The tags to remove for one class id. Grouped by id rather than flattened, so a task's
+// re-probe can drop one id's tags while still deleting the rest.
+export interface PruneItem {
+  classId: string;
+  tags: string[];
+}
+
+export interface PruneDeletion {
+  personId: string;
+  items: PruneItem[];
+}
+
 export interface PrunePlan {
-  deletions: Array<{ personId: string; classIds: string[]; tags: string[] }>;
+  deletions: PruneDeletion[];
   skipped: SkippedId[];
   tagCount: number;
   personCount: number;
@@ -193,13 +214,13 @@ export async function probeClassIds(
 
 // One person's removal: re-probe -> delete -> verify -> report.
 export async function runTagPrune(
-  target: { personId: string; classIds: string[]; tags: string[] },
+  target: PruneDeletion,
   deps: TagPruneDeps,
   config?: TagPruneConfig,
 ): Promise<TagPruneOutcome>;
 ```
 
-`ProbeDeps` injects `readItem(classId): Promise<ReadOutcome>` and `sleep`. `TagPruneDeps` adds `removeTags(personId, tags)`, `readPersonTags(personId)`, and `sleep`. `TagPruneOutcome` is `{ success, deleted, skipped, surviving, deleteOk, verifyRan, verified, attempts }`. `isRetryableError(status, networkOrTimeout)` and `backoffMs(attempt)` come from [role-write.ts:80](../../src/main/services/role-write.ts:80) — no third copy of that logic.
+`ProbeDeps` injects `readItem(classId): Promise<ReadOutcome>` and `sleep`. `TagPruneDeps` adds `removeTags(personId, tags)`, `readPersonTags(personId)`, and `sleep`. `TagPruneOutcome` is `{ success, deletedTags, skippedClassIds, surviving, deleteOk, verifyRan, verified, attempts, error? }` — `deletedTags`/`skippedClassIds` name what shipped, in place of the plain `deleted`/`skipped` first drafted here. `isRetryableError(status, networkOrTimeout)` and `backoffMs(attempt)` come from [role-write.ts:80](../../src/main/services/role-write.ts:80) — no third copy of that logic.
 
 ### Addition to `discrepancy.ts`
 
@@ -218,7 +239,7 @@ Tag strings come from `input` as they were read, so what gets deleted is exactly
 ### Thin IO — `src/main/services/tag-prune.service.ts` (new)
 
 - `planTagPrune(): Promise<PrunePlan>` — loads the discrepancy input, calls `collectUnmatchedClassIds`, probes over `sendApiRequestRead`, returns the plan. Throws only if the input will not load.
-- `pruneDeadTags(personId, classIds, tags): Promise<{ success, error?, deletedTags, skippedClassIds }>` — runs the core with real deps, then reconciles local `persons.tags` in its own try/catch.
+- `pruneDeadTags(personId, items: PruneItem[]): Promise<{ success, error?, deletedTags, skippedClassIds }>` — runs the core with real deps, then reconciles local `persons.tags` in its own try/catch.
 
 ### `sendApiRequestRemoveTagsChecked`
 
@@ -229,7 +250,7 @@ Tag strings come from `input` as they were read, so what gets deleted is exactly
 | Channel | Direction | Payload |
 |---|---|---|
 | `tagPrune:plan` | read-only against Hazu | `()` → `PrunePlan` |
-| `tagPrune:execute` | write | `(personId, classIds, tags)` → `{ success, error?, deletedTags: string[], skippedClassIds: SkippedId[] }` |
+| `tagPrune:execute` | write | `(personId, items: PruneItem[])` → `{ success, error?, deletedTags: string[], skippedClassIds: SkippedId[] }` |
 
 `deletedTags` lists the tag strings this task actually removed and verified gone; `skippedClassIds` lists the ids its own re-probe declined to confirm, so a task that deletes nothing can say why.
 
