@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 // Task type discriminated union
-export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess';
+export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags';
 
 interface BaseTask {
   id: string;
@@ -65,7 +65,15 @@ export interface RevokeOrphanAccessTask extends BaseTask {
   displayName: string | null;
 }
 
-export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask;
+export interface PruneDeadTagsTask extends BaseTask {
+  type: 'pruneDeadTags';
+  personId: string;
+  items: Array<{ classId: string; tags: string[] }>;
+  displayName: string | null;
+  tagCount: number;
+}
+
+export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask;
 
 // Input types for adding tasks to queue
 type AddRoleUpdateInput = Omit<RoleUpdateTask, 'id' | 'status' | 'type'>;
@@ -73,6 +81,7 @@ type AddCreateRoomInput = Omit<CreateRoomTask, 'id' | 'status' | 'type' | 'roomI
 type AddCreatePersonInput = Omit<CreatePersonTask, 'id' | 'status' | 'type' | 'personId'>;
 type AddHealTagInput = Omit<HealTagTask, 'id' | 'status' | 'type'>;
 type AddRevokeAccessInput = Omit<RevokeOrphanAccessTask, 'id' | 'status' | 'type'>;
+type AddPruneTagsInput = Omit<PruneDeadTagsTask, 'id' | 'status' | 'type'>;
 
 // Notification types (for already-completed operations like modal creates)
 type CreateRoomNotification = { type: 'createRoom'; roomName: string; roomId: string };
@@ -87,6 +96,7 @@ interface TaskQueueContextType {
   addCreatePersonTask: (task: AddCreatePersonInput) => string;
   addHealTagTask: (task: AddHealTagInput) => string;
   addRevokeAccessTask: (task: AddRevokeAccessInput) => string;
+  addPruneTagsTask: (task: AddPruneTagsInput) => string;
   // Add already-completed notification (for modals that call API directly)
   addNotification: (notification: NotificationInput) => string;
   dismissTask: (id: string) => void;
@@ -213,6 +223,19 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
             prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
           );
         }
+      } else if (nextTask.type === 'pruneDeadTags') {
+        const task = nextTask as PruneDeadTagsTask;
+        const result = await window.electronAPI.pruneDeadTags(task.personId, task.items);
+
+        if (result.success) {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+          );
+        } else {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
+          );
+        }
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -268,6 +291,14 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
   const addRevokeAccessTask = useCallback((taskData: AddRevokeAccessInput) => {
     const id = `revoke-${Date.now()}-${++taskIdCounter.current}`;
     const task: RevokeOrphanAccessTask = { ...taskData, id, type: 'revokeOrphanAccess', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
+  // Add prune-dead-tags task (S7)
+  const addPruneTagsTask = useCallback((taskData: AddPruneTagsInput) => {
+    const id = `prune-${Date.now()}-${++taskIdCounter.current}`;
+    const task: PruneDeadTagsTask = { ...taskData, id, type: 'pruneDeadTags', status: 'queued' };
     setTasks((prev) => [...prev, task]);
     return id;
   }, []);
@@ -330,6 +361,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         addCreatePersonTask,
         addHealTagTask,
         addRevokeAccessTask,
+        addPruneTagsTask,
         addNotification,
         dismissTask,
         dismissAllCompleted,

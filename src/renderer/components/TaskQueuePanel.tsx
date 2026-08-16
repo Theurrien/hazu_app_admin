@@ -34,6 +34,8 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         return `Tag: ${task.displayName || task.personId}`;
       case 'revokeOrphanAccess':
         return `Revoke: ${task.displayName || task.accountId} → ${task.roomName}`;
+      case 'pruneDeadTags':
+        return `Prune ${task.tagCount} tag(s): ${task.displayName || task.personId}`;
     }
   };
 
