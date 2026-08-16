@@ -10,6 +10,8 @@ import { getDiscrepancies } from '../services/discrepancy.service';
 import { getTagHealPlan, healPersonTag } from '../services/tag-healing.service';
 import { reliableUpdateUserRole } from '../services/role-write.service';
 import { planOrphanRemoval, revokeOrphanAccess } from '../services/orphan-removal.service';
+import { planTagPrune, pruneDeadTags } from '../services/tag-prune.service';
+import { PruneItem } from '../services/tag-prune';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -176,6 +178,36 @@ export function registerIpcHandlers(): void {
       } catch (error) {
         console.error('Orphan access revoke error:', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  );
+
+  // Plan rethrows: a failure to build the plan must reach the page's error banner rather
+  // than opening a confirmation modal over an empty plan.
+  ipcMain.handle(IPC_CHANNELS.TAG_PRUNE_PLAN, async () => {
+    try {
+      return await planTagPrune();
+    } catch (error) {
+      console.error('Tag prune plan error:', error);
+      throw error;
+    }
+  });
+
+  // Execute returns its failure: this runs inside a Task Queue task, which renders the
+  // error on the task row and offers a retry.
+  ipcMain.handle(
+    IPC_CHANNELS.TAG_PRUNE_EXECUTE,
+    async (_event, personId: string, items: PruneItem[]) => {
+      try {
+        return await pruneDeadTags(personId, items);
+      } catch (error) {
+        console.error('Tag prune execute error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          deletedTags: [],
+          skippedClassIds: [],
+        };
       }
     },
   );
