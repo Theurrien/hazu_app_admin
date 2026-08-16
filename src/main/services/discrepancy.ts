@@ -1,3 +1,5 @@
+import { UnmatchedClassId } from './tag-prune';
+
 export type DiscrepancyType = 'orphan-tag' | 'missing-tag' | 'unresolved' | 'unknown';
 
 export interface Discrepancy {
@@ -144,5 +146,56 @@ export function computeDiscrepancies(input: DiscrepancyInput): Discrepancy[] {
       ),
   );
 
+  return out;
+}
+
+/**
+ * Every distinct class id referenced by a breadcrumb tag that maps to no local room, with the
+ * tags and the people carrying them.
+ *
+ * This is the SINGLE definition of "needs probing" (S7). It reads the same DiscrepancyInput the
+ * report renders and applies the same rule computeDiscrepancies uses for its orphan-tag bucket
+ * A, so the probe set can never drift from what the page shows. Tags parseClassTag rejects yield
+ * no class id and are excluded here exactly as they are excluded there.
+ *
+ * Holders carry the raw tag strings as read, never strings rebuilt from the parse, so what a
+ * prune deletes is provably what was parsed.
+ */
+export function collectUnmatchedClassIds(input: DiscrepancyInput): UnmatchedClassId[] {
+  const knownClassIds = new Set<string>();
+  for (const r of input.rooms) if (r.classId) knownClassIds.add(r.classId);
+
+  // classId -> personId -> that person's tags for it
+  const byClassId = new Map<string, Map<string, string[]>>();
+  for (const p of input.persons) {
+    for (const tag of p.tags) {
+      const parsed = parseClassTag(tag);
+      if (!parsed) continue;
+      if (knownClassIds.has(parsed.classId)) continue;
+
+      let holders = byClassId.get(parsed.classId);
+      if (!holders) {
+        holders = new Map<string, string[]>();
+        byClassId.set(parsed.classId, holders);
+      }
+      const existing = holders.get(p.id);
+      if (existing) existing.push(tag);
+      else holders.set(p.id, [tag]);
+    }
+  }
+
+  const out: UnmatchedClassId[] = [];
+  for (const [classId, holderMap] of byClassId) {
+    const holders = [...holderMap].map(([personId, tags]) => ({ personId, tags }));
+    out.push({
+      classId,
+      tagCount: holders.reduce((n, h) => n + h.tags.length, 0),
+      personCount: holders.length,
+      holders,
+    });
+  }
+
+  // Heaviest first: the modal reads better when the id carrying most of the weight leads.
+  out.sort((a, b) => b.tagCount - a.tagCount || a.classId.localeCompare(b.classId));
   return out;
 }
