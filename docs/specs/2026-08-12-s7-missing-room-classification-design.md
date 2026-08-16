@@ -14,7 +14,9 @@
 
 **Ships as two plans, one spec.** Stage A (classification) is built and accepted first. Stage B (pruning) is built only after Stage A has been run against live data and the real split is known. Both are designed here so Stage A is shaped to feed Stage B rather than reworked for it.
 
-> **Sequencing — [S8](2026-08-12-s8-sync-depth-recursion-design.md) shipped first, merged to `main` on 2026-08-16.** S8 makes `syncRooms` walk past level 2, so the 31 rooms that were hidden in CIE year sub-folders now import as real rooms. That shrinks this spec's subject at the source, and **every census figure below is a pre-S8 measurement**: the probe set should fall from 46 class ids to 36, and bucket A from 373 tags to 277. Those two numbers are projections, not counts — no sync has run since S8 merged. The design holds either way, because the classification rules, the storage model, and the deleted-only prune rule never depended on the counts. Re-measure before quoting one.
+> **Sequencing — [S8](2026-08-12-s8-sync-depth-recursion-design.md) shipped first, and it took most of this spec's subject with it.** S8 merged on 2026-08-16 and imported the 31 rooms that had been hidden in CIE year sub-folders. **Every census figure below is a pre-S8 measurement.** Measured after the first post-S8 sync, the probe set is **16 distinct class ids behind 87 tags across 73 people** — down from 46 / 373 / 158, and far below the 36 / 277 this spec predicted, because the *CIE 2025* rooms absorbed tags S8's spec had not credited them with.
+>
+> **So the open question is no longer how to build this, but whether to.** The design holds: the classification rules, the storage model, and the deleted-only prune rule never depended on the counts, and 16 ids is a smaller, cheaper probe than 46. But 87 tags is a much weaker case for two shipped stages than 373 was. Re-measure against the Discrepancies page and decide before planning Stage A.
 
 ---
 

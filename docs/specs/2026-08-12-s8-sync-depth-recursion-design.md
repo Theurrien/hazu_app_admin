@@ -71,20 +71,26 @@ The tempting shortcut — read every unlinked group's class id and import whatev
 
 The 21 *CIE 2025* rooms therefore have **no role groups at all**, and a group-driven backfill would silently miss every one of them. Those are precisely the rooms an administrator would want to assign people *into*.
 
-Two corollaries. **Deleted rooms leave their groups behind** — 29 dead rooms still account for roughly 145 local groups, so the presence of a group is no evidence that a room exists. And **every room self-tags its type**: 123/123 local rooms carry an `hz-config-room-*` tag agreeing with the category-derived `room_type`, as do all 10 alive hidden rooms.
+> **Correction (2026-08-16, measured after S8 shipped): the sentence above is wrong.** The 21 *CIE 2025* rooms have **105 role groups** — five each, exactly like every other room. The first post-S8 sync linked 155 groups, not the 50 this section predicted, and dropped `room_id IS NULL` from 195 to **40** rather than to 145. The pre-S8 probe that produced "10 alive, 29 deleted" simply did not have those 21 class ids in its input set; the conclusion drawn from its absence was an inference, not a measurement, and it was mistaken.
+>
+> **The decision this section supports still stands, for a different reason.** A group-driven backfill would not have missed the *CIE 2025* rooms after all — but it would still have been the wrong mechanism, because it can only ever find rooms that already have groups. The walk finds rooms on their own evidence. That is the argument that survives; the "no groups at all" evidence does not.
+
+Two corollaries. **Deleted rooms leave their groups behind** — 29 dead rooms still account for roughly 145 local groups, so the presence of a group is no evidence that a room exists. (Post-S8, 40 groups remain unlinked, so that figure was itself inflated by the *CIE 2025* groups counted here as orphaned.) And **every room self-tags its type**: 123/123 local rooms carry an `hz-config-room-*` tag agreeing with the category-derived `room_type`, as do all 10 alive hidden rooms — confirmed after the fact, since the post-S8 type distribution shows no pre-existing room changed type.
 
 ## Expected impact
 
-| measure | before | after |
-|---|---|---|
-| rooms | 127 | **158** |
-| `distribution_groups` with `room_id` NULL | 195 | **145** |
-| bucket-A orphan tags | 373 | **277** (96 tags across 42 people stop being orphans) |
-| distinct unmatched class ids (S7's probe set) | 46 | **36** |
+| measure | before | predicted | **measured after the first post-S8 sync** |
+|---|---|---|---|
+| rooms | 127 | 158 | **158** ✅ |
+| `distribution_groups` with `room_id` NULL | 195 | 145 | **40** |
+| bucket-A orphan tags | 373 | 277 | **87** |
+| distinct unmatched class ids (S7's probe set) | 46 | 36 | **16** |
 
-Only 10 of the 31 imported rooms are referenced by any tag or group. The other 21 arrive as empty Matrix columns available for assignment, which is the intent.
+Rooms landed exactly on the prediction. The other three overshot it, all for the same reason: this spec assumed only the 10 *CIE 2024* rooms were referenced by existing tags and groups, and the 21 *CIE 2025* rooms turned out to be referenced too — see the correction under "Why a group-driven backfill cannot replace the walk." So the change absorbed roughly three times the orphaned state it was scoped to absorb.
 
-The 96 tags leaving bucket A land either in *legit* or in bucket B, depending on what each room's group ACL actually says. This spec does not predict the split; the report will show it.
+**S7's subject shrank by 77%**: from 46 class ids behind 373 tags to 16 behind 87, affecting 73 people. Whether that still earns a build is a fresh question, not one this spec answered.
+
+Type resolution changed from category-inherited to self-tag-first, and no pre-existing room moved: the post-S8 distribution is each old bucket plus its category row (state 13, class 31, enterprise 77), with the entire +31 in `cie`.
 
 ## Global constraints
 
