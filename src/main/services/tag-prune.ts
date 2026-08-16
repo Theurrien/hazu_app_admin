@@ -7,6 +7,8 @@
  * The rule this file exists to enforce: only an explicit 404 authorises deleting a tag.
  */
 
+import { isRetryableError, backoffMs } from './role-write';
+
 export type RoomVerdict = 'deleted' | 'alive' | 'unreadable';
 
 // The result of one GET /read attempt, with its failure already classified so the retry
@@ -133,5 +135,210 @@ export function buildPrunePlan(
     tagCount,
     personCount: deletions.length,
     roomCount: deadIds.size,
+  };
+}
+
+export interface ProbeDeps {
+  // One GET /read attempt, with its failure already classified.
+  readItem: (classId: string) => Promise<ReadOutcome>;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export interface ProbeConfig {
+  maxReadAttempts?: number;
+}
+
+const DEFAULT_PROBE_CFG = { maxReadAttempts: 3 };
+
+/**
+ * Probe every id, retrying transient failures only. Sequential on purpose: the sweep is small,
+ * and hammering an API we are about to delete against buys nothing.
+ *
+ * One id's failure never aborts the sweep — a reader that throws instead of classifying is
+ * still just an unread, and the remaining ids are probed regardless.
+ */
+export async function probeClassIds(
+  ids: readonly string[],
+  deps: ProbeDeps,
+  cfg: ProbeConfig = {},
+): Promise<Map<string, Verdict>> {
+  const { maxReadAttempts } = { ...DEFAULT_PROBE_CFG, ...cfg };
+  const out = new Map<string, Verdict>();
+
+  for (const classId of ids) {
+    let verdict: Verdict = { verdict: 'unreadable', title: null, parentId: null };
+
+    for (let i = 0; i < maxReadAttempts; i++) {
+      let res: ReadOutcome;
+      try {
+        res = await deps.readItem(classId);
+      } catch {
+        res = { ok: false, networkOrTimeout: true };
+      }
+      verdict = classifyReadResult(res);
+
+      // A 404 is deterministic: isRetryableError says no, so this breaks on the first read.
+      if (res.ok || !isRetryableError(res.status, res.networkOrTimeout)) break;
+      if (i < maxReadAttempts - 1) await deps.sleep(backoffMs(i));
+    }
+
+    out.set(classId, verdict);
+  }
+
+  return out;
+}
+
+export interface TagPruneDeps {
+  probe: (classId: string) => Promise<ReadOutcome>;
+  // One DELETE attempt; classifies its own failure for the retry predicate.
+  removeTags: (
+    personId: string,
+    tags: string[],
+  ) => Promise<{ ok: boolean; status?: number; networkOrTimeout: boolean; error?: string }>;
+  // The profile's current tags, or null if they could not be read.
+  readPersonTags: (personId: string) => Promise<string[] | null>;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export interface TagPruneConfig {
+  maxReadAttempts?: number;
+  maxDeleteAttempts?: number;
+  maxVerifyReads?: number;
+  verifyDelayMs?: number;
+}
+
+export interface TagPruneOutcome {
+  success: boolean;
+  deletedTags: string[];
+  skippedClassIds: SkippedId[];
+  surviving: string[];
+  deleteOk: boolean;
+  verifyRan: boolean;
+  verified: boolean;
+  attempts: number;
+  error?: string;
+}
+
+const DEFAULT_PRUNE_CFG = {
+  maxReadAttempts: 3,
+  maxDeleteAttempts: 3,
+  maxVerifyReads: 3,
+  verifyDelayMs: 750,
+};
+
+/**
+ * Remove one person's dead breadcrumb tags, then confirm it against a fresh profile read.
+ * All IO injected.
+ *
+ * Step 1 is the authorisation: the plan the operator confirmed does not license anything, so
+ * this re-probes the ids in its OWN payload. That can only ever shrink the delete set.
+ */
+export async function runTagPrune(
+  target: PruneDeletion,
+  deps: TagPruneDeps,
+  cfg: TagPruneConfig = {},
+): Promise<TagPruneOutcome> {
+  const c = { ...DEFAULT_PRUNE_CFG, ...cfg };
+
+  // 1. Re-probe this task's own ids. Only a fresh 404 authorises a deletion.
+  const verdicts = await probeClassIds(
+    target.items.map((i) => i.classId),
+    { readItem: deps.probe, sleep: deps.sleep },
+    { maxReadAttempts: c.maxReadAttempts },
+  );
+
+  const confirmed: PruneItem[] = [];
+  const skippedClassIds: SkippedId[] = [];
+  for (const item of target.items) {
+    const v = verdicts.get(item.classId);
+    const verdict: RoomVerdict = v?.verdict ?? 'unreadable';
+    if (verdict === 'deleted') {
+      confirmed.push(item);
+      continue;
+    }
+    skippedClassIds.push({
+      classId: item.classId,
+      verdict,
+      reason: SKIP_REASON[verdict],
+      title: v?.title ?? null,
+      parentId: v?.parentId ?? null,
+      tagCount: item.tags.length,
+    });
+  }
+
+  const tags = confirmed.flatMap((i) => i.tags);
+  if (tags.length === 0) {
+    // Nothing re-confirmed. Not a failure: nothing went wrong, and nothing was deleted.
+    return {
+      success: true,
+      deletedTags: [],
+      skippedClassIds,
+      surviving: [],
+      deleteOk: true,
+      verifyRan: false,
+      verified: false,
+      attempts: 0,
+    };
+  }
+
+  // 2. One DELETE for all of this person's confirmed-dead tags, retrying transient failures.
+  let attempts = 0;
+  let deleteOk = false;
+  let lastError: string | undefined;
+  for (let i = 0; i < c.maxDeleteAttempts; i++) {
+    attempts += 1;
+    const r = await deps.removeTags(target.personId, tags);
+    if (r.ok) {
+      deleteOk = true;
+      break;
+    }
+    lastError = r.error;
+    if (!isRetryableError(r.status, r.networkOrTimeout) || i === c.maxDeleteAttempts - 1) break;
+    await deps.sleep(backoffMs(i));
+  }
+
+  // 3. Verify against a fresh profile read, re-reading through cache lag. This runs even after
+  //    a failed delete: measured in S4, a transport failure carries no information about
+  //    whether the write committed — only the read does.
+  let surviving: string[] | null = null;
+  for (let i = 0; i < c.maxVerifyReads; i++) {
+    const current = await deps.readPersonTags(target.personId);
+    if (current === null) break; // cannot verify
+    const present = new Set(current);
+    surviving = tags.filter((t) => present.has(t));
+    if (surviving.length === 0) break;
+    if (i < c.maxVerifyReads - 1) await deps.sleep(c.verifyDelayMs);
+  }
+
+  // 4. Truth unreadable: fall back to the delete status code.
+  if (surviving === null) {
+    return {
+      success: deleteOk,
+      deletedTags: deleteOk ? tags : [],
+      skippedClassIds,
+      surviving: [],
+      deleteOk,
+      verifyRan: false,
+      verified: false,
+      attempts,
+      error: deleteOk ? undefined : lastError,
+    };
+  }
+
+  // 5. Truth decides, in both directions.
+  const stillThere = surviving;
+  const verified = stillThere.length === 0;
+  return {
+    success: verified,
+    deletedTags: tags.filter((t) => !stillThere.includes(t)),
+    skippedClassIds,
+    surviving: stillThere,
+    deleteOk,
+    verifyRan: true,
+    verified,
+    attempts,
+    error: verified
+      ? undefined
+      : `${stillThere.length} tag(s) still present after the delete: ${stillThere.join(', ')}`,
   };
 }
