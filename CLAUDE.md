@@ -85,7 +85,25 @@ hazu-admin/
 │   │       │   ├── helpers.ts  # Utilities
 │   │       │   └── interfaces.ts
 │   │       ├── sync.service.ts # Hazu → SQLite sync
-│   │       └── mission-sync.service.ts # Mission data sync
+│   │       ├── mission-sync.service.ts # Mission data sync
+│   │       │
+│   │       │   # Group-truth stages. Each splits into a PURE CORE with all IO
+│   │       │   # injected (vitest-runnable, no native module) + a thin *.service.ts
+│   │       │   # IO layer. Tests live beside the core as *.test.ts.
+│   │       ├── group-membership.ts     # S1 — resolve group members to profiles
+│   │       ├── discrepancy.ts          # S2 — groups vs. tags report; owns parseClassTag
+│   │       │                           #      and collectUnmatchedClassIds (S7)
+│   │       ├── discrepancy.service.ts
+│   │       ├── tag-healing.ts          # S3 — add a missing breadcrumb tag
+│   │       ├── tag-healing.service.ts
+│   │       ├── role-write.ts           # S4 — retry + verify-against-group-truth;
+│   │       │                           #      owns isRetryableError / backoffMs
+│   │       ├── role-write.service.ts
+│   │       ├── orphan-removal.ts       # S6 — revoke an orphan account's access
+│   │       ├── orphan-removal.service.ts
+│   │       ├── tag-prune.ts            # S7 — delete dead breadcrumb tags (404-only)
+│   │       ├── tag-prune.service.ts
+│   │       └── room-tree.ts            # S8 — whole-tree room walk
 │   │
 │   ├── renderer/               # React Frontend (Vite)
 │   │   ├── App.tsx            # Main app with routing
@@ -97,6 +115,7 @@ hazu-admin/
 │   │   │   ├── MatrixPage.tsx
 │   │   │   ├── MissionAnalysisPage.tsx
 │   │   │   ├── BulkImportPage.tsx
+│   │   │   ├── DiscrepanciesPage.tsx  # Groups-vs-tags report + heal/revoke/prune
 │   │   │   └── SettingsPage.tsx
 │   │   ├── components/
 │   │   │   ├── layout/
@@ -116,6 +135,9 @@ hazu-admin/
 │   │   │   ├── CreateRoomModal.tsx
 │   │   │   ├── DeleteConfirmationModal.tsx
 │   │   │   ├── RenameRoomModal.tsx
+│   │   │   ├── HealConfirmationModal.tsx          # S3 — add missing tags
+│   │   │   ├── RevokeAccessConfirmationModal.tsx  # S6 — destructive
+│   │   │   ├── PruneTagsConfirmationModal.tsx     # S7 — destructive
 │   │   │   └── TaskQueuePanel.tsx   # Task Queue UI (sequential writes)
 │   │   ├── hooks/
 │   │   │   └── useMatrixData.ts     # Loads + filters/sorts matrix data
