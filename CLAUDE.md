@@ -585,12 +585,27 @@ unmatched id live and, on confirmation, permanently deletes the corresponding ta
 app, after S6.
 
 ### The 404-only rule
-Only a literal HTTP 404 on the class id's `read` call authorises deleting its tags. An expired
-API key returns 401 for every id in the sweep, not just the dead ones; treating a 401 as
-"deleted" would arm the prune against every live tag the operator holds a key for. So
-`classifyReadResult` in [tag-prune.ts](src/main/services/tag-prune.ts) maps anything that isn't a
-success and isn't a 404 — 401, 403, 500, a timeout, a dropped connection — to `unreadable`, and
-`unreadable` is always a skip, never a delete.
+Only a literal HTTP 404 on the class id's `read` call authorises deleting its tags. A bad key
+turns every id whose room still **exists** into a 401; treating a 401 as "deleted" would arm the
+prune against exactly those live rooms. So `classifyReadResult` in
+[tag-prune.ts](src/main/services/tag-prune.ts) maps anything that isn't a success and isn't a
+404 — 401, 403, 500, a timeout, a dropped connection — to `unreadable`, and `unreadable` is
+always a skip, never a delete.
+
+**Measured 2026-08-17, and not what the design originally assumed.** A bad key does *not* fail
+every read. `GET /read` answers **404 for an unknown id regardless of the key**, and 401 only for
+an id that exists; an empty key gives 500. The rule is therefore both narrower and more necessary
+than "a broken key breaks everything": a credentials failure cannot manufacture a 404, but it can
+strip the protection off every live room in the set, and only the 401→`unreadable` mapping keeps
+those tags safe.
+
+The practical consequence is for whoever tests this next. Breaking the API key and re-running the
+button proves nothing on its own — today's fifteen unmatched ids are all genuinely dead, so they
+answer 404 either way and the modal looks identical whether the rule works or not. To exercise the
+rule you need an unmatched id that is **alive**: delete one live room's row from the local `rooms`
+table (a sync restores it), and confirm the button counts it while the modal skips it — "Still
+exists" with a good key, "Could not read" with a broken one, and the delete total unchanged in
+both. Verified that way on 2026-08-17.
 
 ### `planTagPrune` does not throw on a failed read — unlike S6
 S6's `planOrphanRemoval` throws when an ACL can't be read, because its plan enumerates what will

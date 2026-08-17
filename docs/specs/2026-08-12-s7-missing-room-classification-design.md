@@ -86,7 +86,7 @@ This is also why an `alive` skip carries the room's **`parentId`** alongside its
 
 ## Global constraints
 
-- **Only an explicit 404 means `deleted`.** Every other failure — 5xx, network, timeout, 401, 403 — classifies as `unreadable`. An expired API key returns 401 for every id; were 401 to mean `deleted`, one credentials problem would arm the prune against every live tag in the set.
+- **Only an explicit 404 means `deleted`.** Every other failure — 5xx, network, timeout, 401, 403 — classifies as `unreadable`. A bad key turns every id whose room still exists into a 401; were 401 to mean `deleted`, one credentials problem would arm the prune against exactly those live rooms. (Measured 2026-08-17 — see the correction under *Failure modes*. A bad key does not fail every read, as this document originally assumed; dead ids answer 404 regardless.)
 - **Only `deleted` may be pruned.** Never `alive`, never `unreadable`, never a bucket-B tag.
 - **Re-probe immediately before deleting.** The plan authorises nothing. A fresh 404, taken inside the task that does the deleting, is the authorisation. Following S6, re-planning can only shrink a delete set, never grow it.
 - **Retry only transient failures.** 5xx, network, timeout — never a 4xx, and never a 404.
@@ -270,7 +270,8 @@ No progress counter: 15 reads is roughly twenty seconds, and the polled-progress
 | situation | behaviour |
 |---|---|
 | Zero unmatched ids | Button disabled. No reads. |
-| Every read fails (bad key, offline) | All ids `unreadable`, plan empty, modal offers nothing. This is the 401/403 rule working. |
+| Offline, or every read fails at the transport | All ids `unreadable`, plan empty, modal offers nothing. |
+| Bad or expired key | **Not** an empty plan — see the correction below. Live ids answer 401 and are skipped; dead ids still answer 404 and are still offered. This is the 401 rule working, and it is the *live* ids it protects. |
 | Read throws with no response (DNS, socket) | `networkOrTimeout: true` → retried → `unreadable`. |
 | Re-probe in a task returns 200 | That id is dropped and named in the result. |
 | Re-probe in a task is unreadable | Dropped. Never delete on an unread. |
@@ -282,6 +283,38 @@ No progress counter: 15 reads is roughly twenty seconds, and the polled-progress
 | Tag already absent at delete time | Idempotent; verification confirms absence. |
 | Person deleted between plan and execute | That task errors. Others are unaffected. |
 | Person holds dead tags for several rooms | One task, one DELETE, all their dead tags together. |
+
+### Correction (measured 2026-08-17): a bad key does not fail every read
+
+This document was written on the premise that an expired key returns 401 for *every* id in the
+sweep. That is false. Probed directly against `GET /read`:
+
+| key | target | response |
+|---|---|---|
+| valid | a room that exists | 200 |
+| valid | a dead class id | 404 |
+| **corrupted** | a room that exists | **401** |
+| **corrupted** | a dead class id | **404** |
+| empty | a room that exists | 500 |
+
+Hazu answers 404 for an unknown id whether or not the caller is authorised. A credentials failure
+therefore cannot manufacture a 404 out of a live room — it can only strip that room of the
+evidence that it is alive, leaving a 401. The 404-only rule survives this unchanged, but its
+justification is the narrower one: **401 must mean `unreadable` because live rooms answer 401,
+not because everything does.**
+
+Two consequences worth carrying forward.
+
+*The obvious acceptance test does not test anything.* Breaking the key and re-running the button
+produces byte-identical output whether the rule works or not, because every unmatched id in the
+current set is genuinely dead and answers 404 either way. A valid test needs an unmatched id that
+is **alive** — delete one live room's row from the local `rooms` table, which a sync restores.
+Done that way on 2026-08-17: with 16 unmatched ids and 23 extra candidate tags in front of it, the
+plan still offered 84 tags across 15 rooms, and the live id appeared under *Skipped* as "Still
+exists" with a good key and "Could not read" with a broken one.
+
+*The `alive` verdict has now run against live data*, which it never had when this spec was
+written — the case existed in the code and the tests but nowhere in production.
 
 ## Testing
 

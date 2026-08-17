@@ -66,9 +66,10 @@ describe('classifyReadResult', () => {
     expect(classifyReadResult({ ok: false, networkOrTimeout: true }).verdict).toBe('unreadable');
   });
 
-  // The reason this whole feature is gated on a 404 and nothing else: an expired key
-  // returns 401 for EVERY id, and a 401 that meant "deleted" would arm the prune
-  // against every live tag in the set.
+  // The reason this whole feature is gated on a 404 and nothing else. Measured 2026-08-17
+  // against the live endpoint: a bad key returns 401 for an id that EXISTS and 404 for one
+  // that does not. So a credentials failure cannot invent a 404 — but a 401 that meant
+  // "deleted" would arm the prune against precisely the rooms that are still alive.
   it('classifies a 401 as unreadable, never deleted', () => {
     expect(classifyReadResult({ ok: false, status: 401, networkOrTimeout: false }).verdict).toBe(
       'unreadable',

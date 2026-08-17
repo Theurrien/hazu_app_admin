@@ -74,8 +74,10 @@ export const SKIP_REASON: Record<'alive' | 'unreadable', string> = {
 };
 
 // Classify one read. ONLY a literal 404 yields 'deleted'. Everything else that is not a success
-// is 'unreadable', including 401 and 403: an expired key fails every read, and treating that as
-// "deleted" would arm the prune against every live tag in the set.
+// is 'unreadable', including 401 and 403. Measured 2026-08-17: a bad key does NOT fail every read.
+// Hazu answers 404 for an unknown id whether or not the caller is authorised, and 401 only for an
+// id that exists — so a credentials failure cannot manufacture a 404, but it does strip every LIVE
+// room of the evidence that it is alive. 401 must mean 'unreadable' because live rooms answer 401.
 export function classifyReadResult(res: ReadOutcome): Verdict {
   if (res.ok) {
     return {
