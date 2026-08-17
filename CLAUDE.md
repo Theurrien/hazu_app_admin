@@ -574,6 +574,106 @@ Each write logs one line to the main-process console:
 `[orphan-removal] account=… room=… group=…: success=… deleteOk=… verifyRan=… verified=…
 surviving=[…] attempts=…`.
 
+## Dead-Tag Pruning (S7)
+
+The Discrepancies page also reports **unmatched class ids** — breadcrumb tags of the form
+`hz-config-class-<classId>-<role>` on real profiles that name a class id no local room maps to.
+Most of these are dead: the room was deleted in Hazu, but nobody cleaned up the breadcrumbs it
+left on every assigned person's profile. A **`Check & prune missing rooms`** button probes each
+unmatched id live and, on confirmation, permanently deletes the corresponding tags. Unlike S3's
+`healTag`, which only adds a tag, this is destructive — the second destructive write path in the
+app, after S6.
+
+### The 404-only rule
+Only a literal HTTP 404 on the class id's `read` call authorises deleting its tags. A bad key
+turns every id whose room still **exists** into a 401; treating a 401 as "deleted" would arm the
+prune against exactly those live rooms. So `classifyReadResult` in
+[tag-prune.ts](src/main/services/tag-prune.ts) maps anything that isn't a success and isn't a
+404 — 401, 403, 500, a timeout, a dropped connection — to `unreadable`, and `unreadable` is
+always a skip, never a delete.
+
+**Measured 2026-08-17, and not what the design originally assumed.** A bad key does *not* fail
+every read. `GET /read` answers **404 for an unknown id regardless of the key**, and 401 only for
+an id that exists; an empty key gives 500. The rule is therefore both narrower and more necessary
+than "a broken key breaks everything": a credentials failure cannot manufacture a 404, but it can
+strip the protection off every live room in the set, and only the 401→`unreadable` mapping keeps
+those tags safe.
+
+The practical consequence is for whoever tests this next. Breaking the API key and re-running the
+button proves nothing on its own — today's fifteen unmatched ids are all genuinely dead, so they
+answer 404 either way and the modal looks identical whether the rule works or not. To exercise the
+rule you need an unmatched id that is **alive**: delete one live room's row from the local `rooms`
+table (a sync restores it), and confirm the button counts it while the modal skips it — "Still
+exists" with a good key, "Could not read" with a broken one, and the delete total unchanged in
+both. Verified that way on 2026-08-17.
+
+### `planTagPrune` does not throw on a failed read — unlike S6
+S6's `planOrphanRemoval` throws when an ACL can't be read, because its plan enumerates what will
+be *destroyed*: an unreadable ACL there could make the modal under-promise what removal will do.
+S7's plan is the opposite shape. An unreadable class id only ever **removes** work from the
+delete set — it can never add to it — so one flaky read must not block pruning every other
+confirmed-dead id. `planTagPrune` therefore reports a failed read as a skip and keeps going. Do
+not "fix" this asymmetry into S6's shape; it follows from what each plan is proving.
+
+### Deletions are grouped by class id, not flattened
+A person's plan entry carries `items: Array<{ classId, tags }>`, one entry per class id, rather
+than two parallel `classIds`/`tags` arrays. The re-probe (below) must be able to confirm one of a
+person's class ids as still-404 while the read for another comes back alive or unreadable, dropping
+only that id's tags while still deleting the rest. Flat parallel arrays cannot express "drop this
+one id's tags and keep the others" — a `PruneItem[]` grouped by id can.
+
+### The re-probe is the authorisation, not the plan
+The plan the operator confirms in the modal licenses nothing by itself. `runTagPrune` re-probes
+each class id in its own task's payload before deleting anything, and only a fresh 404 confirms a
+tag for deletion. Re-planning can only shrink a delete set between the modal and execution, never
+grow it — exactly the S6 discipline (re-plan from confirmed ids, not from what the modal showed).
+
+### Truth outranks the status code, in both directions
+Same rule as S4 and S6. After the delete call, `runTagPrune` re-reads the person's profile tags
+(up to 3 reads, 750 ms apart, riding out cache lag) and lets that read decide, not the delete's
+HTTP status: a 2xx delete whose tags survive the read is not a success, and a delete that failed
+transiently but whose tags are confirmed gone by the read is. Truth unreadable falls back to the
+delete status code. A run that re-probes to zero confirmed ids is not a failure — it deletes
+nothing, succeeds, and says so (see the Task Queue label handling in
+[TaskQueuePanel.tsx](src/renderer/components/TaskQueuePanel.tsx)).
+
+### Files
+- [tag-prune.ts](src/main/services/tag-prune.ts) — **pure core**, all IO injected: `classifyReadResult`
+  (the 404-only rule), `buildPrunePlan`, `probeClassIds`, and the `runTagPrune` orchestrator. Tests
+  in [tag-prune.test.ts](src/main/services/tag-prune.test.ts).
+- [tag-prune.service.ts](src/main/services/tag-prune.service.ts) — **thin IO layer**:
+  `planTagPrune()` and `pruneDeadTags(personId, items)`, wiring real reads/deletes/sleep and
+  reconciling local `persons.tags` from the confirmed-deleted set.
+- `collectUnmatchedClassIds` in [discrepancy.ts](src/main/services/discrepancy.ts) — the single
+  definition of "needs probing": every class id referenced by a breadcrumb tag that maps to no
+  local room, grouped by id with its holders and their tags.
+- `sendApiRequestRemoveTagsChecked` in [hazu-api/api.ts](src/main/services/hazu-api/api.ts) — the
+  checked tag-removal call `runTagPrune` deletes through.
+- `src/main/ipc/index.ts` — `TAG_PRUNE_PLAN` (read-only, rethrows so a failed plan reaches the
+  page's error banner rather than opening an empty modal) and `TAG_PRUNE_EXECUTE` (write, returns
+  its failure so the Task Queue can render and retry it).
+- [TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx) — `pruneDeadTags` task type,
+  alongside `roleUpdate` / `createRoom` / `createPerson` / `healTag` / `revokeOrphanAccess`.
+- [PruneTagsConfirmationModal.tsx](src/renderer/components/PruneTagsConfirmationModal.tsx) —
+  shows the tag/person/room counts to delete and the skipped ids with their reason, before
+  confirming enqueues one `pruneDeadTags` task per person.
+- [DiscrepanciesPage.tsx](src/renderer/pages/DiscrepanciesPage.tsx) — the
+  `Check & prune missing rooms` button; click probes live and opens the modal; confirming enqueues
+  the tasks; `refetch()` once they settle.
+
+### Success rule
+Same shape as S4 and S6: where the profile-tag read could confirm the outcome, that read decides;
+where it could not, the delete's status code decides.
+
+- a 404-confirmed id whose tags survive the follow-up read → not deleted, `success:false`, naming
+  which tags remain;
+- a delete that fails transiently but the follow-up read confirms the tags are gone →
+  `success:true`, reconciled locally;
+- an id that re-probes as `alive` or `unreadable` is dropped from the delete set before the call
+  is even made — reported as skipped, not as failed;
+- every id in a task skipped → `success:true`, zero tags deleted, reported as such rather than as
+  an unqualified success (see the Important-#1 fix in the Task Queue panel).
+
 ## Room Tree Sync (S8)
 
 `syncRooms` (in [sync.service.ts](src/main/services/sync.service.ts)) walks the **whole** Hazu room
@@ -663,6 +763,10 @@ gets no progress callback; the injected-IO seam already does that job.
 7. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
 9. Go to Discrepancies → try "Heal all missing-tags" on a `missing-tag` row, then "Revoke access" on an `unknown` row (confirm the modal lists every grant, then verify against group truth — reverts to an error if not confirmed)
+9b. On the same page, click "Check & prune missing rooms" (probes every unmatched class id live);
+   confirm the modal, which lists the tags/persons/rooms to delete and any skipped ids with their
+   reason; each confirmed person becomes one `pruneDeadTags` task, re-probed against Hazu before
+   deletion and verified against a fresh profile read after
 
 ## Future Development
 

@@ -34,6 +34,14 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         return `Tag: ${task.displayName || task.personId}`;
       case 'revokeOrphanAccess':
         return `Revoke: ${task.displayName || task.accountId} → ${task.roomName}`;
+      case 'pruneDeadTags': {
+        const who = task.displayName || task.personId;
+        if (task.status === 'success' && task.deletedCount !== undefined) {
+          const skippedSuffix = task.skippedCount ? ` — ${task.skippedCount} skipped` : '';
+          return `Pruned ${task.deletedCount} of ${task.tagCount} tag(s)${skippedSuffix}: ${who}`;
+        }
+        return `Prune ${task.tagCount} tag(s): ${who}`;
+      }
     }
   };
 

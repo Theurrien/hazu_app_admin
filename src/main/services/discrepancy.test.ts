@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseClassTag, computeDiscrepancies } from './discrepancy';
+import { parseClassTag, computeDiscrepancies, collectUnmatchedClassIds, DiscrepancyInput } from './discrepancy';
 
 describe('parseClassTag', () => {
   it('splits on the LAST hyphen and validates the role', () => {
@@ -97,5 +97,97 @@ describe('computeDiscrepancies', () => {
     });
     expect(res).toHaveLength(1);
     expect(res[0].groupId).toBe('grp0000000000000001');
+  });
+});
+
+describe('collectUnmatchedClassIds', () => {
+  const DEAD_A = 'Dead0000000000000001';
+  const DEAD_B = 'Dead0000000000000002';
+  const LIVE = 'Live0000000000000001';
+  const P1 = 'Person00000000000001';
+  const P2 = 'Person00000000000002';
+  const tag = (classId: string, role = 'student') => `hz-config-class-${classId}-${role}`;
+
+  const person = (id: string, tags: string[]) => ({
+    id,
+    displayName: `Test Person ${id}`,
+    email: `${id}@example.invalid`,
+    tags,
+  });
+
+  const input = (
+    persons: Array<{ id: string; displayName: string; email: string | null; tags: string[] }>,
+    rooms: Array<{ id: string; title: string; classId: string | null }> = [],
+  ): DiscrepancyInput => ({ rooms, persons, assignments: [], issues: [] });
+
+  it('collects a distinct id with its tag and person counts', () => {
+    const out = collectUnmatchedClassIds(
+      input([person(P1, [tag(DEAD_A)]), person(P2, [tag(DEAD_A, 'guardian')])]),
+    );
+    expect(out).toEqual([
+      {
+        classId: DEAD_A,
+        tagCount: 2,
+        personCount: 2,
+        holders: [
+          { personId: P1, tags: [tag(DEAD_A)] },
+          { personId: P2, tags: [tag(DEAD_A, 'guardian')] },
+        ],
+      },
+    ]);
+  });
+
+  it('excludes a class id that maps to a local room', () => {
+    const out = collectUnmatchedClassIds(
+      input([person(P1, [tag(LIVE), tag(DEAD_A)])], [
+        { id: LIVE, title: 'A Real Room', classId: LIVE },
+      ]),
+    );
+    expect(out.map((u) => u.classId)).toEqual([DEAD_A]);
+  });
+
+  it('excludes tags parseClassTag rejects, so they are never probed', () => {
+    const out = collectUnmatchedClassIds(
+      input([
+        person(P1, [
+          'hz-config-class--student',        // empty class id
+          `hz-config-class-${DEAD_A}`,       // no role
+          `hz-config-class-${DEAD_A}-pilot`, // unknown role
+          'hz-share-student-somethingelse',  // not a class tag at all
+        ]),
+      ]),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('counts a person holding several tags for one id once, with both tags', () => {
+    const out = collectUnmatchedClassIds(
+      input([person(P1, [tag(DEAD_A), tag(DEAD_A, 'guardian')])]),
+    );
+    expect(out[0].personCount).toBe(1);
+    expect(out[0].tagCount).toBe(2);
+    expect(out[0].holders).toEqual([
+      { personId: P1, tags: [tag(DEAD_A), tag(DEAD_A, 'guardian')] },
+    ]);
+  });
+
+  it('carries the raw tag strings through unchanged', () => {
+    const raw = tag(DEAD_A, 'companymentor');
+    const out = collectUnmatchedClassIds(input([person(P1, [raw])]));
+    expect(out[0].holders[0].tags[0]).toBe(raw);
+  });
+
+  it('orders the heaviest id first', () => {
+    const out = collectUnmatchedClassIds(
+      input([
+        person(P1, [tag(DEAD_B)]),
+        person(P2, [tag(DEAD_A), tag(DEAD_A, 'guardian')]),
+      ]),
+    );
+    expect(out.map((u) => u.classId)).toEqual([DEAD_A, DEAD_B]);
+  });
+
+  it('returns nothing when there are no persons', () => {
+    expect(collectUnmatchedClassIds(input([]))).toEqual([]);
   });
 });

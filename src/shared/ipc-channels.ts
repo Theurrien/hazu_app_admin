@@ -64,6 +64,10 @@ export const IPC_CHANNELS = {
   ORPHAN_ACCESS_PLAN: 'orphanAccess:plan',
   ORPHAN_ACCESS_REVOKE: 'orphanAccess:revoke',
 
+  // Dead-tag pruning (S7)
+  TAG_PRUNE_PLAN: 'tagPrune:plan',
+  TAG_PRUNE_EXECUTE: 'tagPrune:execute',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',

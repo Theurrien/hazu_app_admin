@@ -49,6 +49,8 @@ const IPC_CHANNELS = {
   TAG_HEAL: 'tagHeal:apply',
   ORPHAN_ACCESS_PLAN: 'orphanAccess:plan',
   ORPHAN_ACCESS_REVOKE: 'orphanAccess:revoke',
+  TAG_PRUNE_PLAN: 'tagPrune:plan',
+  TAG_PRUNE_EXECUTE: 'tagPrune:execute',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -157,6 +159,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.ORPHAN_ACCESS_PLAN, accountId, groupId, roomId),
   revokeOrphanAccess: (accountId: string, groupId: string, roomId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ORPHAN_ACCESS_REVOKE, accountId, groupId, roomId),
+
+  // Dead-tag pruning (S7)
+  planTagPrune: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.TAG_PRUNE_PLAN),
+  pruneDeadTags: (personId: string, items: Array<{ classId: string; tags: string[] }>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TAG_PRUNE_EXECUTE, personId, items),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -303,6 +311,36 @@ declare global {
         aclRole?: string;
       }>>;
       revokeOrphanAccess: (accountId: string, groupId: string, roomId: string) => Promise<{ success: boolean; error?: string }>;
+      planTagPrune: () => Promise<{
+        deletions: Array<{ personId: string; items: Array<{ classId: string; tags: string[] }> }>;
+        skipped: Array<{
+          classId: string;
+          verdict: 'alive' | 'unreadable';
+          reason: string;
+          title: string | null;
+          parentId: string | null;
+          tagCount: number;
+        }>;
+        tagCount: number;
+        personCount: number;
+        roomCount: number;
+      }>;
+      pruneDeadTags: (
+        personId: string,
+        items: Array<{ classId: string; tags: string[] }>,
+      ) => Promise<{
+        success: boolean;
+        error?: string;
+        deletedTags: string[];
+        skippedClassIds: Array<{
+          classId: string;
+          verdict: 'alive' | 'unreadable';
+          reason: string;
+          title: string | null;
+          parentId: string | null;
+          tagCount: number;
+        }>;
+      }>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;
