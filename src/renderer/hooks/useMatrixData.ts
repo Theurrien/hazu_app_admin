@@ -45,17 +45,26 @@ function createAssignmentKey(personId: string, roomId: string): string {
   return `${personId}-${roomId}`;
 }
 
-export function useMatrixData() {
+export interface UseMatrixDataOptions {
+  /** When given, the person-type filter is fixed to these and the toggle is inert. */
+  lockPersonTypes?: PersonType[];
+  /** When given, the room-type filter is fixed to these and the toggle is inert. */
+  lockRoomTypes?: RoomType[];
+}
+
+export function useMatrixData(options: UseMatrixDataOptions = {}) {
+  const { lockPersonTypes, lockRoomTypes } = options;
   const [allPersons, setAllPersons] = useState<Person[]>([]);
   const [allRooms, setAllRooms] = useState<Room[]>([]);
   const [allAssignments, setAllAssignments] = useState<MatrixAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state - empty sets mean "show all"
+  // Filter state - empty sets mean "show all". A lock seeds the set instead, which
+  // reuses the existing filtering path rather than adding a second one.
   const [filters, setFilters] = useState<MatrixFilters>({
-    personTypes: new Set<PersonType>(),
-    roomTypes: new Set<RoomType>(),
+    personTypes: new Set<PersonType>(lockPersonTypes ?? []),
+    roomTypes: new Set<RoomType>(lockRoomTypes ?? []),
     personSearch: '',
     roomSearch: '',
   });
@@ -243,6 +252,7 @@ export function useMatrixData() {
 
   // Filter update functions
   const togglePersonType = useCallback((type: PersonType) => {
+    if (lockPersonTypes) return;
     setFilters(prev => {
       const newTypes = new Set(prev.personTypes);
       if (newTypes.has(type)) {
@@ -252,9 +262,10 @@ export function useMatrixData() {
       }
       return { ...prev, personTypes: newTypes };
     });
-  }, []);
+  }, [lockPersonTypes]);
 
   const toggleRoomType = useCallback((type: RoomType) => {
+    if (lockRoomTypes) return;
     setFilters(prev => {
       const newTypes = new Set(prev.roomTypes);
       if (newTypes.has(type)) {
@@ -264,7 +275,7 @@ export function useMatrixData() {
       }
       return { ...prev, roomTypes: newTypes };
     });
-  }, []);
+  }, [lockRoomTypes]);
 
   const setPersonSearch = useCallback((search: string) => {
     setFilters(prev => ({ ...prev, personSearch: search }));
@@ -295,7 +306,7 @@ export function useMatrixData() {
     setRoomSearch,
 
     // Constants for UI
-    allPersonTypes: ALL_PERSON_TYPES,
-    allRoomTypes: ALL_ROOM_TYPES,
+    allPersonTypes: lockPersonTypes ?? ALL_PERSON_TYPES,
+    allRoomTypes: lockRoomTypes ?? ALL_ROOM_TYPES,
   };
 }

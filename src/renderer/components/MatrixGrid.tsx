@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import type { Person, Room } from '../../shared/types';
+import type { Person, Room, PersonType } from '../../shared/types';
 
 // Layout constants
 const ROW_HEIGHT = 36;
@@ -44,9 +44,15 @@ interface MatrixGridProps {
   onDeleteRoom?: (roomId: string, roomTitle: string) => void;
   onDeletePerson?: (personId: string, personName: string) => void;
   onRenameRoom?: (roomId: string, currentTitle: string) => void;
+  /** When given, the cell dropdown offers only "-" plus these roles. */
+  allowedRoles?: PersonType[];
 }
 
-export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDeleteRoom, onDeletePerson, onRenameRoom }: MatrixGridProps) {
+export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDeleteRoom, onDeletePerson, onRenameRoom, allowedRoles }: MatrixGridProps) {
+  // "_" is the "unassigned" sentinel and is always offered — it is how a role is removed.
+  const visibleRoleOptions = allowedRoles
+    ? roleOptions.filter(option => option.value === '_' || allowedRoles.includes(option.value as PersonType))
+    : roleOptions;
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -299,7 +305,7 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDele
                       className="w-full h-full px-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                       style={{ appearance: 'none' }}
                     >
-                      {roleOptions.map(option => (
+                      {visibleRoleOptions.map(option => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>

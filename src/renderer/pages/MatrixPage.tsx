@@ -5,8 +5,13 @@ import { MatrixGrid } from '../components/MatrixGrid';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
 import { RenameRoomModal } from '../components/RenameRoomModal';
+import { useAppMode } from '../contexts/AppModeContext';
+import { allowedPersonTypes, allowedRoomTypes, isRestricted } from '../../shared/app-mode';
 
 function MatrixPage() {
+  const { mode } = useAppMode();
+  const restricted = isRestricted(mode);
+
   const {
     persons,
     rooms,
@@ -21,7 +26,11 @@ function MatrixPage() {
     setRoomSearch,
     allPersonTypes,
     allRoomTypes,
-  } = useMatrixData();
+  } = useMatrixData(
+    restricted
+      ? { lockPersonTypes: allowedPersonTypes(mode), lockRoomTypes: allowedRoomTypes(mode) }
+      : {}
+  );
 
   const { addRoleUpdateTask } = useTaskQueue();
 
@@ -180,15 +189,17 @@ function MatrixPage() {
         onRoomSearchChange={setRoomSearch}
         allPersonTypes={allPersonTypes}
         allRoomTypes={allRoomTypes}
+        showTypeFilters={!restricted}
       />
       <MatrixGrid
         persons={persons}
         rooms={rooms}
         getAssignment={getAssignment}
         onRoleChange={handleRoleChange}
-        onDeleteRoom={handleDeleteRoom}
-        onDeletePerson={handleDeletePerson}
-        onRenameRoom={handleRenameRoom}
+        allowedRoles={restricted ? allowedPersonTypes(mode) : undefined}
+        onDeleteRoom={restricted ? undefined : handleDeleteRoom}
+        onDeletePerson={restricted ? undefined : handleDeletePerson}
+        onRenameRoom={restricted ? undefined : handleRenameRoom}
       />
 
       {/* Delete Room Modal */}

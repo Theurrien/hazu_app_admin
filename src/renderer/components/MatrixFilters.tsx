@@ -49,6 +49,8 @@ interface MatrixFiltersProps {
   onRoomSearchChange: (search: string) => void;
   allPersonTypes: PersonType[];
   allRoomTypes: RoomType[];
+  /** False hides the type chips and keeps both search boxes. */
+  showTypeFilters?: boolean;
 }
 
 export function MatrixFilters({
@@ -62,22 +64,25 @@ export function MatrixFilters({
   onRoomSearchChange,
   allPersonTypes,
   allRoomTypes,
+  showTypeFilters = true,
 }: MatrixFiltersProps) {
   return (
     <div className="flex gap-6 p-4 bg-white border-b border-gray-200">
       {/* Person Filters (Left side) */}
       <div className="flex flex-col gap-2">
         <div className="text-xs font-medium text-gray-500 uppercase">Persons</div>
-        <div className="flex flex-wrap gap-1.5">
-          {allPersonTypes.map((type) => (
-            <FilterChip
-              key={type}
-              label={personTypeLabels[type]}
-              active={personTypes.has(type)}
-              onClick={() => onTogglePersonType(type)}
-            />
-          ))}
-        </div>
+        {showTypeFilters && (
+          <div className="flex flex-wrap gap-1.5">
+            {allPersonTypes.map((type) => (
+              <FilterChip
+                key={type}
+                label={personTypeLabels[type]}
+                active={personTypes.has(type)}
+                onClick={() => onTogglePersonType(type)}
+              />
+            ))}
+          </div>
+        )}
         <input
           type="text"
           placeholder="Search persons..."
@@ -93,16 +98,18 @@ export function MatrixFilters({
       {/* Room Filters (Right side) */}
       <div className="flex flex-col gap-2">
         <div className="text-xs font-medium text-gray-500 uppercase">Rooms</div>
-        <div className="flex flex-wrap gap-1.5">
-          {allRoomTypes.map((type) => (
-            <FilterChip
-              key={type}
-              label={roomTypeLabels[type]}
-              active={roomTypes.has(type)}
-              onClick={() => onToggleRoomType(type)}
-            />
-          ))}
-        </div>
+        {showTypeFilters && (
+          <div className="flex flex-wrap gap-1.5">
+            {allRoomTypes.map((type) => (
+              <FilterChip
+                key={type}
+                label={roomTypeLabels[type]}
+                active={roomTypes.has(type)}
+                onClick={() => onToggleRoomType(type)}
+              />
+            ))}
+          </div>
+        )}
         <input
           type="text"
           placeholder="Search rooms..."
