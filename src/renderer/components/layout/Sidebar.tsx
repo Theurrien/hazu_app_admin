@@ -11,16 +11,16 @@ import {
   faCog,
   IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
-
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'discrepancies' | 'settings';
+import { useAppMode } from '../../contexts/AppModeContext';
+import { visiblePages, type PageId } from '../../../shared/app-mode';
 
 interface SidebarProps {
-  currentPage: Page;
-  onNavigate: (page: Page) => void;
+  currentPage: PageId;
+  onNavigate: (page: PageId) => void;
 }
 
 interface NavItem {
-  id: Page;
+  id: PageId;
   label: string;
   icon: IconDefinition;
 }
@@ -38,6 +38,10 @@ const navItems: NavItem[] = [
 ];
 
 function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+  const { mode } = useAppMode();
+  const allowed = visiblePages(mode);
+  const items = navItems.filter((item) => allowed.includes(item.id));
+
   return (
     <aside
       className="w-64 flex flex-col"
@@ -79,7 +83,7 @@ function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 py-4 px-3">
         <ul className="space-y-0.5">
-          {navItems.map((item) => {
+          {items.map((item) => {
             const isActive = currentPage === item.id;
             return (
               <li key={item.id}>
