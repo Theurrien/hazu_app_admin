@@ -86,21 +86,31 @@ existing `TaskQueueContext`.
 **Lockout guard:** if `admin_password` is unset in settings, the lock toggles freely. Without this,
 a fresh install defaults to `cie` with no way out.
 
-**Page guard:** switching to `cie` while on a now-hidden page redirects to Matrix. `App.tsx` holds
-`currentPage` in plain state with no route guard today, so this must be added explicitly.
+**Page guard:** switching to `cie` while on a now-hidden page redirects to the Dashboard, which is
+visible in both modes. `App.tsx` holds `currentPage` in plain state with no route guard today, so
+this must be added explicitly.
 
-### Header — lock and sync
+### Header — the lock
 
-Both sit beside the existing "Connected" pill in
-[Header.tsx](../../src/renderer/components/layout/Header.tsx), which is visible on every page.
+The lock sits beside the existing "Connected" pill in
+[Header.tsx](../../src/renderer/components/layout/Header.tsx), which is visible on every page. It
+is a subtle `faLock` / `faLockOpen`. Locked, a click prompts for the admin password. Unlocked, a
+click re-locks immediately with no prompt. The mode persists across restarts.
 
-The lock is a subtle `faLock` / `faLockOpen`. Locked, a click prompts for the admin password.
-Unlocked, a click re-locks immediately with no prompt. The mode persists across restarts.
+Nothing else is added to the header.
 
-The Sync button reuses the existing `runSync` IPC and progress polling. **It is required, not a
-convenience:** Matrix and Bulk Import both render entirely from local SQLite, and the Dashboard —
-the only sync trigger today — is hidden in CIE mode. Without it his data starts empty and never
-refreshes as students are added centrally.
+### The Dashboard stays visible
+
+CIE mode shows three nav items: Dashboard, Matrix, Bulk Import.
+
+Keeping the Dashboard is a deliberate choice against a smaller nav. Matrix and Bulk Import render
+entirely from local SQLite, and the Dashboard's Sync button is the only trigger in the app — hide
+it and his data starts empty and never picks up centrally-added students. The alternative was a
+Sync button in the header, but that means **adding** a control to compensate for a restriction,
+which is the wrong shape for this work: every other change here is subtraction.
+
+The page is safe to expose. It reads the API config, reads sync status, and runs sync
+([Dashboard.tsx](../../src/renderer/pages/Dashboard.tsx)) — one button, nothing destructive.
 
 ### Matrix in CIE mode
 
@@ -131,8 +141,13 @@ to CIE rooms.
 ### Out of scope
 
 Missions, Discrepancies, the Persons and Rooms browse pages, Person creation, the Verify tab, and
-every delete and rename path. Settings is hidden in CIE mode — his API key is configured before
-the machine is handed over.
+every delete and rename path. Settings is hidden — his API key is configured before the machine is
+handed over.
+
+**No workflow gains a capability.** Every change to Matrix and Bulk Import is subtraction: fewer
+tabs, frozen filters, shorter dropdowns, hidden hover actions. The write paths, the Task Queue, the
+IPC layer, and the main process are untouched. The only genuinely new code is the mode mechanism
+itself — the setting, the context, the lock, and the page guard.
 
 ## Testing
 
@@ -140,9 +155,9 @@ the machine is handed over.
 types, and `complete` is a superset of `cie`.
 
 The rest is renderer wiring, whose gate is the typecheck, the unchanged suite, and a manual
-acceptance run: lock the app, confirm two nav items, create a CIE course and confirm it lands in the CIE
-category, assign a student through the Matrix and through a spreadsheet, then unlock with the password and
-confirm the full surface returns.
+acceptance run: lock the app, confirm three nav items, sync from the Dashboard, create a CIE course
+and confirm it lands in the CIE category, assign a student through the Matrix and through a
+spreadsheet, then unlock with the password and confirm the full surface returns.
 
 ## Risks
 
