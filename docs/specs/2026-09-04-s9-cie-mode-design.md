@@ -33,22 +33,35 @@ Two consequences worth writing down:
   gets courses with no students.
 - His install mirrors the whole platform locally, every canton included. That is what sync does.
 
-## Where new CIE courses must land
+## Where new CIE courses land — and why flat is correct
 
 Both room-creation paths resolve the destination as
 `room_type === type && parent_id === rootHazuId`
 ([CreateRoomModal.tsx](../../src/renderer/components/CreateRoomModal.tsx),
 [BulkImportPage.tsx](../../src/renderer/pages/BulkImportPage.tsx)) — that is, directly under the
-top-level category folder.
+top-level category folder, the "Cours interentreprises" Hazu.
 
-That is the wrong place for CIE. Measured against the live tree on 2026-09-04, the 65 `cie`-typed
-rows are: the "Cours interentreprises" category itself, 54 rooms inside two **year sub-folders**
-under it (34 and 20), and 10 rooms sitting flat in the category. Seven of those ten are this
-year's — the current code has already put 2026 in a different place from 2024 and 2025.
+**That is the right place, and CIE mode keeps it.** New courses always land flat in the CIE
+category. Filing them into a year folder is deliberate housekeeping done at the end of the school
+year, not something the creation path should anticipate.
 
-The year folders are exactly the containers S8 walks through but never persists: only categories
-and rooms are written to `rooms`, so **the destination picker cannot be built from local SQLite.**
-It must list the category's children live through the API.
+So this design adds **no destination picker**. Room Creation in CIE mode locks the room type to
+`cie` and otherwise uses the existing `findTargetId` unchanged.
+
+### Do not "fix" the flat drop
+
+The live tree invites a wrong conclusion, so it is worth recording what it means. Measured on
+2026-09-04, the 65 `cie`-typed rows are: the category itself, 54 rooms inside two **year
+sub-folders** under it (34 and 20), and 10 rooms sitting flat in the category. A reader who finds
+this year's courses flat while 2024's and 2025's sit tidily in folders will read it as a bug in
+`findTargetId` and be tempted to route creation into a year folder.
+
+It is not a bug. It is the year in progress. The year folders are filled at the end of the year,
+by hand, and a creation path that wrote into them would be writing into the archive.
+
+(For anyone who does later build tooling for that housekeeping: the year folders are the containers
+S8 walks through but never persists — only categories and rooms are written to `rooms` — so they
+cannot be enumerated from local SQLite and must be listed live through the API.)
 
 ## Design
 
@@ -109,20 +122,11 @@ Writes are unchanged: the same Task Queue and the same S4 verify-against-truth p
 
 Two of the four workflow tabs: **Room Creation** and **Assignment**.
 
-Room Creation locks the room type to `cie` and gains a **destination picker**. This needs a new
-IPC channel modelled on `TEMPLATES_FETCH`: derive the CIE category from `root_hazu_id` exactly as
-`findTargetId` does, list its children live, and return the containers — that is, the children that
-are not themselves class-tagged rooms.
-
-The picker offers those containers **and the category itself**, since ten existing rooms sit
-directly in the category and that must stay expressible. It defaults to the container whose title
-sorts highest, which puts the most recent year first under the observed `YYYY …` naming; if the
-list is empty it defaults to the category.
+Room Creation locks the room type to `cie`. Nothing else about it changes — no destination picker,
+no new IPC channel; `findTargetId` already resolves the CIE category, which is where courses belong.
 
 Assignment restricts the role selector to student and course teacher, and restricts room matching
 to CIE rooms.
-
-Creating a new year folder is out of scope. He works in an existing one; you add 2027 yourself.
 
 ### Out of scope
 
@@ -136,8 +140,8 @@ the machine is handed over.
 types, and `complete` is a superset of `cie`.
 
 The rest is renderer wiring, whose gate is the typecheck, the unchanged suite, and a manual
-acceptance run: lock the app, confirm two nav items, create a CIE course into a chosen year folder,
-assign a student through the Matrix and through a spreadsheet, then unlock with the password and
+acceptance run: lock the app, confirm two nav items, create a CIE course and confirm it lands in the CIE
+category, assign a student through the Matrix and through a spreadsheet, then unlock with the password and
 confirm the full surface returns.
 
 ## Risks
@@ -146,6 +150,5 @@ confirm the full surface returns.
 - **`roleOptions` and `navItems` are module-level constants with no exhaustiveness check.** A role
   or page added later will not automatically be considered for either mode. `app-mode.ts` centralises
   the decision so there is one place to look.
-- **The destination picker depends on a live API call.** If it fails, room creation must block with
-  a clear error rather than silently falling back to the flat category drop — that fallback is the
-  bug this design exists to fix.
+- **A future maintainer may mistake the flat drop for a bug** and route creation into a year
+  folder, writing new courses into the archive. The section above exists to prevent that.
