@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { useTaskQueue, Task } from '../contexts/TaskQueueContext';
+import { useAppMode } from '../contexts/AppModeContext';
+import { allowedTaskTypes } from '../../shared/app-mode';
 
 interface TaskItemProps {
   task: Task;
@@ -102,16 +104,34 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
 });
 
 export function TaskQueuePanel() {
-  const { tasks, dismissTask, retryTask, dismissAllCompleted, dismissAllErrors } = useTaskQueue();
+  const { tasks, dismissTask, retryTask } = useTaskQueue();
+  const { mode } = useAppMode();
 
-  if (tasks.length === 0) return null;
+  // CIE mode can itself only produce roleUpdate/createRoom tasks. A task of any
+  // other type — most importantly an errored revokeOrphanAccess or pruneDeadTags
+  // left behind by an admin — must not stay retryable once the app locks. This
+  // filters what the panel *renders*; it never dismisses, cancels, or mutates a
+  // hidden task, so unlocking again shows it exactly as it was left.
+  const visibleTasks = useMemo(() => {
+    const allowed = new Set(allowedTaskTypes(mode));
+    return tasks.filter((t) => allowed.has(t.type));
+  }, [tasks, mode]);
+
+  if (visibleTasks.length === 0) return null;
 
   const { processing, queued, success, errors } = useMemo(() => ({
-    processing: tasks.filter((t) => t.status === 'processing'),
-    queued: tasks.filter((t) => t.status === 'queued'),
-    success: tasks.filter((t) => t.status === 'success'),
-    errors: tasks.filter((t) => t.status === 'error'),
-  }), [tasks]);
+    processing: visibleTasks.filter((t) => t.status === 'processing'),
+    queued: visibleTasks.filter((t) => t.status === 'queued'),
+    success: visibleTasks.filter((t) => t.status === 'success'),
+    errors: visibleTasks.filter((t) => t.status === 'error'),
+  }), [visibleTasks]);
+
+  // Bulk-dismiss only the tasks currently rendered — a blanket dismissAllCompleted/
+  // dismissAllErrors would also drop hidden tasks of a type CIE mode can't render,
+  // which is the "delete" this fix must not do. In complete mode `visibleTasks`
+  // equals `tasks`, so this dismisses exactly what the old bulk actions did.
+  const clearDone = () => success.forEach((t) => dismissTask(t.id));
+  const clearErrors = () => errors.forEach((t) => dismissTask(t.id));
 
   const handleOpen = async (entityId: string) => {
     const config = await window.electronAPI.getApiConfig();
@@ -124,11 +144,11 @@ export function TaskQueuePanel() {
   return (
     <div className="fixed top-4 right-4 w-80 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-50">
       <div className="bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 border-b flex items-center justify-between">
-        <span>Task Queue ({tasks.length})</span>
+        <span>Task Queue ({visibleTasks.length})</span>
         <div className="flex gap-2">
           {success.length > 0 && (
             <button
-              onClick={dismissAllCompleted}
+              onClick={clearDone}
               className="text-xs text-gray-500 hover:text-gray-700"
               title="Clear completed"
             >
@@ -137,7 +157,7 @@ export function TaskQueuePanel() {
           )}
           {errors.length > 0 && (
             <button
-              onClick={dismissAllErrors}
+              onClick={clearErrors}
               className="text-xs text-red-500 hover:text-red-700"
               title="Clear errors"
             >

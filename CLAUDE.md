@@ -797,6 +797,16 @@ from different branches of the same root (`syncRooms` vs. `syncPersonsFromContai
 [sync.service.ts](src/main/services/sync.service.ts)), so a CIE-only root yields courses with no
 students.
 
+### The lock's gate ships with a default value — change it before handing off a machine
+
+`admin_password` is seeded with a default value present in this repository (in
+[schema.sql](src/main/database/schema.sql) and a migration in
+[index.ts](src/main/database/index.ts)) and there is no UI to change it. Until someone changes it
+in the local SQLite `settings` table, "unlocking asks for the admin password" is checking against
+a value anyone with this repo can read — not a real check. This is separate from the
+guardrail-not-a-boundary point above: even taken as a guardrail against mis-clicks, it does not
+work until the default is replaced on the machine being handed off.
+
 ### Every mode decision lives in one pure module
 
 [app-mode.ts](src/shared/app-mode.ts) — no IO, no React, tested in

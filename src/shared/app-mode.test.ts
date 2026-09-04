@@ -10,6 +10,7 @@ import {
   isWorkflowVisible,
   allowedPersonTypes,
   allowedRoomTypes,
+  allowedTaskTypes,
   isRestricted,
 } from './app-mode';
 
@@ -157,6 +158,30 @@ describe('allowedRoomTypes', () => {
   });
 });
 
+describe('allowedTaskTypes', () => {
+  it('is roleUpdate and createRoom in cie mode', () => {
+    expect(allowedTaskTypes('cie')).toEqual(['roleUpdate', 'createRoom']);
+  });
+
+  it('excludes the task types cie mode cannot produce', () => {
+    const types = allowedTaskTypes('cie');
+    for (const excluded of ['createPerson', 'healTag', 'revokeOrphanAccess', 'pruneDeadTags'] as const) {
+      expect(types).not.toContain(excluded);
+    }
+  });
+
+  it('is all six in complete mode', () => {
+    expect(allowedTaskTypes('complete')).toHaveLength(6);
+  });
+
+  it('makes complete a superset of cie', () => {
+    const complete = allowedTaskTypes('complete');
+    for (const type of allowedTaskTypes('cie')) {
+      expect(complete).toContain(type);
+    }
+  });
+});
+
 describe('isRestricted', () => {
   it('is true only in cie mode', () => {
     expect(isRestricted('cie')).toBe(true);
@@ -171,5 +196,8 @@ describe('returned arrays are safe to hand to callers', () => {
 
     allowedRoomTypes('cie').push('class');
     expect(allowedRoomTypes('cie')).toEqual(['cie']);
+
+    allowedTaskTypes('cie').push('healTag');
+    expect(allowedTaskTypes('cie')).toEqual(['roleUpdate', 'createRoom']);
   });
 });

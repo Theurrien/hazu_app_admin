@@ -38,8 +38,12 @@ const navItems: NavItem[] = [
 ];
 
 function Sidebar({ currentPage, onNavigate }: SidebarProps) {
-  const { mode } = useAppMode();
-  const allowed = visiblePages(mode);
+  const { mode, ready } = useAppMode();
+  // The stored mode is read over async IPC and defaults to 'cie' until it lands.
+  // Rendering nav items before `ready` would flash the reduced CIE sidebar on
+  // every launch for an admin in full mode. An empty list keeps the frame (logo,
+  // header, footer) in place rather than a jarring blank aside.
+  const allowed = ready ? visiblePages(mode) : [];
   const items = navItems.filter((item) => allowed.includes(item.id));
 
   return (

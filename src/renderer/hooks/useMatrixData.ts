@@ -69,6 +69,24 @@ export function useMatrixData(options: UseMatrixDataOptions = {}) {
     roomSearch: '',
   });
 
+  // Re-seed the type filters when the *contents* of the locks change (e.g. a mode
+  // flip while the Matrix stays mounted). `MatrixPage` passes a fresh array (and a
+  // fresh options object) on every render, so depending on `lockPersonTypes` /
+  // `lockRoomTypes` directly would re-seed — and wipe the search boxes — on every
+  // keystroke. Depending on a joined-string derived from their contents instead
+  // only fires when the actual set of allowed types changes. `personSearch` /
+  // `roomSearch` are preserved via the functional update.
+  const lockPersonTypesKey = (lockPersonTypes ?? []).join(',');
+  const lockRoomTypesKey = (lockRoomTypes ?? []).join(',');
+  useEffect(() => {
+    setFilters(prev => ({
+      ...prev,
+      personTypes: new Set<PersonType>(lockPersonTypesKey ? (lockPersonTypesKey.split(',') as PersonType[]) : []),
+      roomTypes: new Set<RoomType>(lockRoomTypesKey ? (lockRoomTypesKey.split(',') as RoomType[]) : []),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockPersonTypesKey, lockRoomTypesKey]);
+
   // Load all data
   const loadData = useCallback(async () => {
     setLoading(true);

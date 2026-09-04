@@ -66,6 +66,34 @@ const CIE_PERSON_TYPES: readonly PersonType[] = ['student', 'courseteacher'];
 const ALL_ROOM_TYPES: readonly RoomType[] = ['class', 'enterprise', 'state', 'cie'];
 const CIE_ROOM_TYPES: readonly RoomType[] = ['cie'];
 
+// Mirrors TaskQueueContext.tsx's `TaskType` union. Declared locally rather than
+// imported so this module stays free of runtime imports — importing a type-only
+// export would be fine, but the six string literals are also the module's only
+// use for it, so spelling them out here keeps the dependency at zero.
+export type TaskType =
+  | 'roleUpdate'
+  | 'createRoom'
+  | 'createPerson'
+  | 'healTag'
+  | 'revokeOrphanAccess'
+  | 'pruneDeadTags';
+
+const ALL_TASK_TYPES: readonly TaskType[] = [
+  'roleUpdate',
+  'createRoom',
+  'createPerson',
+  'healTag',
+  'revokeOrphanAccess',
+  'pruneDeadTags',
+];
+// The two task types CIE mode can itself produce: Matrix cell edits (roleUpdate)
+// and Bulk Import Room Creation (createRoom). Everything else — createPerson and
+// the Discrepancies-only writes healTag/revokeOrphanAccess/pruneDeadTags (the
+// latter two destructive) — comes only from pages CIE mode does not show, but a
+// task an admin left errored in the panel before locking must stay hidden, not
+// deleted.
+const CIE_TASK_TYPES: readonly TaskType[] = ['roleUpdate', 'createRoom'];
+
 /**
  * Anything that is not exactly "complete" is CIE mode, so a missing, empty, or
  * corrupted setting fails closed rather than opening the full surface.
@@ -105,4 +133,8 @@ export function allowedPersonTypes(mode: AppMode): PersonType[] {
 
 export function allowedRoomTypes(mode: AppMode): RoomType[] {
   return [...(mode === 'complete' ? ALL_ROOM_TYPES : CIE_ROOM_TYPES)];
+}
+
+export function allowedTaskTypes(mode: AppMode): TaskType[] {
+  return [...(mode === 'complete' ? ALL_TASK_TYPES : CIE_TASK_TYPES)];
 }

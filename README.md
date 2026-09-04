@@ -131,6 +131,11 @@ The app starts in CIE mode. Leaving it asks for the admin password. This is a gu
 mis-clicks for a colleague who runs CIE courses — it is not an access boundary, since the API key
 that the app authenticates with carries full platform rights regardless of which pages are shown.
 
+The `admin_password` setting ships with a default value that is present in this repository, and
+there is no UI to change it. Change it in the local SQLite `settings` table before handing a
+machine to anyone — until you do, the "admin password" prompt is not checking against anything
+private.
+
 ### Mission Analysis
 
 1. Run a full sync first (**Dashboard → Sync Now**) so person data is fully populated
