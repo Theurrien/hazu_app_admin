@@ -10,12 +10,15 @@ interface AssignmentRoleSelectorProps {
   selectedRole: string | null;
   onRoleChange: (role: string) => void;
   disabled?: boolean;
+  /** When given, only user types whose `name` is in this list are offered. */
+  allowedRoles?: string[];
 }
 
 export function AssignmentRoleSelector({
   selectedRole,
   onRoleChange,
   disabled = false,
+  allowedRoles,
 }: AssignmentRoleSelectorProps) {
   const [userTypes, setUserTypes] = useState<UserType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,6 +39,10 @@ export function AssignmentRoleSelector({
     loadUserTypes();
   }, []);
 
+  const visibleUserTypes = allowedRoles
+    ? userTypes.filter(type => allowedRoles.includes(type.name))
+    : userTypes;
+
   if (isLoading) {
     return (
       <div className="animate-pulse">
@@ -49,7 +56,7 @@ export function AssignmentRoleSelector({
     );
   }
 
-  if (userTypes.length === 0) {
+  if (visibleUserTypes.length === 0) {
     return (
       <div className="text-sm text-gray-500">
         No roles available. Please run sync first.
@@ -63,7 +70,7 @@ export function AssignmentRoleSelector({
         Role <span className="text-red-500">*</span>
       </label>
       <div className="grid grid-cols-3 gap-2">
-        {userTypes.map((type) => (
+        {visibleUserTypes.map((type) => (
           <label
             key={type.id}
             className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
