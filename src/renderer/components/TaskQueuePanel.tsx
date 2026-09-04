@@ -117,14 +117,14 @@ export function TaskQueuePanel() {
     return tasks.filter((t) => allowed.has(t.type));
   }, [tasks, mode]);
 
-  if (visibleTasks.length === 0) return null;
-
   const { processing, queued, success, errors } = useMemo(() => ({
     processing: visibleTasks.filter((t) => t.status === 'processing'),
     queued: visibleTasks.filter((t) => t.status === 'queued'),
     success: visibleTasks.filter((t) => t.status === 'success'),
     errors: visibleTasks.filter((t) => t.status === 'error'),
   }), [visibleTasks]);
+
+  if (visibleTasks.length === 0) return null;
 
   // Bulk-dismiss only the tasks currently rendered — a blanket dismissAllCompleted/
   // dismissAllErrors would also drop hidden tasks of a type CIE mode can't render,

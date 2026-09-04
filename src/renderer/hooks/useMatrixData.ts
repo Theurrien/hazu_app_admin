@@ -75,14 +75,17 @@ export function useMatrixData(options: UseMatrixDataOptions = {}) {
   // `lockRoomTypes` directly would re-seed — and wipe the search boxes — on every
   // keystroke. Depending on a joined-string derived from their contents instead
   // only fires when the actual set of allowed types changes. `personSearch` /
-  // `roomSearch` are preserved via the functional update.
+  // `roomSearch` are preserved via the functional update. The joined strings stand
+  // in for the array contents in the dependency array precisely because the arrays
+  // are fresh identities on every render; the effect body reads the arrays directly
+  // from scope.
   const lockPersonTypesKey = (lockPersonTypes ?? []).join(',');
   const lockRoomTypesKey = (lockRoomTypes ?? []).join(',');
   useEffect(() => {
     setFilters(prev => ({
       ...prev,
-      personTypes: new Set<PersonType>(lockPersonTypesKey ? (lockPersonTypesKey.split(',') as PersonType[]) : []),
-      roomTypes: new Set<RoomType>(lockRoomTypesKey ? (lockRoomTypesKey.split(',') as RoomType[]) : []),
+      personTypes: new Set<PersonType>(lockPersonTypes ?? []),
+      roomTypes: new Set<RoomType>(lockRoomTypes ?? []),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockPersonTypesKey, lockRoomTypesKey]);
