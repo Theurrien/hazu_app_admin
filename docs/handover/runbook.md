@@ -12,8 +12,25 @@ The installer contains no key. The same file works for everyone.
 
 Deactivate that person's key in Hazu. Their next sync fails and offers **Check connection**.
 
-Note what this does and does not do: it closes the window, it does not narrow it. A Hazu
-key carries full platform rights for as long as it is active.
+Their local copy of the data goes with it, because `clearOldData()` in
+[sync.service.ts](../../src/main/services/sync.service.ts) empties `persons`, `rooms`,
+`person_room_assignments`, `distribution_groups`, `user_types` and `membership_issues`
+**before** the first API call. So a sync on a dead key wipes the local cache and then fails,
+leaving the app blank rather than read-only. Nothing is lost in Hazu; one successful sync
+restores all of it.
+
+This is intended, and useful for an app holding data about minors — but be precise about what
+it is:
+
+- **It is not revocation-triggered deletion.** The wipe happens only if that person presses
+  Sync. Someone whose key is revoked and who never syncs keeps the full local copy
+  indefinitely, and the SQLite file is on their machine regardless. Like CIE mode, it depends
+  on cooperation; it is not a boundary.
+- **The same path fires on any failed sync.** A dropped connection mid-sync clears the cache
+  too, and that part is pure collateral — the user resyncs when the network is back.
+
+And what revocation itself does and does not do: it closes the window, it does not narrow it.
+A Hazu key carries full platform rights for as long as it is active.
 
 ## Ship a new version
 
