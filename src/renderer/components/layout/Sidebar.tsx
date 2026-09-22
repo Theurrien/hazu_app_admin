@@ -11,16 +11,16 @@ import {
   faCog,
   IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
-
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'discrepancies' | 'settings';
+import { useAppMode } from '../../contexts/AppModeContext';
+import { visiblePages, type PageId } from '../../../shared/app-mode';
 
 interface SidebarProps {
-  currentPage: Page;
-  onNavigate: (page: Page) => void;
+  currentPage: PageId;
+  onNavigate: (page: PageId) => void;
 }
 
 interface NavItem {
-  id: Page;
+  id: PageId;
   label: string;
   icon: IconDefinition;
 }
@@ -38,6 +38,14 @@ const navItems: NavItem[] = [
 ];
 
 function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+  const { mode, ready } = useAppMode();
+  // The stored mode is read over async IPC and defaults to 'cie' until it lands.
+  // Rendering nav items before `ready` would flash the reduced CIE sidebar on
+  // every launch for an admin in full mode. An empty list keeps the frame (logo,
+  // header, footer) in place rather than a jarring blank aside.
+  const allowed = ready ? visiblePages(mode) : [];
+  const items = navItems.filter((item) => allowed.includes(item.id));
+
   return (
     <aside
       className="w-64 flex flex-col"
@@ -79,7 +87,7 @@ function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 py-4 px-3">
         <ul className="space-y-0.5">
-          {navItems.map((item) => {
+          {items.map((item) => {
             const isActive = currentPage === item.id;
             return (
               <li key={item.id}>

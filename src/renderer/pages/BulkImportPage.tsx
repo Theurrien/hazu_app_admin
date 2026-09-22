@@ -15,6 +15,15 @@ import { AssignmentRoleSelector } from '../components/bulk-import/AssignmentRole
 import { PersonMatchingPanel } from '../components/bulk-import/PersonMatchingPanel';
 import { RoomMatchingPanel } from '../components/bulk-import/RoomMatchingPanel';
 import { AssignmentPreviewPanel, PreviewAssignment } from '../components/bulk-import/AssignmentPreviewPanel';
+import { useAppMode } from '../contexts/AppModeContext';
+import {
+  visibleWorkflows,
+  isWorkflowVisible,
+  allowedPersonTypes,
+  allowedRoomTypes,
+  isRestricted,
+  type BulkImportWorkflow,
+} from '../../shared/app-mode';
 
 interface Template {
   id: string;
@@ -33,13 +42,22 @@ interface FileData {
   fileName: string;
 }
 
-type Workflow = 'room' | 'person' | 'assignment' | 'verify';
+type Workflow = BulkImportWorkflow;
+
+const WORKFLOW_LABELS: Record<Workflow, string> = {
+  room: 'Room Creation',
+  person: 'Person',
+  assignment: 'Assignment',
+  verify: 'Verify',
+};
 
 // Email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function BulkImportPage() {
   const { addCreateRoomTask, addCreatePersonTask, addRoleUpdateTask } = useTaskQueue();
+  const { mode } = useAppMode();
+  const restricted = isRestricted(mode);
 
   // Workflow state
   const [activeWorkflow, setActiveWorkflow] = useState<Workflow>('room');
@@ -112,6 +130,22 @@ function BulkImportPage() {
       window.electronAPI.getAllAssignments().then(setExistingAssignments);
     }
   }, [activeWorkflow]);
+
+  // A mode change cannot strand the page on a hidden tab.
+  useEffect(() => {
+    if (!isWorkflowVisible(mode, activeWorkflow)) {
+      setActiveWorkflow('room');
+    }
+  }, [mode, activeWorkflow]);
+
+  // Lock the room type in CIE mode. Depends on `roomType` as well as `restricted`,
+  // because the workflow reset's setRoomType(null) clears it after every file
+  // change — an effect keyed only on `restricted` would not fire again.
+  useEffect(() => {
+    if (restricted && roomType !== 'cie') {
+      setRoomType('cie');
+    }
+  }, [restricted, roomType]);
 
   // Load rooms, persons, and root ID on mount
   useEffect(() => {
@@ -469,6 +503,12 @@ function BulkImportPage() {
     return Array.from(values).sort();
   }, [fileData, assignmentRoomColumn]);
 
+  // Assignment matches only against rooms the mode allows.
+  const assignableRooms = useMemo(
+    () => (restricted ? rooms.filter(r => allowedRoomTypes(mode).includes(r.room_type as RoomType)) : rooms),
+    [rooms, restricted, mode]
+  );
+
   // Compute room matches when room column changes
   useEffect(() => {
     if (!fileData || !assignmentRoomColumn) {
@@ -479,7 +519,7 @@ function BulkImportPage() {
     const matches = new Map<string, string | null>();
 
     uniqueAssignmentRoomValues.forEach((value) => {
-      const room = rooms.find(
+      const room = assignableRooms.find(
         (r) => r.title.toLowerCase() === value.toLowerCase()
       );
       matches.set(value, room?.id || null);
@@ -487,7 +527,7 @@ function BulkImportPage() {
 
     setRoomMatches(matches);
     setRoomResolutions(new Map()); // Clear resolutions when column changes
-  }, [fileData, assignmentRoomColumn, rooms, uniqueAssignmentRoomValues]);
+  }, [fileData, assignmentRoomColumn, assignableRooms, uniqueAssignmentRoomValues]);
 
   // Get resolved person ID (auto or manual)
   const getResolvedPersonId = useCallback((email: string): string | null => {
@@ -833,46 +873,19 @@ function BulkImportPage() {
       {/* Header with workflow tabs */}
       <div className="border-b border-gray-200 px-6 py-4">
         <div className="flex items-center gap-4">
-          <button
-            onClick={() => setActiveWorkflow('room')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeWorkflow === 'room'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Room Creation
-          </button>
-          <button
-            onClick={() => setActiveWorkflow('person')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeWorkflow === 'person'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Person
-          </button>
-          <button
-            onClick={() => setActiveWorkflow('assignment')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeWorkflow === 'assignment'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Assignment
-          </button>
-          <button
-            onClick={() => setActiveWorkflow('verify')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeWorkflow === 'verify'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Verify
-          </button>
+          {visibleWorkflows(mode).map((workflow) => (
+            <button
+              key={workflow}
+              onClick={() => setActiveWorkflow(workflow)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeWorkflow === workflow
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {WORKFLOW_LABELS[workflow]}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -932,6 +945,7 @@ function BulkImportPage() {
               <RoomTypeSelector
                 selectedType={roomType}
                 onTypeChange={setRoomType}
+                availableTypes={allowedRoomTypes(mode)}
               />
             </div>
 
@@ -1003,7 +1017,7 @@ function BulkImportPage() {
                   group1Values={group1Values}
                   roomAssignments={roomAssignments}
                   onRoomAssignmentsChange={setRoomAssignments}
-                  rooms={rooms}
+                  rooms={assignableRooms}
                 />
               </div>
             )}
@@ -1028,6 +1042,7 @@ function BulkImportPage() {
                 <AssignmentRoleSelector
                   selectedRole={selectedAssignmentRole}
                   onRoleChange={setSelectedAssignmentRole}
+                  allowedRoles={restricted ? allowedPersonTypes(mode) : undefined}
                 />
               </div>
             )}
@@ -1060,7 +1075,7 @@ function BulkImportPage() {
               <div className="mt-6">
                 <RoomMatchingPanel
                   uniqueRoomValues={uniqueAssignmentRoomValues}
-                  rooms={rooms}
+                  rooms={assignableRooms}
                   roomMatches={roomMatches}
                   roomResolutions={roomResolutions}
                   onResolutionChange={(roomValue, roomId) => {

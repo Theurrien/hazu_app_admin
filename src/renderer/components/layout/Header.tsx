@@ -1,12 +1,12 @@
 import React from 'react';
-
-type Page = 'dashboard' | 'rooms' | 'persons' | 'matrix' | 'import' | 'missions' | 'discrepancies' | 'settings';
+import { ModeLock } from './ModeLock';
+import type { PageId } from '../../../shared/app-mode';
 
 interface HeaderProps {
-  currentPage: Page;
+  currentPage: PageId;
 }
 
-const pageTitles: Record<Page, string> = {
+const pageTitles: Record<PageId, string> = {
   dashboard: 'Dashboard',
   rooms: 'Rooms',
   persons: 'Persons',
@@ -39,6 +39,7 @@ function Header({ currentPage }: HeaderProps) {
         className="flex items-center gap-4"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        <ModeLock />
         {/* Sync status indicator */}
         <div
           className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-full"

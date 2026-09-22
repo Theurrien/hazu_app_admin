@@ -5,6 +5,8 @@ interface RoomTypeSelectorProps {
   selectedType: RoomType | null;
   onTypeChange: (type: RoomType) => void;
   disabled?: boolean;
+  /** When given, only these types are offered. */
+  availableTypes?: RoomType[];
 }
 
 const roomTypes: { value: RoomType; label: string }[] = [
@@ -18,10 +20,14 @@ export function RoomTypeSelector({
   selectedType,
   onTypeChange,
   disabled = false,
+  availableTypes,
 }: RoomTypeSelectorProps) {
+  const visibleTypes = availableTypes
+    ? roomTypes.filter(type => availableTypes.includes(type.value))
+    : roomTypes;
   return (
     <div className="flex flex-wrap gap-4">
-      {roomTypes.map((type) => (
+      {visibleTypes.map((type) => (
         <label
           key={type.value}
           className={`

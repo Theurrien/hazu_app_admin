@@ -19,6 +19,8 @@ Hazu Admin connects to the Hazu platform API, mirrors your data into a local SQL
 - **Bulk Import** — upload an Excel file to create rooms, create persons, or assign existing persons to rooms, with live preview and per-row control
 - **Mission Analysis** — treemap and heatmap dashboards showing student MPE completion by profession, level, and lieu de formation, with drill-down to individual students
 - **Discrepancies** — a read-only report of every place Hazu's access groups and its profile tags disagree, with repair actions for the fixable cases
+- **CIE mode** — a padlock in the header reduces the app to Dashboard, Matrix, and Bulk Import,
+  scoped to CIE rooms and to students and course teachers, for colleagues who only run CIE courses
 - **Task Queue** — all API writes run through a background queue with per-task status, error reporting, and retry; writes are verified against the server afterwards and marked failed if the change didn't actually take effect
 
 ---
@@ -117,6 +119,22 @@ remove before they do it, and neither trusts the API's success response. Every w
 by re-reading the server afterwards, and a write the server accepted but the re-read contradicts
 is reported as a failure. Only a literal `404` on a room id authorises deleting its tags; a
 credentials failure, a timeout, or any other error leaves the tags alone.
+
+### CIE mode
+
+A padlock in the header switches between the full app and **CIE mode**, which shows only the
+Dashboard, the Assignment Matrix, and Bulk Import, scoped to CIE rooms and to students and course
+teachers. New courses are created in the CIE Hazu; filing them into a year folder is separate
+end-of-year housekeeping.
+
+The app starts in CIE mode. Leaving it asks for the admin password. This is a guardrail against
+mis-clicks for a colleague who runs CIE courses — it is not an access boundary, since the API key
+that the app authenticates with carries full platform rights regardless of which pages are shown.
+
+The `admin_password` setting ships with a default value that is present in this repository, and
+there is no UI to change it. Change it in the local SQLite `settings` table before handing a
+machine to anyone — until you do, the "admin password" prompt is not checking against anything
+private.
 
 ### Mission Analysis
 

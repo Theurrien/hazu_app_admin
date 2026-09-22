@@ -45,20 +45,50 @@ function createAssignmentKey(personId: string, roomId: string): string {
   return `${personId}-${roomId}`;
 }
 
-export function useMatrixData() {
+export interface UseMatrixDataOptions {
+  /** When given, the person-type filter is fixed to these and the toggle is inert. */
+  lockPersonTypes?: PersonType[];
+  /** When given, the room-type filter is fixed to these and the toggle is inert. */
+  lockRoomTypes?: RoomType[];
+}
+
+export function useMatrixData(options: UseMatrixDataOptions = {}) {
+  const { lockPersonTypes, lockRoomTypes } = options;
   const [allPersons, setAllPersons] = useState<Person[]>([]);
   const [allRooms, setAllRooms] = useState<Room[]>([]);
   const [allAssignments, setAllAssignments] = useState<MatrixAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state - empty sets mean "show all"
+  // Filter state - empty sets mean "show all". A lock seeds the set instead, which
+  // reuses the existing filtering path rather than adding a second one.
   const [filters, setFilters] = useState<MatrixFilters>({
-    personTypes: new Set<PersonType>(),
-    roomTypes: new Set<RoomType>(),
+    personTypes: new Set<PersonType>(lockPersonTypes ?? []),
+    roomTypes: new Set<RoomType>(lockRoomTypes ?? []),
     personSearch: '',
     roomSearch: '',
   });
+
+  // Re-seed the type filters when the *contents* of the locks change (e.g. a mode
+  // flip while the Matrix stays mounted). `MatrixPage` passes a fresh array (and a
+  // fresh options object) on every render, so depending on `lockPersonTypes` /
+  // `lockRoomTypes` directly would re-seed — and wipe the search boxes — on every
+  // keystroke. Depending on a joined-string derived from their contents instead
+  // only fires when the actual set of allowed types changes. `personSearch` /
+  // `roomSearch` are preserved via the functional update. The joined strings stand
+  // in for the array contents in the dependency array precisely because the arrays
+  // are fresh identities on every render; the effect body reads the arrays directly
+  // from scope.
+  const lockPersonTypesKey = (lockPersonTypes ?? []).join(',');
+  const lockRoomTypesKey = (lockRoomTypes ?? []).join(',');
+  useEffect(() => {
+    setFilters(prev => ({
+      ...prev,
+      personTypes: new Set<PersonType>(lockPersonTypes ?? []),
+      roomTypes: new Set<RoomType>(lockRoomTypes ?? []),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockPersonTypesKey, lockRoomTypesKey]);
 
   // Load all data
   const loadData = useCallback(async () => {
@@ -243,6 +273,7 @@ export function useMatrixData() {
 
   // Filter update functions
   const togglePersonType = useCallback((type: PersonType) => {
+    if (lockPersonTypes) return;
     setFilters(prev => {
       const newTypes = new Set(prev.personTypes);
       if (newTypes.has(type)) {
@@ -252,9 +283,10 @@ export function useMatrixData() {
       }
       return { ...prev, personTypes: newTypes };
     });
-  }, []);
+  }, [lockPersonTypes]);
 
   const toggleRoomType = useCallback((type: RoomType) => {
+    if (lockRoomTypes) return;
     setFilters(prev => {
       const newTypes = new Set(prev.roomTypes);
       if (newTypes.has(type)) {
@@ -264,7 +296,7 @@ export function useMatrixData() {
       }
       return { ...prev, roomTypes: newTypes };
     });
-  }, []);
+  }, [lockRoomTypes]);
 
   const setPersonSearch = useCallback((search: string) => {
     setFilters(prev => ({ ...prev, personSearch: search }));
@@ -295,7 +327,7 @@ export function useMatrixData() {
     setRoomSearch,
 
     // Constants for UI
-    allPersonTypes: ALL_PERSON_TYPES,
-    allRoomTypes: ALL_ROOM_TYPES,
+    allPersonTypes: lockPersonTypes ?? ALL_PERSON_TYPES,
+    allRoomTypes: lockRoomTypes ?? ALL_ROOM_TYPES,
   };
 }

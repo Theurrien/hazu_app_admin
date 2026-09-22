@@ -120,7 +120,8 @@ hazu-admin/
 │   │   ├── components/
 │   │   │   ├── layout/
 │   │   │   │   ├── Sidebar.tsx
-│   │   │   │   └── Header.tsx
+│   │   │   │   ├── Header.tsx
+│   │   │   │   └── ModeLock.tsx     # Header padlock + unlock prompt
 │   │   │   ├── mission-analysis/   # Mission dashboard viz components
 │   │   │   │   ├── MissionSyncButton.tsx
 │   │   │   │   ├── MissionFilterBar.tsx
@@ -142,11 +143,13 @@ hazu-admin/
 │   │   ├── hooks/
 │   │   │   └── useMatrixData.ts     # Loads + filters/sorts matrix data
 │   │   ├── contexts/
+│   │   │   ├── AppModeContext.tsx   # CIE-mode flag, persisted to settings
 │   │   │   └── TaskQueueContext.tsx # Sequential write queue for bulk operations
 │   │   └── styles/
 │   │       └── global.css      # Tailwind imports
 │   │
 │   └── shared/                 # Shared between main & renderer
+│       ├── app-mode.ts        # S9 — pure mode decisions (pages/workflows/roles)
 │       ├── types.ts           # TypeScript interfaces
 │       └── ipc-channels.ts    # IPC channel constants
 │
@@ -774,6 +777,66 @@ the same pattern `syncDistributionGroups` and `syncGroupMemberships` use for the
 the Dashboard doesn't sit on one unchanging string for a long silent stretch. `room-tree.ts` itself
 gets no progress callback; the injected-IO seam already does that job.
 
+## CIE Mode (S9)
+
+The app runs in one of two modes, stored in the `app_mode` setting: **`complete`** (all eight
+pages) and **`cie`** (Dashboard, Matrix, Bulk Import only, scoped to CIE rooms and to students
+and course teachers). `cie` is the default — `parseAppMode` treats anything that is not exactly
+the string `complete` as `cie`, so a missing or corrupted setting reduces the surface rather than
+opening it. A padlock in the header toggles between them; unlocking asks for `admin_password`.
+
+### It is a guardrail, not a boundary
+
+The app has no per-user authorization. One API key from Settings authenticates every call
+([config.ts](src/main/services/hazu-api/config.ts)) and carries full platform rights, and it lives
+in local SQLite on the machine running the app. CIE mode changes what someone does **by accident**,
+not what they can do. Never describe it as restricting anyone's rights.
+
+Narrowing `root_hazu_id` to the CIE subtree is not an alternative: rooms and persons are walked
+from different branches of the same root (`syncRooms` vs. `syncPersonsFromContainers` in
+[sync.service.ts](src/main/services/sync.service.ts)), so a CIE-only root yields courses with no
+students.
+
+### The lock's gate ships with a default value — change it before handing off a machine
+
+`admin_password` is seeded with a default value present in this repository (in
+[schema.sql](src/main/database/schema.sql) and a migration in
+[index.ts](src/main/database/index.ts)) and there is no UI to change it. Until someone changes it
+in the local SQLite `settings` table, "unlocking asks for the admin password" is checking against
+a value anyone with this repo can read — not a real check. This is separate from the
+guardrail-not-a-boundary point above: even taken as a guardrail against mis-clicks, it does not
+work until the default is replaced on the machine being handed off.
+
+### Every mode decision lives in one pure module
+
+[app-mode.ts](src/shared/app-mode.ts) — no IO, no React, tested in
+[app-mode.test.ts](src/shared/app-mode.test.ts) — owns `visiblePages`, `visibleWorkflows`,
+`allowedPersonTypes`, `allowedRoomTypes`, and `parseAppMode`. **Add a new page, workflow, or role
+there, not at the call sites**, or the two modes drift: a tab shown in one and forgotten in the
+other. `AppModeContext` is the only thing that touches the setting, through the existing
+`getSetting`/`setSetting` IPC.
+
+### No workflow gains a capability
+
+Every renderer change is subtraction — fewer nav items, fewer tabs, frozen filter sets, shorter
+dropdowns, hidden hover actions. The main process, the IPC layer, the Task Queue, and the S4/S6/S7
+write paths are untouched. Hiding the Matrix's rename and delete needs no change to
+[MatrixGrid.tsx](src/renderer/components/MatrixGrid.tsx): the three handlers are already optional
+props whose affordances render only when passed, so `MatrixPage` withholds them.
+
+The **Dashboard stays visible** in CIE mode. Matrix and Bulk Import render entirely from local
+SQLite, and the Dashboard's Sync button is the app's only trigger — hiding it would have meant
+*adding* a Sync control to the header, which is the wrong shape for this work.
+
+### New CIE courses land flat, and that is correct
+
+Room Creation in CIE mode locks the type to `cie` and leaves `findTargetId` alone, so courses land
+directly in the CIE Hazu under root. Filing them into a year folder is deliberate housekeeping done
+at the end of the school year. The live tree invites the opposite conclusion — this year's courses
+sit flat while earlier years sit tidily in folders — but a creation path that wrote into a year
+folder would be writing into the archive. See
+[the S9 spec](docs/specs/2026-09-04-s9-cie-mode-design.md).
+
 ## Testing the App
 
 1. Run `npm run build`
@@ -789,6 +852,9 @@ gets no progress callback; the injected-IO seam already does that job.
    confirm the modal, which lists the tags/persons/rooms to delete and any skipped ids with their
    reason; each confirmed person becomes one `pruneDeadTags` task, re-probed against Hazu before
    deletion and verified against a fresh profile read after
+10. Click the padlock in the header to leave CIE mode (admin password), and again to return.
+    Locked, confirm three nav items, CIE-only Matrix columns, a three-entry role dropdown, no
+    rename/delete on hover, and two Bulk Import tabs.
 
 ## Future Development
 
