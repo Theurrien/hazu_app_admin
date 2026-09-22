@@ -22,6 +22,7 @@ const IPC_CHANNELS = {
   API_SET_CONFIG: 'api:setConfig',
   API_GET_CONFIG: 'api:getConfig',
   API_IS_CONFIGURED: 'api:isConfigured',
+  API_VALIDATE_CONFIG: 'api:validateConfig',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   SETTINGS_GET_WEBHOOK_CONFIG: 'settings:getWebhookConfig',
@@ -107,6 +108,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.API_GET_CONFIG),
   isApiConfigured: () =>
     ipcRenderer.invoke(IPC_CHANNELS.API_IS_CONFIGURED),
+  validateApiConfig: (config: { apiKey: string; environment: string; rootHazuId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.API_VALIDATE_CONFIG, config),
 
   // Settings
   getSetting: (key: string) =>
@@ -248,6 +251,11 @@ declare global {
       setApiConfig: (config: { apiKey: string; environment: string; rootHazuId: string }) => Promise<any>;
       getApiConfig: () => Promise<{ apiKey: string; environment: string; rootHazuId: string }>;
       isApiConfigured: () => Promise<boolean>;
+      validateApiConfig: (config: {
+        apiKey: string;
+        environment: string;
+        rootHazuId: string;
+      }) => Promise<import('../shared/config-probe').ProbeResult>;
       getSetting: (key: string) => Promise<string | null>;
       setSetting: (key: string, value: string) => Promise<void>;
       getWebhookConfig: () => Promise<{ adminId: string; templateId: string; webhookUrl: string }>;

@@ -6,9 +6,17 @@ import axios from "axios";
 import { CreateOptions, UpdateOptions, ApiParametersPropagate, HazuEntity } from "./interfaces";
 import { getApiKey, getApiEndpoint } from "./config";
 
-function getAuthHeaders(): Record<string, string> {
-  const token = getApiKey();
+/**
+ * Hazu accepts two header shapes and picks by key length. Exported so the S10 config probe
+ * applies the identical rule to a candidate key — restating it would let the probe reject
+ * valid keys of whichever kind it got wrong.
+ */
+export function buildAuthHeaders(token: string): Record<string, string> {
   return token.length <= 20 ? { token } : { "x-api-key": token };
+}
+
+function getAuthHeaders(): Record<string, string> {
+  return buildAuthHeaders(getApiKey());
 }
 
 // READ OPERATIONS
