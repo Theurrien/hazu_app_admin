@@ -68,7 +68,10 @@ function initAutoUpdater(): void {
     console.log('[updater] downloaded, installs on quit:', info.version);
   });
 
-  void autoUpdater.checkForUpdatesAndNotify();
+  // electron-updater rethrows after emitting 'error', and checkForUpdatesAndNotify adds
+  // no catch of its own — without this, every failed check is an unhandled rejection. The
+  // 'error' listener above already logs it.
+  void autoUpdater.checkForUpdatesAndNotify().catch(() => {});
 }
 
 app.whenReady().then(async () => {
