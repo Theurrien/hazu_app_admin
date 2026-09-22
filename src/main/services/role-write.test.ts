@@ -25,8 +25,9 @@ describe('isIdentityInAcl', () => {
   });
 
   it('matches by authorId when persons.email holds an account UID, not an email', () => {
-    // The Amah case: persons.email is the account UID; the ACL keys the member by that authorId
-    // while description carries the real email. Matching authorId recovers the identity.
+    // A real observed data shape, not a hypothetical: some profiles carry the account UID in
+    // persons.email instead of an address. The ACL then keys that member by authorId while
+    // description holds the real email, so only the authorId path recovers the identity.
     expect(isIdentityInAcl(members, 'ACCTUID00000000000000000001')).toBe(true);
   });
 
