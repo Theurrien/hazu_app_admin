@@ -15,6 +15,7 @@ export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfig
   const [result, setResult] = useState<ProbeResult | null>(null);
   const [saved, setSaved] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const handleConnect = async () => {
     setBusy(true);
@@ -51,13 +52,24 @@ export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfig
 
   const handleSyncNow = async () => {
     setSyncing(true);
+    setSyncError(null);
     try {
-      await window.electronAPI.runSync();
+      const result = await window.electronAPI.runSync();
+      if (result.status === 'error') {
+        console.error('[setup-gate] first sync reported an error:', result.message);
+        setSyncError(
+          'The connection worked, but loading the data did not. You can try again, or continue and load it later from the Dashboard.'
+        );
+        return;
+      }
+      onConfigured();
     } catch (error) {
       console.error('[setup-gate] first sync failed:', error);
+      setSyncError(
+        'The connection worked, but loading the data did not. You can try again, or continue and load it later from the Dashboard.'
+      );
     } finally {
       setSyncing(false);
-      onConfigured();
     }
   };
 
@@ -128,6 +140,9 @@ export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfig
             <div className="p-3 rounded bg-green-50 text-green-800 text-sm mb-6">
               Connected. Now load the data from Hazu — this takes a few minutes.
             </div>
+            {syncError && (
+              <div className="p-3 rounded bg-red-50 text-red-800 text-sm mb-6">{syncError}</div>
+            )}
             <button
               type="button"
               className="w-full py-2 rounded text-white font-medium disabled:opacity-50 mb-3"

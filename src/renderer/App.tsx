@@ -23,6 +23,7 @@ function AppShell() {
   // page (spec §5). Task 4 adds the second, explicitly-requested entry point.
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [initialConfig, setInitialConfig] = useState({ apiKey: '', rootHazuId: '' });
+  const [forceSetup, setForceSetup] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,12 +55,12 @@ function AppShell() {
   const renderPage = () => {
     // Guard the render too: the effect above lands one frame later.
     if (ready && !isPageVisible(mode, currentPage)) {
-      return <Dashboard />;
+      return <Dashboard onRequestSetup={() => setForceSetup(true)} />;
     }
 
     switch (currentPage) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onRequestSetup={() => setForceSetup(true)} />;
       case 'rooms':
         return <RoomsPage />;
       case 'persons':
@@ -90,12 +91,15 @@ function AppShell() {
     );
   }
 
-  if (!configured) {
+  if (!configured || forceSetup) {
     return (
       <SetupGate
         initialApiKey={initialConfig.apiKey}
         initialRootHazuId={initialConfig.rootHazuId}
-        onConfigured={() => setConfigured(true)}
+        onConfigured={() => {
+          setConfigured(true);
+          setForceSetup(false);
+        }}
       />
     );
   }
