@@ -34,8 +34,36 @@ function MatrixPage() {
 
   const { addRoleUpdateTask } = useTaskQueue();
 
-  // Local state for optimistic updates
-  const [assignments, setAssignments] = useState<Map<string, string>>(new Map());
+  // Optimistic overlay on top of the synced data, keyed `personId:roomId`.
+  //
+  // A value of `null` means "optimistically cleared" and is deliberately stored rather
+  // than deleted: deleting the key would mean "no override", so the grid would fall back
+  // to the synced row and redisplay the role the user just removed.
+  //
+  // `getAssignmentWithOverrides` below is what makes this visible. Before it existed the
+  // overlay was written but never read, so neither the optimistic fill nor the documented
+  // revert-on-failure did anything.
+  const [roleOverrides, setRoleOverrides] = useState<Map<string, string | null>>(new Map());
+
+  const setRoleOverride = useCallback((personId: string, roomId: string, role: string | null) => {
+    setRoleOverrides((prev) => new Map(prev).set(`${personId}:${roomId}`, role));
+  }, []);
+
+  const getAssignmentWithOverrides = useCallback(
+    (personId: string, roomId: string): string | null => {
+      const key = `${personId}:${roomId}`;
+      // `has` rather than a truthy check, so an explicit null reads as "cleared".
+      if (roleOverrides.has(key)) return roleOverrides.get(key) ?? null;
+      return getAssignment(personId, roomId);
+    },
+    [roleOverrides, getAssignment]
+  );
+
+  // Synced data is authoritative once reloaded, so drop the overlay with it.
+  const refetchAndClearOverrides = useCallback(async () => {
+    await refetch();
+    setRoleOverrides(new Map());
+  }, [refetch]);
 
   // Modal state for delete/rename
   const [deleteRoomModal, setDeleteRoomModal] = useState<{ isOpen: boolean; roomId: string; roomTitle: string }>({
@@ -64,20 +92,9 @@ function MatrixPage() {
       oldRole: string | null,
       newRole: string | null
     ) => {
-      // Update local state immediately for responsiveness
-      if (newRole) {
-        setAssignments((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(`${personId}:${roomId}`, newRole);
-          return newMap;
-        });
-      } else {
-        setAssignments((prev) => {
-          const newMap = new Map(prev);
-          newMap.delete(`${personId}:${roomId}`);
-          return newMap;
-        });
-      }
+      // Show the change immediately; `null` is stored, not deleted, so a removal reads
+      // as cleared rather than falling back to the synced role.
+      setRoleOverride(personId, roomId, newRole);
 
       // Add to task queue with revert callback
       addRoleUpdateTask({
@@ -88,24 +105,13 @@ function MatrixPage() {
         oldRole,
         newRole,
         onError: () => {
-          // Revert to old role on error
-          if (oldRole) {
-            setAssignments((prev) => {
-              const newMap = new Map(prev);
-              newMap.set(`${personId}:${roomId}`, oldRole);
-              return newMap;
-            });
-          } else {
-            setAssignments((prev) => {
-              const newMap = new Map(prev);
-              newMap.delete(`${personId}:${roomId}`);
-              return newMap;
-            });
-          }
+          // Put the cell back where it was. This is the revert S4 relies on when group
+          // truth does not confirm a write the server accepted.
+          setRoleOverride(personId, roomId, oldRole);
         },
       });
     },
-    [addRoleUpdateTask]
+    [addRoleUpdateTask, setRoleOverride]
   );
 
   // Handlers for delete/rename from matrix headers
@@ -126,7 +132,7 @@ function MatrixPage() {
     try {
       const result = await window.electronAPI.deleteRoom(deleteRoomModal.roomId);
       if (result.success) {
-        await refetch();
+        await refetchAndClearOverrides();
       }
       return result;
     } catch (error) {
@@ -139,7 +145,7 @@ function MatrixPage() {
     try {
       const result = await window.electronAPI.deletePerson(deletePersonModal.personId);
       if (result.success) {
-        await refetch();
+        await refetchAndClearOverrides();
       }
       return result;
     } catch (error) {
@@ -152,7 +158,7 @@ function MatrixPage() {
     try {
       const result = await window.electronAPI.renameRoom(renameRoomModal.roomId, newTitle);
       if (result.success) {
-        await refetch();
+        await refetchAndClearOverrides();
       }
       return result;
     } catch (error) {
@@ -194,7 +200,7 @@ function MatrixPage() {
       <MatrixGrid
         persons={persons}
         rooms={rooms}
-        getAssignment={getAssignment}
+        getAssignment={getAssignmentWithOverrides}
         onRoleChange={handleRoleChange}
         allowedRoles={restricted ? allowedPersonTypes(mode) : undefined}
         onDeleteRoom={restricted ? undefined : handleDeleteRoom}
