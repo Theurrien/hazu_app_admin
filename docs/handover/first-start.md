@@ -41,3 +41,6 @@ key may have been deactivated — contact your administrator.
 The app is meant to update itself in the background, so you shouldn't normally need to download
 anything again. If your administrator tells you a new version exists, contact them for the latest
 installer.
+
+The version you are running is shown at the bottom of the left-hand menu. If you ever call about
+a problem, read that number out — it is the quickest way to tell which build you have.
