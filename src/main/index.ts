@@ -20,8 +20,12 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 15, y: 15 },
+    // macOS only. Both options exist to inset the traffic lights; on Windows a non-default
+    // titleBarStyle hides the title bar, and this app draws no window controls of its own —
+    // the user would get a window with no close, minimise or maximise button.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 15, y: 15 } }
+      : {}),
   });
 
   // Show window when ready to avoid flash
