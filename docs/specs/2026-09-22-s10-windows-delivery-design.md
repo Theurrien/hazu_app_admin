@@ -54,8 +54,13 @@ Measured 2026-09-22 on the development Mac, except where noted.
 - **NSIS defaults are already the right ones.** One-click, per-user install into the user's
   AppData, no elevation and no UAC prompt — which is what makes this installable on a
   school-managed device without involving IT.
-- **No application icon is set.** electron-builder logged
-  `default Electron icon is used  reason=application icon is not set`.
+- **The application icon is set, and needs no configuration.** It was missing when this spec was
+  first written (electron-builder logged `default Electron icon is used  reason=application icon
+  is not set`). `build/icon.ico` now exists and electron-builder picks it up from that default
+  path with **no `win.icon` key**: a rebuild logs the warning no longer, and both the 256 px PNG
+  payload and the 32 px DIB pixels are present inside the built `Hazu Admin.exe`.
+- **The NSIS defaults are confirmed by the build log**, not just by documentation:
+  `oneClick=true perMachine=false`.
 - **The database lives in `userData`** ([database/index.ts](../../src/main/database/index.ts)), so
   it survives reinstalls and upgrades untouched.
 - **`setApiConfig` already writes exactly the rows a setup screen needs**
@@ -144,8 +149,16 @@ by reachability:
 
 In the `build` block of `package.json`:
 
-- `win.icon` — an `.ico`, so the app is identifiable in the Start menu and taskbar rather than
-  appearing as a stranger's generic Electron app.
+- **Icon: nothing to configure.** `build/icon.ico` is electron-builder's default lookup path, so
+  the icon ships without a `win.icon` key. Do not add one.
+
+  The icon is two designs in one file, because one drawing cannot serve both ends of the range.
+  At 128 and 256 px it is the full mark — frame intact — scaled to sit above an orange foot bar
+  (18% of the tile, `#E57B4D`, the app's own `--hazu-school`). At 64 px and below the frame is
+  **dropped** and the glyph enlarged: the frame's stroke is ~6 px in a 276 px source, which is
+  0.36 px at 16 px — a grey smudge that takes the glyph's legibility down with it. Small entries
+  are BMP/DIB, the large two PNG, which is the layout icon editors produce and the safest for
+  NSIS.
 - `artifactName` — explicit and versioned.
 - `nsis` — the current defaults stated explicitly rather than inherited:
   `oneClick`, `perMachine: false`, `createDesktopShortcut`, `runAfterFinish`.
