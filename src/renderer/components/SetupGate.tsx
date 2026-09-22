@@ -31,7 +31,9 @@ export function SetupGate({
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  const canCancel = !!onCancel && !busy && !syncing;
+  // Back must stay live during sync: the sync path sets no axios timeout, so runSync()
+  // may never settle if the network drops. Disabling Back would trap the user.
+  const canCancel = !!onCancel && !busy;
 
   const handleConnect = async () => {
     setBusy(true);

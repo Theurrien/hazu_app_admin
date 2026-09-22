@@ -39,5 +39,5 @@ If a sync fails, click **Check connection** and re-enter your key. If it still f
 key may have been deactivated — contact your administrator.
 
 The app is meant to update itself in the background, so you shouldn't normally need to download
-anything again. If you ever notice it hasn't, contact your administrator for the latest
+anything again. If your administrator tells you a new version exists, contact them for the latest
 installer.
