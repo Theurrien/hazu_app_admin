@@ -72,7 +72,13 @@ def report(violations):
 
 
 def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True).stdout
+    # errors="replace", not strict: `git show :<file>` on a staged BINARY blob (an icon, an
+    # image) would otherwise raise UnicodeDecodeError and break every commit that adds one.
+    # Replacing undecodable bytes rather than skipping binaries keeps any ASCII text inside
+    # them — an address in PNG metadata, say — visible to the scan.
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, errors="replace"
+    ).stdout
 
 
 def main():
