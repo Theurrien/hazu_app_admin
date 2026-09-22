@@ -64,8 +64,17 @@ Measured 2026-09-22 on the development Mac, except where noted.
 - **The database lives in `userData`** ([database/index.ts](../../src/main/database/index.ts)), so
   it survives reinstalls and upgrades untouched.
 - **`setApiConfig` already writes exactly the rows a setup screen needs**
-  ([ipc/index.ts](../../src/main/ipc/index.ts)) — it is what `SettingsPage` calls. The setup
-  screen needs **no new IPC channel and no main-process change**.
+  ([ipc/index.ts](../../src/main/ipc/index.ts)) — it is what `SettingsPage` calls. **Saving needs
+  no new IPC channel.**
+- **Validating does need one.** `sendApiRequestRead` takes only an `id`; it reads the key from
+  module-level `currentConfig` via `getApiKey()`
+  ([api.ts](../../src/main/services/hazu-api/api.ts), [config.ts](../../src/main/services/hazu-api/config.ts)).
+  Probing a *candidate* key through it would mean calling `setApiConfig` first — which, on a failed
+  probe, would leave a previously working configuration overwritten by the bad one. The probe
+  therefore takes its credentials as arguments and touches no shared state.
+- **The auth header is conditional on key length:** `token.length <= 20 ? { token } : { "x-api-key": token }`
+  ([api.ts](../../src/main/services/hazu-api/api.ts)). The probe must apply the same rule, or it
+  will reject valid keys of the other kind. Extract it rather than restating it.
 - **Nothing validates a key.** `isConfigured()` only checks that two strings are non-empty, and
   there is no 401 handling anywhere in the codebase. A mistyped key currently produces an app that
   looks configured and fails on every call.
@@ -75,8 +84,8 @@ Measured 2026-09-22 on the development Mac, except where noted.
 
 ## Design
 
-Two parts: a first-run setup gate in the renderer, and packaging. No change to any write path, any
-sync path, or any existing IPC channel.
+Two parts: a first-run setup gate in the renderer, and packaging. One new read-only IPC channel
+for validation (see above). No change to any write path, any sync path, or any existing channel.
 
 ### 1. One generic installer
 
