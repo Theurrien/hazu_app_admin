@@ -1,6 +1,6 @@
 {
   "name": "hazu-admin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hazu Platform Admin Tool",
   "main": "dist/main/index.js",
   "author": "Hazu",
@@ -37,7 +37,8 @@
       {
         "provider": "github",
         "owner": "Theurrien",
-        "repo": "hazu_app_admin"
+        "repo": "hazu_app_admin",
+        "releaseType": "release"
       }
     ],
     "mac": {
