@@ -837,6 +837,132 @@ sit flat while earlier years sit tidily in folders — but a creation path that 
 folder would be writing into the archive. See
 [the S9 spec](docs/specs/2026-09-04-s9-cie-mode-design.md).
 
+## Windows Delivery (S10)
+
+CIE mode (S9) hides the Settings page, which left the shipped build with no way for its
+target user — a course teacher on Windows, not technically advanced — to configure an API
+key at all. S10 is the delivery path for that build: **one generic installer**, a first-run
+setup gate that asks for the two values instead of baking them in, and auto-update so a
+revoked key or a bug fix never requires walking someone through a manual reinstall.
+
+**No artifact ever carries a secret.** The installer is the same file for every user, every
+key, and every root — which is what makes publishing and auto-updating it safe rather than
+carefully-safe. An earlier draft baked credentials into the build at build time; it was
+replaced because a baked artifact cannot be published, cannot be revoked without rebuilding,
+and strands a user whose database is lost. See the "Superseded design" section of
+[the S10 spec](docs/specs/2026-09-22-s10-windows-delivery-design.md) before re-deriving it.
+
+### Files
+
+- [config-probe.ts](src/shared/config-probe.ts) — **pure core**, no IO: `classifyProbeResult`
+  (the 401/404 taxonomy below) and `runConfigProbe`, the orchestrator the gate calls. Lives in
+  `shared/` rather than `main/services/` because the renderer renders these outcomes directly —
+  the same reason `app-mode.ts` (S9) lives there. Tested in
+  [config-probe.test.ts](src/shared/config-probe.test.ts).
+- [config-probe.service.ts](src/main/services/config-probe.service.ts) — **thin IO layer**:
+  `validateApiConfig` builds the real HTTP call and hands it to the pure core.
+- [SetupGate.tsx](src/renderer/components/SetupGate.tsx) — the first-run screen: two fields, a
+  Connect button, and — only after a confirmed 200 — a "Load data now" button that runs the
+  first sync before handing off to the normal shell.
+- `src/main/ipc/index.ts` — the `API_VALIDATE_CONFIG` handler (read-only).
+- [main/index.ts](src/main/index.ts) — the macOS-only `titleBarStyle` guard (below) and
+  `initAutoUpdater`.
+- `build` block of [package.json](package.json) — the NSIS installer configuration, the
+  `artifactName`, and the `publish` target.
+- [docs/handover/runbook.md](docs/handover/runbook.md) — issuing a key, revoking one, shipping a
+  version, and the macOS-rebuild trap that follows a Windows build.
+- [docs/handover/first-start.md](docs/handover/first-start.md) — the one-page sheet handed to the
+  person receiving the app.
+
+### The probe exists because nothing else in the app validates a key
+
+Before S10, `isConfigured()` only checked that two strings were non-empty, and there was no 401
+handling anywhere in the codebase — a mistyped key produced an app that looked configured and
+failed on every call, with no Settings page to fix it from in CIE mode. The setup gate's Connect
+button must therefore verify **before** saving, not after: saving first and failing later would
+just move the dead end, not remove it.
+
+### The 401/404 split, and why it needs its own read
+
+`GET /read` answers **404 for an unknown id regardless of the key**, and **401 only for an id
+that exists** (the same S7 measurement CLAUDE.md's Dead-Tag Pruning section cites). That
+asymmetry is what lets `classifyProbeResult` tell the user **which of the two fields** to fix,
+rather than a single "it didn't work" that sends them to the phone:
+
+| Response | Meaning | Field blamed |
+|---|---|---|
+| 200 | both values good | none |
+| 401 / 403 | the root id resolved; the key was rejected | `apiKey` |
+| 404 | the root id was not found | `rootHazuId` |
+| 500 | the key sent was empty | `apiKey` |
+| network error | unreachable | none |
+
+Do not collapse 401 and 404 into one error — that is the whole value of this design.
+
+**`sendApiRequestRead` could not be reused for this.** It takes only an `id`; it reads the key
+from module-level `currentConfig` via `getApiKey()`
+([config.ts](src/main/services/hazu-api/config.ts)). Probing a *candidate* key through it would
+mean calling `setApiConfig` first — which, on a failed probe, would leave a previously working
+configuration overwritten by the bad one before the user ever sees an error. `validateApiConfig`
+therefore takes its credentials as plain arguments and never touches `currentConfig` or
+`settings`; a failed probe cannot damage a configuration that was already working. It also
+re-derives the same auth-header rule `sendApiRequestRead` uses
+(`token.length <= 20 ? { token } : { "x-api-key": token }` in
+[api.ts](src/main/services/hazu-api/api.ts)) rather than restating it by hand, so a valid key of
+either shape still probes correctly.
+
+### The gate's reachability rule — the one deliberate hole in the CIE surface
+
+S9's shape is subtraction only: CIE mode withholds the Settings page, and with it the ability to
+change the API key. The setup gate hands that ability back, which is intentional — a revocable
+per-user key is not workable without some way back in — but it is bounded on purpose:
+
+- reachable when the app is unconfigured (`api_key` or `root_hazu_id` empty), in **either**
+  mode, before the normal shell;
+- reachable from a failed sync, via a **Check connection** action that reopens it, pre-filled;
+- **never** a browsable page, never in the navigation, never reachable while a working
+  configuration is already in place.
+
+Get this wrong and a CIE-mode user can overwrite a good key with a bad one with no Settings page
+to undo it from.
+
+### The title bar is macOS-only, and that is deliberate
+
+`src/main/index.ts` used to set `titleBarStyle: 'hiddenInset'` and `trafficLightPosition`
+unconditionally — both exist only to inset the macOS traffic lights, and the renderer draws no
+window controls of its own (only drag regions in `Header.tsx`, `Sidebar.tsx`, and
+`global.css`). A non-default `titleBarStyle` hides the title bar on Windows too, which would
+have shipped a window with no close, minimise, or maximise button, recoverable only via Alt+F4
+or the taskbar — not by the person this build is for. Both options are now conditioned on
+`process.platform === 'darwin'`; Windows gets its standard title bar. **Not verified from
+macOS** — it is the first check in the acceptance run below.
+
+### Auto-update, and why it needs neither a token nor a signature
+
+`electron-updater` with `provider: github`, checking on launch, downloading in the background,
+and installing on quit — guarded by `app.isPackaged` so it neither runs nor throws in
+development. `Theurrien/hazu_app_admin` is a **public** repository, which is what makes this
+tokenless: there is no credential to leak from a public GitHub Actions log or a shared machine.
+electron-builder already emits a `.blockmap` beside the installer, so updates transfer far less
+than the full artifact. Windows signature verification is skipped because the app is unsigned
+and no `publisherName` is configured — deliberately: an OV certificate does not clear
+SmartScreen without a hardware token, and only the more expensive EV tier does, for a handful of
+users. Because the updater fetches and launches the installer itself rather than the file
+arriving through a browser download, SmartScreen does not reappear on any update after the
+first install.
+
+### The updater is untrusted until the Windows acceptance run
+
+None of the above — the probe's error taxonomy, the reachability rule, the title bar, or
+auto-update — has been exercised on a real Windows install. The updater in particular cannot be
+tested from macOS: the thing under test *is* the Windows install path, and an updater that fails
+silently on a user's machine is worse than no updater, because neither he nor the maintainer
+would find out. **Do not describe auto-update, or this feature generally, as working until the
+8-step acceptance run in [the S10 spec](docs/specs/2026-09-22-s10-windows-delivery-design.md)
+has been run once, end to end, on a Windows machine** — install, the setup gate in CIE mode, the
+401 and 404 messages naming the right field, persistence across relaunch, key deactivation and
+recovery, and one real self-update.
+
 ## Testing the App
 
 1. Run `npm run build`

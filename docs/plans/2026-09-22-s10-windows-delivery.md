@@ -879,7 +879,10 @@ with:
 
 - [ ] **Step 3: Offer re-entry when a sync fails**
 
-Immediately after the closing `</p>` of the `syncResult.message` paragraph inside the `{syncResult && (` block, add:
+Inside the `{syncResult && (` block, add this as the **last child** — after the
+`{syncResult.errors.length > 0 && (…)}` list and immediately before that block's closing
+`</div>`. It must come last: placing it right after the message paragraph would push the
+"Synced N rooms…" summary and the error list below the button.
 
 ```tsx
             {syncResult.status === 'error' && onRequestSetup && (

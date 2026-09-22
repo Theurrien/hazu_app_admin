@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import { autoUpdater } from 'electron-updater';
 import { initDatabase } from './database';
 import { registerIpcHandlers } from './ipc';
 
@@ -20,8 +21,12 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 15, y: 15 },
+    // macOS only. Both options exist to inset the traffic lights; on Windows a non-default
+    // titleBarStyle hides the title bar, and this app draws no window controls of its own —
+    // the user would get a window with no close, minimise or maximise button.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 15, y: 15 } }
+      : {}),
   });
 
   // Show window when ready to avoid flash
@@ -47,6 +52,28 @@ function createWindow() {
   });
 }
 
+function initAutoUpdater(): void {
+  // Never in development: there is no packaged app to replace, and the check throws.
+  if (!app.isPackaged) return;
+
+  autoUpdater.on('error', (error) => {
+    // Never surfaced to the user: a failed update check is not their problem, and this
+    // app's user has no way to act on it. It must also never crash the app.
+    console.error('[updater] check failed:', error);
+  });
+  autoUpdater.on('update-available', (info) => {
+    console.log('[updater] update available:', info.version);
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[updater] downloaded, installs on quit:', info.version);
+  });
+
+  // electron-updater rethrows after emitting 'error', and checkForUpdatesAndNotify adds
+  // no catch of its own — without this, every failed check is an unhandled rejection. The
+  // 'error' listener above already logs it.
+  void autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
 app.whenReady().then(async () => {
   // Initialize database
   await initDatabase();
@@ -56,6 +83,9 @@ app.whenReady().then(async () => {
 
   // Create window
   createWindow();
+
+  // After the window, so a slow or failing check never delays startup.
+  initAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

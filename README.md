@@ -25,6 +25,16 @@ Hazu Admin connects to the Hazu platform API, mirrors your data into a local SQL
 
 ---
 
+## Installing (Windows)
+
+Most users should not clone this repo. Download the installer from the
+[latest release](https://github.com/Theurrien/hazu_app_admin/releases/latest), run it, and follow
+[docs/handover/first-start.md](docs/handover/first-start.md) — it walks through the SmartScreen
+prompt, the two values you'll be sent, and loading your data for the first time. The installer
+carries no credentials; you enter your own key on first launch. The app is built to auto-update
+itself afterwards, but that path has not yet completed its Windows acceptance run — see
+[CLAUDE.md](CLAUDE.md#windows-delivery-s10).
+
 ## Getting Started
 
 ### Prerequisites
@@ -236,6 +246,13 @@ IPC communication: `renderer → preload (contextBridge) → ipcMain handlers �
 | Charts | ECharts (echarts-for-react) |
 | Bundler | Vite 7 |
 | Packaging | electron-builder |
+
+### Releasing
+
+Building and publishing a Windows release, issuing a new user their access key, and revoking one
+are all covered in [docs/handover/runbook.md](docs/handover/runbook.md) — including a trap worth
+knowing before you build: a Windows build made on a Mac replaces the local native SQLite module
+in place, so `npm run dev` won't start again until you run `npm run rebuild`.
 
 ### Extending the app
 

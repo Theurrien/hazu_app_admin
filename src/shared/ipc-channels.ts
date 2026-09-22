@@ -34,6 +34,7 @@ export const IPC_CHANNELS = {
   API_SET_CONFIG: 'api:setConfig',
   API_GET_CONFIG: 'api:getConfig',
   API_IS_CONFIGURED: 'api:isConfigured',
+  API_VALIDATE_CONFIG: 'api:validateConfig',
 
   // Settings
   SETTINGS_GET: 'settings:get',

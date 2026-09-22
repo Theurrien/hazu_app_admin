@@ -12,6 +12,7 @@ import { reliableUpdateUserRole } from '../services/role-write.service';
 import { planOrphanRemoval, revokeOrphanAccess } from '../services/orphan-removal.service';
 import { planTagPrune, pruneDeadTags } from '../services/tag-prune.service';
 import { PruneItem } from '../services/tag-prune';
+import { validateApiConfig } from '../services/config-probe.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -420,6 +421,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.API_IS_CONFIGURED, async () => {
     return isConfigured();
   });
+
+  // Read-only. Never writes settings and never touches the in-memory config, so a failed
+  // probe leaves a working configuration untouched.
+  ipcMain.handle(
+    IPC_CHANNELS.API_VALIDATE_CONFIG,
+    async (_event, config: { apiKey: string; environment: string; rootHazuId: string }) => {
+      return validateApiConfig(config);
+    }
+  );
 
   // ============================================================================
   // SETTINGS

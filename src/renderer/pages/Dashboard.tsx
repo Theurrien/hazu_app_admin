@@ -25,7 +25,12 @@ interface SyncProgress {
   errors: string[];
 }
 
-function Dashboard() {
+interface DashboardProps {
+  /** Reopens the setup gate. Absent when the Dashboard is rendered without re-entry. */
+  onRequestSetup?: () => void;
+}
+
+function Dashboard({ onRequestSetup }: DashboardProps) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -140,9 +145,19 @@ function Dashboard() {
           Sync Status
         </h3>
 
+        {/* The old copy sent the reader to Settings, which CIE mode hides — a dead end. */}
         {!isConfigured && (
-          <div className="mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-lg">
-            API not configured. Please go to Settings to configure your API key and Root Hazu ID.
+          <div className="mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-lg flex items-center justify-between gap-4">
+            <span>Not connected to Hazu yet.</span>
+            {onRequestSetup && (
+              <button
+                type="button"
+                className="px-3 py-1 rounded bg-yellow-200 text-yellow-900 text-sm font-medium whitespace-nowrap"
+                onClick={onRequestSetup}
+              >
+                Connect
+              </button>
+            )}
           </div>
         )}
 
@@ -164,6 +179,15 @@ function Dashboard() {
                   <li key={i}>{err}</li>
                 ))}
               </ul>
+            )}
+            {syncResult.status === 'error' && onRequestSetup && (
+              <button
+                type="button"
+                className="mt-3 px-3 py-1 rounded bg-white border text-sm font-medium"
+                onClick={onRequestSetup}
+              >
+                Check connection
+              </button>
             )}
           </div>
         )}
