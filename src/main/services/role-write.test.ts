@@ -8,6 +8,7 @@ import {
   looksLikeEmail,
   RoleWriteDeps,
   GroupMembershipSnapshot,
+  resolveMembershipReading,
 } from './role-write';
 
 const noSleep = async () => {};
@@ -210,5 +211,47 @@ describe('runReliableRoleWrite', () => {
     const out = await runReliableRoleWrite(assign, deps);
     expect(reads).toBe(2);
     expect(out).toMatchObject({ success: true, verified: true, reconciledRole: 'student' });
+  });
+});
+
+describe('resolveMembershipReading', () => {
+  const absent: GroupMembershipSnapshot = { inNewGroup: false, inOldGroup: false };
+  const neverCalled = async () => {
+    throw new Error('confirmLinkedAccount should not have been called');
+  };
+
+  it('trusts an absence reading for an email identity without confirming the account', async () => {
+    const r = await resolveMembershipReading('student@example.invalid', absent, neverCalled);
+    expect(r).toEqual(absent);
+  });
+
+  it('trusts an absence reading for a UID identity confirmed as a linked account', async () => {
+    // The fix: a UID that really names an account on the profile's own ACL makes "not in the
+    // group" a true negative, not an unreadable identity. Without this the write is reported
+    // as an unverifiable success on a 2xx that did nothing.
+    const r = await resolveMembershipReading('ACCTUID00000000000000000001', absent, async () => true);
+    expect(r).toEqual(absent);
+  });
+
+  it('cannot verify an absence reading for a UID that names no linked account', async () => {
+    const r = await resolveMembershipReading('ACCTUID00000000000000000001', absent, async () => false);
+    expect(r).toBeNull();
+  });
+
+  it('does not spend an account read when the identity was found in a group', async () => {
+    const present: GroupMembershipSnapshot = { inNewGroup: true, inOldGroup: false };
+    const r = await resolveMembershipReading('ACCTUID00000000000000000001', present, neverCalled);
+    expect(r).toEqual(present);
+  });
+
+  it('cannot verify a blank identity', async () => {
+    expect(await resolveMembershipReading('', absent, neverCalled)).toBeNull();
+  });
+
+  it('cannot verify when the account-confirmation read itself fails', async () => {
+    const r = await resolveMembershipReading('ACCTUID00000000000000000001', absent, async () => {
+      throw new Error('ACL read failed');
+    });
+    expect(r).toBeNull();
   });
 });
