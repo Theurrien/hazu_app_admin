@@ -76,6 +76,33 @@ export function looksLikeEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
 }
 
+// Decide whether a membership reading can be trusted, given how the local identity is shaped.
+//
+// An absence reading ("in neither group") is only evidence if we know the identity we searched
+// for is the one the ACL would key this person by. An email identity matches ACL `description`
+// and is always trustworthy. A UID identity matches `authorId` — but a UID that is stale, wrong,
+// or never linked would also fail to match, so a bare absence proves nothing on its own.
+//
+// `confirmLinkedAccount` resolves that ambiguity by reading the profile's own ACL: a UID that
+// appears there names a live account, which makes "not in the role group" a true negative. It is
+// only consulted when it can change the answer — a hit in either group already settles it.
+//
+// Returning null means "cannot verify", which leaves the write's status code to decide.
+export async function resolveMembershipReading(
+  identity: string,
+  reading: GroupMembershipSnapshot,
+  confirmLinkedAccount: () => Promise<boolean>,
+): Promise<GroupMembershipSnapshot | null> {
+  if (!(identity || '').trim()) return null;
+  if (reading.inNewGroup || reading.inOldGroup) return reading;
+  if (looksLikeEmail(identity)) return reading;
+  try {
+    return (await confirmLinkedAccount()) ? reading : null;
+  } catch {
+    return null; // account read failed -> cannot verify
+  }
+}
+
 // Retry only transient failures: any 5xx, or a network/timeout error. Never a 4xx (deterministic).
 export function isRetryableError(status: number | undefined, networkOrTimeout: boolean): boolean {
   if (networkOrTimeout) return true;

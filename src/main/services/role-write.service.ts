@@ -2,7 +2,13 @@ import axios from 'axios';
 import { getDb } from '../database';
 import { getApiEndpoint, getApiKey } from './hazu-api/config';
 import { sendApiRequestGetAclInfo } from './hazu-api/api';
-import { runReliableRoleWrite, isIdentityInAcl, looksLikeEmail, RoleWriteDeps, GroupMembershipSnapshot } from './role-write';
+import {
+  runReliableRoleWrite,
+  isIdentityInAcl,
+  resolveMembershipReading,
+  RoleWriteDeps,
+  GroupMembershipSnapshot,
+} from './role-write';
 
 export interface RoleWriteResult {
   success: boolean;
@@ -62,6 +68,20 @@ export async function reliableUpdateUserRole(
     return isIdentityInAcl(acl?.data || [], emailRaw);
   };
 
+  // Does `emailRaw` name a live account linked to this profile? Read from the profile's OWN ACL,
+  // where a linked account appears as an ordinary person entry (isGroup false) — so unlike S6's
+  // room-item ACL, isIdentityInAcl is the correct predicate here and its isGroup skip is right.
+  // Memoized: the answer is a stable fact, and readMembership may run up to maxVerifyReads times.
+  let linkedAccount: Promise<boolean> | null = null;
+  const confirmLinkedAccount = (): Promise<boolean> => {
+    if (!linkedAccount) {
+      linkedAccount = sendApiRequestGetAclInfo(personId).then((acl) =>
+        isIdentityInAcl(acl?.data || [], emailRaw),
+      );
+    }
+    return linkedAccount;
+  };
+
   const deps: RoleWriteDeps = {
     postUpdateRoles: async () => {
       try {
@@ -94,10 +114,10 @@ export async function reliableUpdateUserRole(
       try {
         const inNewGroup = await isMember(newGroupId);
         const inOldGroup = await isMember(oldGroupId);
-        // If the local identity isn't a real email and we couldn't match it as an account id in
-        // either group, a "not a member" reading is unreliable -> cannot verify, trust the 2xx.
-        if (!looksLikeEmail(emailRaw) && !inNewGroup && !inOldGroup) return null;
-        return { inNewGroup, inOldGroup };
+        // A UID identity absent from both groups used to be discarded as unverifiable, which let
+        // a 2xx that changed nothing report success. Confirm the UID against the profile's own
+        // ACL instead: a linked account makes the absence a true negative. See role-write.ts.
+        return await resolveMembershipReading(emailRaw, { inNewGroup, inOldGroup }, confirmLinkedAccount);
       } catch {
         return null; // ACL read failure -> cannot verify
       }
