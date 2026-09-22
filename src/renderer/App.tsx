@@ -12,11 +12,36 @@ import DiscrepanciesPage from './pages/DiscrepanciesPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { AppModeProvider, useAppMode } from './contexts/AppModeContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
+import SetupGate from './components/SetupGate';
 import { isPageVisible, fallbackPage, type PageId } from '../shared/app-mode';
 
 function AppShell() {
   const { mode, ready } = useAppMode();
   const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
+
+  // null = still reading. The gate renders only when unconfigured — never as a browsable
+  // page (spec §5). Task 4 adds the second, explicitly-requested entry point.
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [initialConfig, setInitialConfig] = useState({ apiKey: '', rootHazuId: '' });
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI
+      .getApiConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setInitialConfig({ apiKey: config.apiKey ?? '', rootHazuId: config.rootHazuId ?? '' });
+        setConfigured(!!(config.apiKey && config.rootHazuId));
+      })
+      .catch((error) => {
+        // Show the gate rather than an empty shell: it is the only actionable screen.
+        console.error('[app] failed to read the API config:', error);
+        if (!cancelled) setConfigured(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // A mode change can leave currentPage on a page the sidebar no longer offers.
   useEffect(() => {
@@ -53,6 +78,27 @@ function AppShell() {
         return <Dashboard />;
     }
   };
+
+  if (configured === null) {
+    return (
+      <div
+        className="h-screen flex items-center justify-center"
+        style={{ backgroundColor: 'var(--hazu-bg-subtle)' }}
+      >
+        <div className="text-gray-500">Starting…</div>
+      </div>
+    );
+  }
+
+  if (!configured) {
+    return (
+      <SetupGate
+        initialApiKey={initialConfig.apiKey}
+        initialRootHazuId={initialConfig.rootHazuId}
+        onConfigured={() => setConfigured(true)}
+      />
+    );
+  }
 
   return (
     <div
