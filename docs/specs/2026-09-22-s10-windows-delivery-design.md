@@ -154,7 +154,22 @@ by reachability:
 - **never** a browsable page, never in the navigation, never reachable while a working
   configuration is in place.
 
-### 6. Installer configuration
+### 6. The window has no close button on Windows
+
+`src/main/index.ts` sets `titleBarStyle: 'hiddenInset'` and `trafficLightPosition`
+unconditionally. Both are macOS styles, and `grep -rn "app-region" src/renderer/` confirms the
+renderer draws **no window controls of its own** — only drag regions in `Header.tsx`,
+`Sidebar.tsx` and `global.css`.
+
+On Windows a non-default `titleBarStyle` hides the title bar. The likely result on the target
+platform is a window with no close, minimise or maximise button — recoverable with Alt+F4 or the
+taskbar, and not recoverable by the person this build is for.
+
+**Not verified from macOS.** Conditioning both options on `process.platform === 'darwin'` is
+correct regardless: Windows then gets its standard title bar, which is what a Windows user
+expects, and macOS is unchanged. The acceptance run checks it.
+
+### 7. Installer configuration
 
 In the `build` block of `package.json`:
 
@@ -172,7 +187,7 @@ In the `build` block of `package.json`:
 - `nsis` — the current defaults stated explicitly rather than inherited:
   `oneClick`, `perMachine: false`, `createDesktopShortcut`, `runAfterFinish`.
 
-### 7. Auto-update
+### 8. Auto-update
 
 `electron-updater` with `provider: github`. The repository is public, so this needs **no token, no
 server and no hosting**.
@@ -188,7 +203,7 @@ Because the updater fetches and launches the installer itself, rather than the f
 through a browser download, **SmartScreen does not reappear on any update after the first
 install.**
 
-### 8. Documents
+### 9. Documents
 
 - **A one-page sheet for the user** — the SmartScreen click (*More info → Run anyway*), the two
   strings to paste, and who to call.
@@ -222,6 +237,8 @@ the maintainer would find out.
 **The updater is not to be trusted until this has been run once, end to end, on a Windows machine:**
 
 1. Install. Confirm no admin prompt, a desktop shortcut, and that the app launches itself.
+   **Confirm the window has a close, minimise and maximise button** (§6), and that the sidebar
+   and header are still clickable — the drag regions were written for a hidden title bar.
 2. Confirm the setup gate appears, in CIE mode, before the normal shell.
 3. Enter a wrong key against a correct root ID; confirm the 401 message names the **key**.
 4. Enter a wrong root ID; confirm the 404 message names the **root ID**.
