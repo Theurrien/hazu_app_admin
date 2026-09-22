@@ -38,4 +38,6 @@ once — afterwards, use **Sync** on the Dashboard whenever you want fresh data.
 If a sync fails, click **Check connection** and re-enter your key. If it still fails, your
 key may have been deactivated — contact your administrator.
 
-Updates install themselves. You do not need to download anything again.
+The app is meant to update itself in the background, so you shouldn't normally need to download
+anything again. If you ever notice it hasn't, contact your administrator for the latest
+installer.

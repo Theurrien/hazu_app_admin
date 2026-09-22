@@ -25,6 +25,11 @@ Installed apps pick it up on their next launch and install it on quit.
 
 **Use `npm run dist:win` for a local build** — it hardcodes `--publish never`.
 
+`release:win` publishes with `--publish always`, which needs `GH_TOKEN` (or `GITHUB_TOKEN`) set
+in your environment — that's for *uploading* the release. It's unrelated to the "no token needed"
+claim elsewhere: that one is about installed apps *downloading* updates from the public repo,
+which genuinely needs nothing.
+
 ## A Mac build for Windows breaks `npm run dev` afterwards
 
 Running `npm run dist:win` (or `release:win`) on a Mac leaves the development environment

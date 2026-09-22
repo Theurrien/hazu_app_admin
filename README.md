@@ -31,8 +31,9 @@ Most users should not clone this repo. Download the installer from the
 [latest release](https://github.com/Theurrien/hazu_app_admin/releases/latest), run it, and follow
 [docs/handover/first-start.md](docs/handover/first-start.md) — it walks through the SmartScreen
 prompt, the two values you'll be sent, and loading your data for the first time. The installer
-carries no credentials; you enter your own key on first launch, and the app auto-updates itself
-afterwards.
+carries no credentials; you enter your own key on first launch. The app is built to auto-update
+itself afterwards, but that path has not yet completed its Windows acceptance run — see
+[CLAUDE.md](CLAUDE.md#windows-delivery-s10).
 
 ## Getting Started
 

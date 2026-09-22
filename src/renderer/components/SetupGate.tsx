@@ -4,11 +4,25 @@ import type { ProbeResult } from '../../shared/config-probe';
 interface SetupGateProps {
   initialApiKey?: string;
   initialRootHazuId?: string;
+  /** Carried through to the probe and the save — never rewritten by this screen. */
+  initialEnvironment?: string;
   /** Called once the configuration is saved and the user is done here. */
   onConfigured: () => void;
+  /**
+   * Steps back out of the gate without saving anything. Provided only when the gate was
+   * opened onto an already-configured app (the `forceSetup` re-entry) — never on first run,
+   * where there is nothing yet to go back to.
+   */
+  onCancel?: () => void;
 }
 
-export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfigured }: SetupGateProps) {
+export function SetupGate({
+  initialApiKey = '',
+  initialRootHazuId = '',
+  initialEnvironment = 'swiss',
+  onConfigured,
+  onCancel,
+}: SetupGateProps) {
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [rootHazuId, setRootHazuId] = useState(initialRootHazuId);
   const [busy, setBusy] = useState(false);
@@ -17,13 +31,15 @@ export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfig
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  const canCancel = !!onCancel && !busy && !syncing;
+
   const handleConnect = async () => {
     setBusy(true);
     setResult(null);
     try {
       const probe = await window.electronAPI.validateApiConfig({
         apiKey,
-        environment: 'swiss',
+        environment: initialEnvironment,
         rootHazuId,
       });
       setResult(probe);
@@ -32,7 +48,7 @@ export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfig
 
       await window.electronAPI.setApiConfig({
         apiKey: apiKey.trim(),
-        environment: 'swiss',
+        environment: initialEnvironment,
         rootHazuId: rootHazuId.trim(),
       });
       setSaved(true);
@@ -161,6 +177,17 @@ export function SetupGate({ initialApiKey = '', initialRootHazuId = '', onConfig
               Skip for now
             </button>
           </>
+        )}
+
+        {onCancel && (
+          <button
+            type="button"
+            className="w-full py-2 rounded border text-sm disabled:opacity-50 mt-3"
+            onClick={onCancel}
+            disabled={!canCancel}
+          >
+            Back
+          </button>
         )}
       </div>
     </div>
