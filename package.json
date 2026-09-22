@@ -17,12 +17,15 @@
     "rebuild": "electron-rebuild",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "release:win": "npm run build && electron-builder --win --x64 --publish always",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "build": {
     "appId": "com.hazu.admin",
     "productName": "Hazu Admin",
+    "artifactName": "Hazu-Admin-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -30,12 +33,25 @@
       "dist/**/*",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Theurrien",
+        "repo": "hazu_app_admin"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dmg"
     },
     "win": {
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
     }
   },
   "devDependencies": {
