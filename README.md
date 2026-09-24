@@ -275,4 +275,4 @@ in place, so `npm run dev` won't start again until you run `npm run rebuild`.
 
 ## License
 
-MIT — built for the [Hazu](https://hazu.ch) educational platform.
+[MIT](LICENSE) — built for the [Hazu](https://hazu.ch) educational platform.
