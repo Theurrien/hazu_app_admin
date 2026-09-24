@@ -23,12 +23,19 @@ export interface RoleWriteOutcome {
   partial: boolean;
   attempts: number;
   error?: string;
+  // Why group truth was not read, when verifyRan is false after a check was attempted:
+  // 'unverifiable' = a permanent gap (no identity, group not synced, account unconfirmed);
+  // 'read-error' = every ACL read in the loop failed, with the last message in verifyError.
+  verifySkipped?: 'unverifiable' | 'read-error';
+  verifyError?: string;
 }
 
 export interface RoleWriteDeps {
   // One POST attempt; classifies its own failure for the retry predicate.
   postUpdateRoles: () => Promise<{ ok: boolean; status?: number; networkOrTimeout: boolean; error?: string }>;
-  // Read current group truth; null = could not read (missing local group / ACL read error).
+  // Read current group truth. null = cannot verify, permanently (no identity, group not synced,
+  // account unconfirmed) — retrying cannot help. THROW = a transient read error, which the verify
+  // loop retries.
   readMembership: () => Promise<GroupMembershipSnapshot | null>;
   sleep: (ms: number) => Promise<void>;
 }
@@ -87,7 +94,9 @@ export function looksLikeEmail(s: string): boolean {
 // appears there names a live account, which makes "not in the role group" a true negative. It is
 // only consulted when it can change the answer — a hit in either group already settles it.
 //
-// Returning null means "cannot verify", which leaves the write's status code to decide.
+// Returning null means "cannot verify", which leaves the write's status code to decide. A failed
+// account read is rethrown rather than turned into null: it is transient, not a fact about the
+// identity, and the verify loop retries it.
 export async function resolveMembershipReading(
   identity: string,
   reading: GroupMembershipSnapshot,
@@ -96,11 +105,7 @@ export async function resolveMembershipReading(
   if (!(identity || '').trim()) return null;
   if (reading.inNewGroup || reading.inOldGroup) return reading;
   if (looksLikeEmail(identity)) return reading;
-  try {
-    return (await confirmLinkedAccount()) ? reading : null;
-  } catch {
-    return null; // account read failed -> cannot verify
-  }
+  return (await confirmLinkedAccount()) ? reading : null;
 }
 
 export interface UpdateUserRolesPayload {
@@ -162,6 +167,40 @@ export function evaluateVerification(intent: RoleWriteIntent, snapshot: GroupMem
   return { verified, reconciledRole, partial };
 }
 
+interface TruthReading {
+  snapshot: GroupMembershipSnapshot | null;
+  verifySkipped?: 'unverifiable' | 'read-error';
+  verifyError?: string;
+}
+
+// Read group truth, re-reading through cache lag. A thrown read is transient and retried within the
+// same budget; a null is a permanent cannot-verify and ends the loop at once.
+async function readTruth(
+  intent: RoleWriteIntent,
+  deps: RoleWriteDeps,
+  maxVerifyReads: number,
+  verifyDelayMs: number,
+): Promise<TruthReading> {
+  let snapshot: GroupMembershipSnapshot | null = null;
+  let verifyError: string | undefined;
+  for (let i = 0; i < maxVerifyReads; i++) {
+    let s: GroupMembershipSnapshot | null;
+    try {
+      s = await deps.readMembership();
+    } catch (err) {
+      verifyError = err instanceof Error ? err.message : String(err);
+      if (i < maxVerifyReads - 1) await deps.sleep(verifyDelayMs);
+      continue;
+    }
+    if (s === null) return snapshot ? { snapshot } : { snapshot: null, verifySkipped: 'unverifiable' };
+    snapshot = s;
+    if (evaluateVerification(intent, s).verified) break;
+    if (i < maxVerifyReads - 1) await deps.sleep(verifyDelayMs);
+  }
+  if (snapshot) return { snapshot };
+  return { snapshot: null, verifySkipped: 'read-error', verifyError };
+}
+
 // Orchestrate retry + verify with all IO injected. The unit-tested heart of S4.
 export async function runReliableRoleWrite(
   intent: RoleWriteIntent,
@@ -185,6 +224,20 @@ export async function runReliableRoleWrite(
     lastError = r.error;
     lastRetryable = isRetryableError(r.status, r.networkOrTimeout);
     if (!lastRetryable || attempts >= maxWriteAttempts) break;
+
+    // A timeout does not mean the server-side job died: Hazu support measured a role change whose
+    // permission update outlasts the client timeout. Resending re-triggers that heavy job, so check
+    // group truth first and stop if the write has already landed. Only a timeout/network failure —
+    // a 5xx is an answer, and the measured 5xx-then-landed cases are caught by the final verify.
+    if (r.networkOrTimeout) {
+      const pre = await readTruth(intent, deps, maxVerifyReads, verifyDelayMs);
+      if (pre.snapshot) {
+        const v = evaluateVerification(intent, pre.snapshot);
+        if (v.verified) {
+          return { success: true, postOk: false, verifyRan: true, verified: true, reconciledRole: v.reconciledRole, partial: false, attempts };
+        }
+      }
+    }
     await deps.sleep(backoffMs(attempts - 1));
   }
 
@@ -196,28 +249,19 @@ export async function runReliableRoleWrite(
     return { success: false, postOk: false, verifyRan: false, verified: false, reconciledRole: null, partial: false, attempts, error: lastError };
   }
 
-  // 2. Verify against group truth, re-reading through cache lag.
-  let snapshot: GroupMembershipSnapshot | null = null;
-  let verifyRan = false;
-  for (let i = 0; i < maxVerifyReads; i++) {
-    const s = await deps.readMembership();
-    if (s === null) break; // cannot verify (missing group / read error)
-    snapshot = s;
-    verifyRan = true;
-    if (evaluateVerification(intent, s).verified) break;
-    if (i < maxVerifyReads - 1) await deps.sleep(verifyDelayMs);
-  }
+  // 2. Verify against group truth, re-reading through cache lag and transient read errors.
+  const { snapshot, verifySkipped, verifyError } = await readTruth(intent, deps, maxVerifyReads, verifyDelayMs);
+  const skipped = verifyError !== undefined ? { verifySkipped, verifyError } : { verifySkipped };
 
   // 3. Could not read truth. After a 2xx, trust it and reconcile optimistically to intent; after
   //    a failed write there is nothing to trust, so the failure stands.
-  if (!verifyRan || snapshot === null) {
+  if (snapshot === null) {
     if (!postOk) {
-      return { success: false, postOk: false, verifyRan: false, verified: false, reconciledRole: null, partial: false, attempts, error: lastError };
+      return { success: false, postOk: false, verifyRan: false, verified: false, reconciledRole: null, partial: false, attempts, error: lastError, ...skipped };
     }
     const optimistic = isRealRole(intent.newRole) ? intent.newRole : null;
-    return { success: true, postOk: true, verifyRan: false, verified: false, reconciledRole: optimistic, partial: false, attempts };
+    return { success: true, postOk: true, verifyRan: false, verified: false, reconciledRole: optimistic, partial: false, attempts, ...skipped };
   }
-
   // 4. Decide from truth. Truth outranks the status code in BOTH directions: a 2xx it contradicts
   //    is a failure, and a transport failure it confirms is a success — the write landed anyway.
   const v = evaluateVerification(intent, snapshot);

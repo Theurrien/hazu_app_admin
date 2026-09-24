@@ -480,7 +480,11 @@ bypass) but wraps it in **retry → verify-against-group-ACL-truth → reconcile
 
 ### Flow (all IO injected into the pure core)
 1. **Write, retrying only transient failures** — POST `update-user-roles`; retry on 5xx / network /
-   timeout with exponential backoff (`500 * 2^n`, up to 3 attempts). A 4xx fails fast.
+   timeout with exponential backoff (`500 * 2^n`, up to 3 attempts). A 4xx fails fast. **After a
+   timeout/network failure, group truth is read before resending**, and a write that already landed
+   is not resent: Hazu support confirmed a role change whose server-side permission update outlasts
+   the 120 s client timeout (for a student already in many classes), and a blind resend re-triggers
+   that heavy job. A 5xx resends without the check; the final verify still catches one that landed.
 2. **Verify against group truth** — re-read the role-GROUP ACL (up to 3 reads, 750 ms apart, to ride
    out cache lag) and match the person against ACL entries by email (`description`) **or account id
    (`authorId`)**, skipping `isGroup` entries (`isIdentityInAcl`). The authorId path matters because
@@ -488,6 +492,10 @@ bypass) but wraps it in **retry → verify-against-group-ACL-truth → reconcile
    does, it equals the ACL entry's `authorId`, not its `description`. If the local identity is neither
    a valid email nor a matched account id, verification is treated as **cannot-verify** (trust the 2xx)
    rather than a false negative. Groups are truth; profile tags are not consulted here.
+   A **failed ACL read is transient** and retried within the same 3-read budget; only a permanent
+   gap (no local identity, role group not synced, account id not on the profile ACL) ends the loop
+   at once. Before 2026-09-24 one failed read was swallowed into "cannot verify" and ended the loop,
+   logged only as `verifyRan=false` with no reason.
    Verification also runs after a **failed** write, for the reason in the success rule below — a
    4xx is the one exception (rejected at the boundary; a read there could only ever confirm
    pre-existing state and would mask a malformed request).
@@ -509,13 +517,15 @@ bypass) but wraps it in **retry → verify-against-group-ACL-truth → reconcile
   and 15 of 22 non-responses in the full sweep had in fact been applied. **A failure status carries
   no information about whether the write committed** — only the group ACL does. Without this, Matrix
   reverts a cell whose change actually took effect.
-- a write that **cannot be verified** (blank email, role-group not synced locally, or an ACL read
-  error) → falls back to the status code: a 2xx is trusted and reconciled optimistically to the
+- a write that **cannot be verified** (blank email, role-group not synced locally, account id not
+  on the profile ACL, or every ACL read in the loop failing) → falls back to the status code: a 2xx is trusted and reconciled optimistically to the
   intended role; a failure stands as a failure.
 
 Each write logs one concise `[role-write] … success=… postOk=… verifyRan=… verified=… attempts=…`
 line to the main-process console — a write that landed despite a transport failure reads as
-`success=true postOk=false verified=true`. The IPC handler contract is unchanged
+`success=true postOk=false verified=true`. When truth could not be read, the line says why:
+`verifySkipped=unverifiable(<reason>)` for a permanent gap, or `verifySkipped=read-error(<message>)`
+when every ACL read in the loop failed. The IPC handler contract is unchanged
 (`{ success, error? }`), so the renderer's Task Queue needs no change; the behavior changes are that
 an unconfirmed write now correctly reports failure instead of a silent success, and a confirmed
 write now correctly reports success instead of a false failure. (The old fire-and-forget `ASSIGNMENTS_EXECUTE`
