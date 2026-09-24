@@ -9,9 +9,40 @@ import {
   RoleWriteDeps,
   GroupMembershipSnapshot,
   resolveMembershipReading,
+  buildUpdateUserRolesPayload,
 } from './role-write';
 
 const noSleep = async () => {};
+
+describe('buildUpdateUserRolesPayload', () => {
+  it('sends the school template (root hazu) as templateId, not the hz-config-admin hazu', () => {
+    // Hazu support: templateId must be the school template itself — the same root the
+    // create-group / remove-group calls send. The hz-config-admin id is the wrong value here.
+    const payload = buildUpdateUserRolesPayload({
+      schoolTemplateId: 'ROOT_TEMPLATE_ID',
+      profileId: 'PROFILE_ID',
+      classId: 'CLASS_ID',
+      oldRole: null,
+      newRole: 'student',
+    });
+    expect(payload).toEqual({
+      templateId: 'ROOT_TEMPLATE_ID',
+      profileId: 'PROFILE_ID',
+      userTypesInfo: [{ classId: 'CLASS_ID', oldUserType: '_', newUserType: 'student' }],
+    });
+  });
+
+  it('encodes a removal as newUserType "_"', () => {
+    const payload = buildUpdateUserRolesPayload({
+      schoolTemplateId: 'ROOT_TEMPLATE_ID',
+      profileId: 'PROFILE_ID',
+      classId: 'CLASS_ID',
+      oldRole: 'student',
+      newRole: null,
+    });
+    expect(payload.userTypesInfo).toEqual([{ classId: 'CLASS_ID', oldUserType: 'student', newUserType: '_' }]);
+  });
+});
 
 describe('isIdentityInAcl', () => {
   const members = [
@@ -202,6 +233,118 @@ describe('runReliableRoleWrite', () => {
     expect(out).toMatchObject({ success: true, postOk: true, verifyRan: false, verified: false, reconciledRole: 'student' });
   });
 
+  // A failed ACL read is transient: one bad read must not end verification. Before this, a single
+  // throw inside readMembership was swallowed into null and the loop broke on its first pass, so a
+  // write was logged verifyRan=false with no reason and the remaining reads never happened.
+  it('retries a transient ACL read error within the verify loop', async () => {
+    let reads = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: true, networkOrTimeout: false }),
+      readMembership: async () => {
+        reads += 1;
+        if (reads === 1) throw new Error('ACL read failed');
+        return { inNewGroup: true, inOldGroup: false };
+      },
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(reads).toBe(2);
+    expect(out).toMatchObject({ success: true, verifyRan: true, verified: true, reconciledRole: 'student' });
+    expect(out.verifySkipped).toBeUndefined();
+  });
+
+  it('reports read-error with the message when every verify read fails', async () => {
+    let reads = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: false, networkOrTimeout: true, error: 'timeout of 120000ms exceeded' }),
+      readMembership: async () => { reads += 1; throw new Error('ACL read failed'); },
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps, { maxWriteAttempts: 1 });
+    expect(reads).toBe(3);
+    expect(out).toMatchObject({
+      success: false, postOk: false, verifyRan: false, verifySkipped: 'read-error', verifyError: 'ACL read failed',
+      error: 'timeout of 120000ms exceeded',
+    });
+  });
+
+  it('does not retry a permanent cannot-verify (null) and says so', async () => {
+    let reads = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => ({ ok: true, networkOrTimeout: false }),
+      readMembership: async () => { reads += 1; return null; },
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(reads).toBe(1);
+    expect(out).toMatchObject({ success: true, verifyRan: false, verifySkipped: 'unverifiable' });
+  });
+
+  // Option A: a timeout says nothing about whether the server-side job is still running. Hazu
+  // support measured a role change whose permission update outlasts the 120 s client timeout;
+  // resending blindly re-triggers that heavy job. So read group truth before each resend.
+  it('does not resend after a timeout when group truth already confirms the write', async () => {
+    let posts = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => { posts += 1; return { ok: false, networkOrTimeout: true, error: 'timeout' }; },
+      readMembership: okMembership,
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(posts).toBe(1);
+    expect(out).toMatchObject({ success: true, postOk: false, verifyRan: true, verified: true, reconciledRole: 'student', attempts: 1 });
+    expect(out.error).toBeUndefined();
+  });
+
+  it('resends after a timeout when group truth does not yet confirm the write', async () => {
+    let posts = 0;
+    let reads = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => {
+        posts += 1;
+        return posts === 1 ? { ok: false, networkOrTimeout: true, error: 'timeout' } : { ok: true, networkOrTimeout: false };
+      },
+      // Absent through the pre-resend check (3 reads), present after the second POST.
+      readMembership: async () => { reads += 1; return { inNewGroup: reads > 3, inOldGroup: false }; },
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(posts).toBe(2);
+    expect(out).toMatchObject({ success: true, postOk: true, verified: true, attempts: 2 });
+  });
+
+  it('still resends after a timeout when the pre-resend check cannot verify', async () => {
+    let posts = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => {
+        posts += 1;
+        return posts === 1 ? { ok: false, networkOrTimeout: true, error: 'timeout' } : { ok: true, networkOrTimeout: false };
+      },
+      readMembership: async () => null,
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(posts).toBe(2);
+    expect(out).toMatchObject({ success: true, postOk: true, verifyRan: false });
+  });
+
+  it('does not read truth before resending after a 5xx (Option A is timeout-only)', async () => {
+    let posts = 0;
+    let reads = 0;
+    const deps: RoleWriteDeps = {
+      postUpdateRoles: async () => {
+        posts += 1;
+        return posts < 3 ? { ok: false, status: 500, networkOrTimeout: false, error: 'boom' } : { ok: true, networkOrTimeout: false };
+      },
+      readMembership: async () => { reads += 1; return { inNewGroup: true, inOldGroup: false }; },
+      sleep: noSleep,
+    };
+    const out = await runReliableRoleWrite(assign, deps);
+    expect(posts).toBe(3);
+    expect(reads).toBe(1);
+    expect(out).toMatchObject({ success: true, postOk: true, attempts: 3 });
+  });
+
   it('stops verifying as soon as truth confirms (cache lag)', async () => {
     let reads = 0;
     const deps: RoleWriteDeps = {
@@ -249,10 +392,12 @@ describe('resolveMembershipReading', () => {
     expect(await resolveMembershipReading('', absent, neverCalled)).toBeNull();
   });
 
-  it('cannot verify when the account-confirmation read itself fails', async () => {
-    const r = await resolveMembershipReading('ACCTUID00000000000000000001', absent, async () => {
-      throw new Error('ACL read failed');
-    });
-    expect(r).toBeNull();
+  it('rethrows when the account-confirmation read itself fails, so the verify loop retries it', async () => {
+    // A failed read is transient, not a fact about the identity — null would end verification.
+    await expect(
+      resolveMembershipReading('ACCTUID00000000000000000001', absent, async () => {
+        throw new Error('ACL read failed');
+      }),
+    ).rejects.toThrow('ACL read failed');
   });
 });

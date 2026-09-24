@@ -6,6 +6,7 @@ import {
   runReliableRoleWrite,
   isIdentityInAcl,
   resolveMembershipReading,
+  buildUpdateUserRolesPayload,
   RoleWriteDeps,
   GroupMembershipSnapshot,
 } from './role-write';
@@ -34,10 +35,11 @@ export async function reliableUpdateUserRole(
 ): Promise<RoleWriteResult> {
   const db = getDb();
 
-  const adminRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_id'").get() as { value: string } | undefined;
-  const templateId = adminRow?.value;
-  if (!templateId) {
-    return { success: false, verified: false, reconciledRole: null, attempts: 0, error: 'Admin ID not found. Please run sync first.' };
+  // templateId is the school template (root hazu), not admin_id — see buildUpdateUserRolesPayload.
+  const rootRow = db.prepare("SELECT value FROM settings WHERE key = 'root_hazu_id'").get() as { value: string } | undefined;
+  const schoolTemplateId = rootRow?.value;
+  if (!schoolTemplateId) {
+    return { success: false, verified: false, reconciledRole: null, attempts: 0, error: 'Root Hazu ID not configured. Go to Settings.' };
   }
 
   const personRow = db.prepare('SELECT email FROM persons WHERE id = ?').get(personId) as { email: string | null } | undefined;
@@ -55,11 +57,7 @@ export async function reliableUpdateUserRole(
 
   const token = getApiKey();
   const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
-  const payload = {
-    templateId,
-    profileId: personId,
-    userTypesInfo: [{ classId: roomId, oldUserType: oldRole || '_', newUserType: newRole || '_' }],
-  };
+  const payload = buildUpdateUserRolesPayload({ schoolTemplateId, profileId: personId, classId: roomId, oldRole, newRole });
 
   const isMember = async (groupId: string | null): Promise<boolean> => {
     if (!groupId || !emailRaw) return false;
@@ -72,15 +70,23 @@ export async function reliableUpdateUserRole(
   // where a linked account appears as an ordinary person entry (isGroup false) — so unlike S6's
   // room-item ACL, isIdentityInAcl is the correct predicate here and its isGroup skip is right.
   // Memoized: the answer is a stable fact, and readMembership may run up to maxVerifyReads times.
+  // A failed read is not memoized: it is transient, and the verify loop retries it.
   let linkedAccount: Promise<boolean> | null = null;
   const confirmLinkedAccount = (): Promise<boolean> => {
     if (!linkedAccount) {
-      linkedAccount = sendApiRequestGetAclInfo(personId).then((acl) =>
-        isIdentityInAcl(acl?.data || [], emailRaw),
+      linkedAccount = sendApiRequestGetAclInfo(personId).then(
+        (acl) => isIdentityInAcl(acl?.data || [], emailRaw),
+        (err) => {
+          linkedAccount = null;
+          throw err;
+        },
       );
     }
     return linkedAccount;
   };
+
+  // Why readMembership returned null (a permanent cannot-verify), for the log line.
+  let unverifiableReason: string | undefined;
 
   const deps: RoleWriteDeps = {
     postUpdateRoles: async () => {
@@ -105,22 +111,27 @@ export async function reliableUpdateUserRole(
         return { ok: false, networkOrTimeout: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
+    // null = permanent cannot-verify (reason recorded); an ACL read error is left to THROW so the
+    // verify loop in role-write.ts retries it instead of giving up on the first failed read.
     readMembership: async (): Promise<GroupMembershipSnapshot | null> => {
       // Cannot verify without a local identity to match against role-group ACL entries.
-      if (!emailRaw) return null;
-      // Cannot verify if a group we need isn't synced locally.
-      if (isRealRole(newRole) && !newGroupId) return null;
-      if (isRealRole(oldRole) && oldRole !== newRole && !oldGroupId) return null;
-      try {
-        const inNewGroup = await isMember(newGroupId);
-        const inOldGroup = await isMember(oldGroupId);
-        // A UID identity absent from both groups used to be discarded as unverifiable, which let
-        // a 2xx that changed nothing report success. Confirm the UID against the profile's own
-        // ACL instead: a linked account makes the absence a true negative. See role-write.ts.
-        return await resolveMembershipReading(emailRaw, { inNewGroup, inOldGroup }, confirmLinkedAccount);
-      } catch {
-        return null; // ACL read failure -> cannot verify
+      if (!emailRaw) {
+        unverifiableReason = 'no local identity';
+        return null;
       }
+      // Cannot verify if a group we need isn't synced locally.
+      if ((isRealRole(newRole) && !newGroupId) || (isRealRole(oldRole) && oldRole !== newRole && !oldGroupId)) {
+        unverifiableReason = 'role group not synced locally';
+        return null;
+      }
+      const inNewGroup = await isMember(newGroupId);
+      const inOldGroup = await isMember(oldGroupId);
+      // A UID identity absent from both groups used to be discarded as unverifiable, which let
+      // a 2xx that changed nothing report success. Confirm the UID against the profile's own
+      // ACL instead: a linked account makes the absence a true negative. See role-write.ts.
+      const reading = await resolveMembershipReading(emailRaw, { inNewGroup, inOldGroup }, confirmLinkedAccount);
+      if (reading === null) unverifiableReason = 'account id not on the profile ACL';
+      return reading;
     },
     sleep,
   };
@@ -131,6 +142,8 @@ export async function reliableUpdateUserRole(
     `[role-write] ${personId} @ ${roomId} ${oldRole || '_'}→${newRole || '_'}: ` +
     `success=${outcome.success} postOk=${outcome.postOk} verifyRan=${outcome.verifyRan} ` +
     `verified=${outcome.verified} attempts=${outcome.attempts}` +
+    (outcome.verifySkipped === 'unverifiable' ? ` verifySkipped=unverifiable(${unverifiableReason ?? '?'})` : '') +
+    (outcome.verifySkipped === 'read-error' ? ` verifySkipped=read-error(${outcome.verifyError ?? '?'})` : '') +
     (outcome.error ? ` error=${outcome.error}` : ''),
   );
 

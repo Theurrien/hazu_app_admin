@@ -55,7 +55,7 @@ Bypassing to the permissions API is explicitly **out of scope** and deferred (ma
 
 `reliableUpdateUserRole(personId, roomId, oldRole, newRole)`:
 
-1. **Gather** (thin-IO): `templateId` = `admin_id` from settings; `email` = `persons.email` for `personId`; the role-group ids for `(roomId, newRole)` and `(roomId, oldRole)` from `distribution_groups` (`SELECT id FROM distribution_groups WHERE room_id=? AND role=?`).
+1. **Gather** (thin-IO): `templateId` = `root_hazu_id` from settings (the school template — originally specified as `admin_id`, which Hazu support confirmed on 2026-09-24 is wrong); `email` = `persons.email` for `personId`; the role-group ids for `(roomId, newRole)` and `(roomId, oldRole)` from `distribution_groups` (`SELECT id FROM distribution_groups WHERE room_id=? AND role=?`).
 2. **Write with retry**: POST `update-user-roles` with the existing payload
    `{ templateId, profileId: personId, userTypesInfo: [{ classId: roomId, oldUserType: oldRole||'_', newUserType: newRole||'_' }] }`.
    On a retryable error (5xx / network / timeout) sleep `backoffMs(attempt)` and retry, up to `MAX_WRITE_ATTEMPTS`. A 4xx stops immediately (deterministic).
