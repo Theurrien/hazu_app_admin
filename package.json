@@ -3,7 +3,7 @@
   "version": "1.0.3",
   "description": "Hazu Platform Admin Tool",
   "main": "dist/main/index.js",
-  "author": "Hazu",
+  "author": "Urs Chalupny",
   "license": "MIT",
   "scripts": {
     "postinstall": "electron-rebuild",
