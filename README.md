@@ -54,15 +54,20 @@ npm start
 
 ### Configure
 
-On first launch, open **Settings** and fill in:
+On first launch the app opens a setup screen that asks for two values:
 
-| Setting | What to enter |
+| Field | What to enter |
 |---------|---------------|
-| API Key | Your Hazu platform API key |
-| Environment | `swiss` (production), `io`, or `dev` |
+| Access key | Your Hazu platform API key |
 | Root Hazu ID | The ID of the root Hazu to sync from |
 
-Then go to **Dashboard → Sync Now** to pull your data.
+**Connect** checks both against the live API before saving anything, and tells you which of the
+two is wrong if it fails — a rejected key and an unknown root ID give different messages. Once it
+connects, **Load data now** runs the first sync. The setup screen uses the `swiss` (production)
+environment. To use `io` or `dev`, leave CIE mode (see below) and change it in **Settings**.
+
+If a later sync fails, the Dashboard offers **Check connection**, which reopens the setup screen
+pre-filled — the way back in when a key has been revoked or mistyped.
 
 ---
 
@@ -173,6 +178,9 @@ npm run dev     # Vite + Electron with hot reload
 | `npm run build` | Production build |
 | `npm start` | Run the built app |
 | `npm run dist` | Package for distribution |
+| `npm run dist:win` | Build the Windows installer locally (never publishes) |
+| `npm run release:win` | Build and publish a Windows release to GitHub — see [Releasing](#releasing) |
+| `npm run rebuild` | Rebuild the native SQLite module for Electron — run after any Windows build on a Mac |
 | `npm test` | Run the unit suite (vitest) |
 | `npm run test:watch` | Same, in watch mode |
 
@@ -224,6 +232,7 @@ fix the data rather than the guard. [CLAUDE.md](CLAUDE.md) has the full rule.
 │   │   └── contexts/          # TaskQueue context
 │   └── shared/                # Types & IPC channel constants
 ├── docs/
+│   ├── handover/              # Runbook and the first-start sheet for new users
 │   ├── specs/                 # Design specs, one per feature stage
 │   └── plans/                 # Implementation plans built from those specs
 ├── scripts/                   # Repo tooling (person-data guard)
@@ -260,7 +269,7 @@ in place, so `npm run dev` won't start again until you run `npm run rebuild`.
 - **New page** — create `src/renderer/pages/NewPage.tsx`, add a route in `App.tsx`, add a nav item in `Sidebar.tsx`
 - **New database column** — update `src/main/database/schema.sql` and the corresponding interface in `src/shared/types.ts`
 - **New Task Queue action** — extend the `TaskType` union and the queue processor in `src/renderer/contexts/TaskQueueContext.tsx`, and add a `getLabel()` case in `TaskQueuePanel.tsx`. The switch has no exhaustiveness check, so a missing case renders a blank row and the compiler stays silent.
-- **New write against the Hazu API** — follow the pure-core-plus-thin-IO split the existing write paths use, and verify the write by re-reading the server rather than trusting its status code. The endpoints return 500s and timeouts for writes that committed, and 200s for writes that did not.
+- **New write against the Hazu API** — follow the pure-core-plus-thin-IO split the existing write paths use, and verify the write by re-reading the server rather than trusting its status code. The endpoints return 500s and timeouts for writes that committed, and 200s for writes that did not. Be careful resending after a timeout: some server-side jobs outlast the client timeout, so the role-write path checks whether the write already landed before it resends.
 
 ---
 
