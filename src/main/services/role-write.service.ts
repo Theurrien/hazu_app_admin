@@ -6,6 +6,7 @@ import {
   runReliableRoleWrite,
   isIdentityInAcl,
   resolveMembershipReading,
+  buildUpdateUserRolesPayload,
   RoleWriteDeps,
   GroupMembershipSnapshot,
 } from './role-write';
@@ -34,10 +35,11 @@ export async function reliableUpdateUserRole(
 ): Promise<RoleWriteResult> {
   const db = getDb();
 
-  const adminRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_id'").get() as { value: string } | undefined;
-  const templateId = adminRow?.value;
-  if (!templateId) {
-    return { success: false, verified: false, reconciledRole: null, attempts: 0, error: 'Admin ID not found. Please run sync first.' };
+  // templateId is the school template (root hazu), not admin_id — see buildUpdateUserRolesPayload.
+  const rootRow = db.prepare("SELECT value FROM settings WHERE key = 'root_hazu_id'").get() as { value: string } | undefined;
+  const schoolTemplateId = rootRow?.value;
+  if (!schoolTemplateId) {
+    return { success: false, verified: false, reconciledRole: null, attempts: 0, error: 'Root Hazu ID not configured. Go to Settings.' };
   }
 
   const personRow = db.prepare('SELECT email FROM persons WHERE id = ?').get(personId) as { email: string | null } | undefined;
@@ -55,11 +57,7 @@ export async function reliableUpdateUserRole(
 
   const token = getApiKey();
   const headers = token.length <= 20 ? { token } : { 'x-api-key': token };
-  const payload = {
-    templateId,
-    profileId: personId,
-    userTypesInfo: [{ classId: roomId, oldUserType: oldRole || '_', newUserType: newRole || '_' }],
-  };
+  const payload = buildUpdateUserRolesPayload({ schoolTemplateId, profileId: personId, classId: roomId, oldRole, newRole });
 
   const isMember = async (groupId: string | null): Promise<boolean> => {
     if (!groupId || !emailRaw) return false;

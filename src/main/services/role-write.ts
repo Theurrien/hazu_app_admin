@@ -103,6 +103,30 @@ export async function resolveMembershipReading(
   }
 }
 
+export interface UpdateUserRolesPayload {
+  templateId: string;
+  profileId: string;
+  userTypesInfo: Array<{ classId: string; oldUserType: string; newUserType: string }>;
+}
+
+// Body for POST /api-v2-admin/update-user-roles. `templateId` is the SCHOOL TEMPLATE — the root
+// hazu (`root_hazu_id`), the same value the create-group / remove-group calls send — and NOT the
+// hz-config-admin hazu (`admin_id`). Hazu support confirmed the admin id is the wrong value here.
+// "No role" is encoded as '_' on either side.
+export function buildUpdateUserRolesPayload(args: {
+  schoolTemplateId: string;
+  profileId: string;
+  classId: string;
+  oldRole: string | null;
+  newRole: string | null;
+}): UpdateUserRolesPayload {
+  return {
+    templateId: args.schoolTemplateId,
+    profileId: args.profileId,
+    userTypesInfo: [{ classId: args.classId, oldUserType: args.oldRole || '_', newUserType: args.newRole || '_' }],
+  };
+}
+
 // Retry only transient failures: any 5xx, or a network/timeout error. Never a 4xx (deterministic).
 export function isRetryableError(status: number | undefined, networkOrTimeout: boolean): boolean {
   if (networkOrTimeout) return true;

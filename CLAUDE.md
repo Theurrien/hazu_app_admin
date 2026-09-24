@@ -254,7 +254,8 @@ Stored in SQLite settings table:
 - `api_key` - Hazu API key
 - `environment` - "swiss" | "io" | "dev"
 - `root_hazu_id` - Root Hazu ID to sync from
-- `admin_id` - `hz-config-admin` Hazu ID (set by sync; used as `adminId`/`templateId` for user ops)
+- `admin_id` - `hz-config-admin` Hazu ID (set by sync; used as `adminId` for `add-users`). **Not** the
+  `templateId` of `update-user-roles` — that is `root_hazu_id` (see Step 2 below)
 - `template_id` - Profile-templates container ID (set by sync)
 
 ### Person Creation
@@ -288,9 +289,13 @@ local `persons` row is minimal — the next Dashboard sync (`INSERT OR REPLACE` 
 `POST /api-v2-admin/update-user-roles` with the same payload, now wrapped in retry + verify + local
 reconcile:
 ```jsonc
-{ "templateId": adminId, "profileId": <new id>,
+{ "templateId": rootHazuId, "profileId": <new id>,
   "userTypesInfo": [ { "classId": roomId, "oldUserType": "_", "newUserType": role } ] }
 ```
+`templateId` is the **school template** — the root hazu (`root_hazu_id`), the same value the
+create-group / remove-group webhook calls send. It is **not** `admin_id`: until 2026-09-24 the app
+sent the `hz-config-admin` id here, and Hazu support confirmed that is the wrong value. The body is
+built by `buildUpdateUserRolesPayload` in [role-write.ts](src/main/services/role-write.ts).
 Each per-room call is wrapped in its own try/catch, so room-assignment failures stay logged-but-non-fatal (the person is already created).
 
 > Note: `sendApiRequestCreateUser` in `api.ts` targets the older singular `add-user` endpoint
@@ -438,7 +443,7 @@ the API directly and push a completed `addNotification` into the same panel.
 Each `roleUpdate` → `updateUserRole(personId, roomId, oldRole, newRole)` → `WEBHOOK_UPDATE_USER_ROLE`
 handler → the **S4 reliable role-write path** (`reliableUpdateUserRole`; see
 [Reliable Role Writes (S4)](#reliable-role-writes-s4)). It still posts to
-`POST /api-v2-admin/update-user-roles` (same endpoint Person Creation uses; `templateId` = `admin_id`),
+`POST /api-v2-admin/update-user-roles` (same endpoint Person Creation uses; `templateId` = `root_hazu_id`, the school template),
 now wrapped in retry + verify-against-group-ACL-truth. On a **confirmed** write it reconciles local
 `person_room_assignments` **from truth** (`INSERT OR REPLACE`, or `DELETE` when the role resolves to
 `_`), so no full re-sync is needed; a write the server accepted but truth contradicts returns
@@ -468,7 +473,7 @@ bypass) but wraps it in **retry → verify-against-group-ACL-truth → reconcile
   `evaluateVerification` (the assign/remove/change decision table), and the `runReliableRoleWrite`
   orchestrator. Tests in [role-write.test.ts](src/main/services/role-write.test.ts).
 - [role-write.service.ts](src/main/services/role-write.service.ts) — **thin IO layer**:
-  `reliableUpdateUserRole(personId, roomId, oldRole, newRole)` gathers `admin_id`, the person's
+  `reliableUpdateUserRole(personId, roomId, oldRole, newRole)` gathers `root_hazu_id`, the person's
   `email`, and the role-group ids from SQLite, builds the real deps (axios POST +
   `sendApiRequestGetAclInfo` membership reads + `sleep`), runs the orchestrator, then reconciles
   local `person_room_assignments`.

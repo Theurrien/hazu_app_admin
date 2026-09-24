@@ -9,9 +9,40 @@ import {
   RoleWriteDeps,
   GroupMembershipSnapshot,
   resolveMembershipReading,
+  buildUpdateUserRolesPayload,
 } from './role-write';
 
 const noSleep = async () => {};
+
+describe('buildUpdateUserRolesPayload', () => {
+  it('sends the school template (root hazu) as templateId, not the hz-config-admin hazu', () => {
+    // Hazu support: templateId must be the school template itself — the same root the
+    // create-group / remove-group calls send. The hz-config-admin id is the wrong value here.
+    const payload = buildUpdateUserRolesPayload({
+      schoolTemplateId: 'ROOT_TEMPLATE_ID',
+      profileId: 'PROFILE_ID',
+      classId: 'CLASS_ID',
+      oldRole: null,
+      newRole: 'student',
+    });
+    expect(payload).toEqual({
+      templateId: 'ROOT_TEMPLATE_ID',
+      profileId: 'PROFILE_ID',
+      userTypesInfo: [{ classId: 'CLASS_ID', oldUserType: '_', newUserType: 'student' }],
+    });
+  });
+
+  it('encodes a removal as newUserType "_"', () => {
+    const payload = buildUpdateUserRolesPayload({
+      schoolTemplateId: 'ROOT_TEMPLATE_ID',
+      profileId: 'PROFILE_ID',
+      classId: 'CLASS_ID',
+      oldRole: 'student',
+      newRole: null,
+    });
+    expect(payload.userTypesInfo).toEqual([{ classId: 'CLASS_ID', oldUserType: 'student', newUserType: '_' }]);
+  });
+});
 
 describe('isIdentityInAcl', () => {
   const members = [
