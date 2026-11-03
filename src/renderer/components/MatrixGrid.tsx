@@ -46,9 +46,12 @@ interface MatrixGridProps {
   onRenameRoom?: (roomId: string, currentTitle: string) => void;
   /** When given, the cell dropdown offers only "-" plus these roles. */
   allowedRoles?: PersonType[];
+  /** Per-column gates for the header actions. Omitted means every column gets them. */
+  canRenameRoom?: (room: Room) => boolean;
+  canDeleteRoom?: (room: Room) => boolean;
 }
 
-export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDeleteRoom, onDeletePerson, onRenameRoom, allowedRoles }: MatrixGridProps) {
+export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDeleteRoom, onDeletePerson, onRenameRoom, allowedRoles, canRenameRoom, canDeleteRoom }: MatrixGridProps) {
   // "_" is the "unassigned" sentinel and is always offered — it is how a role is removed.
   const visibleRoleOptions = allowedRoles
     ? roleOptions.filter(option => option.value === '_' || allowedRoles.includes(option.value as PersonType))
@@ -145,6 +148,8 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDele
             {rooms.slice(visibleCols.start, visibleCols.end).map((room, idx) => {
               const colIndex = visibleCols.start + idx;
               const title = stripHtml(room.title);
+              const showRename = !!onRenameRoom && (canRenameRoom?.(room) ?? true);
+              const showDelete = !!onDeleteRoom && (canDeleteRoom?.(room) ?? true);
               return (
                 <div
                   key={room.id}
@@ -160,12 +165,12 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDele
                     <div className="text-xs text-gray-700 font-medium leading-tight line-clamp-3 flex-1">
                       {title}
                     </div>
-                    <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
-                      {onRenameRoom && (
+                    <div className="flex justify-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity mt-1">
+                      {showRename && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            onRenameRoom(room.id, title);
+                            onRenameRoom!(room.id, title);
                           }}
                           className="p-0.5 text-gray-500 hover:text-gray-700 transition-colors"
                           title="Rename room"
@@ -175,11 +180,11 @@ export function MatrixGrid({ persons, rooms, getAssignment, onRoleChange, onDele
                           </svg>
                         </button>
                       )}
-                      {onDeleteRoom && (
+                      {showDelete && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            onDeleteRoom(room.id, title);
+                            onDeleteRoom!(room.id, title);
                           }}
                           className="p-0.5 text-red-500 hover:text-red-700 transition-colors"
                           title="Delete room"

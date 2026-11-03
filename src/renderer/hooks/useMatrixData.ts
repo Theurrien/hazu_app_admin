@@ -314,6 +314,8 @@ export function useMatrixData(options: UseMatrixDataOptions = {}) {
     // Data
     persons: sortedPersons,
     rooms: sortedRooms,
+    /** Every synced room, unfiltered — for structure checks that must not depend on search. */
+    allRooms,
     getAssignment,
     loading,
     error,

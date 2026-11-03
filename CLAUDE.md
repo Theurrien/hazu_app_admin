@@ -394,7 +394,7 @@ columns, and every cell is a role dropdown.
   and room types (empty selection = show all) and free-text searches both axes. Rows/columns sort by
   type then alphabetically; searching one axis "smart-sorts" the other so the top match's assigned
   rows/columns float to the front.
-- **Delete / rename from headers** — hovering a room header reveals rename + delete; hovering a
+- **Delete / rename from headers** — room headers carry rename + delete icons (faint until hovered); hovering a
   person row reveals delete. These open confirmation modals
   ([DeleteConfirmationModal.tsx](src/renderer/components/DeleteConfirmationModal.tsx),
   [RenameRoomModal.tsx](src/renderer/components/RenameRoomModal.tsx)) and call `deleteRoom` /
@@ -406,7 +406,8 @@ Both write through the same `roleUpdate` task → `WEBHOOK_UPDATE_USER_ROLE` →
 helper (`reliableUpdateUserRole`; see [Reliable Role Writes (S4)](#reliable-role-writes-s4)). Matrix
 is for **manual, one-cell-at-a-time** edits with live optimistic feedback; the Bulk Import
 **Assignment** tab is for **batch** assignment from a spreadsheet. Deleting/renaming rooms and
-deleting persons is Matrix-only.
+deleting persons is Matrix-only (in CIE mode: room rename/delete only, gated per column — see
+[CIE Mode (S9)](#cie-mode-s9)).
 
 ### Prerequisites
 - Run the main sync first (Dashboard > Sync) — the grid renders entirely from local SQLite.
@@ -831,13 +832,31 @@ there, not at the call sites**, or the two modes drift: a tab shown in one and f
 other. `AppModeContext` is the only thing that touches the setting, through the existing
 `getSetting`/`setSetting` IPC.
 
-### No workflow gains a capability
+### Subtraction, with one exception: room rename and delete
 
 Every renderer change is subtraction — fewer nav items, fewer tabs, frozen filter sets, shorter
-dropdowns, hidden hover actions. The main process, the IPC layer, the Task Queue, and the S4/S6/S7
-write paths are untouched. Hiding the Matrix's rename and delete needs no change to
-[MatrixGrid.tsx](src/renderer/components/MatrixGrid.tsx): the three handlers are already optional
-props whose affordances render only when passed, so `MatrixPage` withholds them.
+dropdowns. The main process, the IPC layer, the Task Queue, and the S4/S6/S7 write paths are
+untouched. Hiding person delete needs no change to
+[MatrixGrid.tsx](src/renderer/components/MatrixGrid.tsx): its handlers are optional props whose
+affordances render only when passed, so `MatrixPage` withholds `onDeletePerson`.
+
+**Rename and delete of rooms came back in CIE mode on 2026-11-03**, so a course teacher can fix a
+typo in a course title and undo rooms created by mistake. They are gated per column by
+`canRenameRoom` / `canDeleteRoom` in [app-mode.ts](src/shared/app-mode.ts), passed to
+`MatrixGrid` as predicates:
+
+- **Never on a category folder.** The CIE folder is itself a `cie` row, so it is a Matrix column;
+  deleting it would remove the whole CIE Hazu. A category is a row whose `parent_id` is
+  `root_hazu_id` (`categoryIdsOf`) — the same predicate `CreateRoomModal` uses. If the root id is
+  unknown, no categories are known and CIE mode offers neither action.
+- **Rename** — any course.
+- **Delete** — only a course whose parent *is* a category, i.e. this year's flat courses
+  (including one created moments ago and not yet synced). Courses filed into a year folder are
+  the archive, and their parent is that folder, which has no row of its own.
+
+The test does **not** use `class_id`: a room created through Room Creation is inserted locally
+without one until the next sync, so a `class_id` test would hide delete on exactly the rooms it
+exists for. Complete mode is unchanged — both actions on every column.
 
 The **Dashboard stays visible** in CIE mode. Matrix and Bulk Import render entirely from local
 SQLite, and the Dashboard's Sync button is the app's only trigger — hiding it would have meant
@@ -994,8 +1013,9 @@ recovery, and one real self-update.
    reason; each confirmed person becomes one `pruneDeadTags` task, re-probed against Hazu before
    deletion and verified against a fresh profile read after
 10. Click the padlock in the header to leave CIE mode (admin password), and again to return.
-    Locked, confirm three nav items, CIE-only Matrix columns, a three-entry role dropdown, no
-    rename/delete on hover, and two Bulk Import tabs.
+    Locked, confirm three nav items, CIE-only Matrix columns, a three-entry role dropdown, rename
+    on course headers but not on the CIE folder, delete only on this year's flat courses, no person
+    delete, and two Bulk Import tabs.
 
 ## Future Development
 

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { AnchoredPanel } from '../AnchoredPanel';
 
 interface Person {
   id: string;
@@ -123,41 +124,14 @@ export function PersonMatchingPanel({
                     </div>
 
                     <div className="flex-1">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="Search person..."
-                          value={currentResolution ? '' : searchQuery}
-                          onChange={(e) => handleSearchChange(email, e.target.value)}
-                          disabled={!!currentResolution}
-                          className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                        />
-
-                        {/* Search results dropdown */}
-                        {searchQuery && !currentResolution && (
-                          <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                            {filteredPersons.length === 0 ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">
-                                No persons found
-                              </div>
-                            ) : (
-                              filteredPersons.map((person) => (
-                                <button
-                                  key={person.id}
-                                  type="button"
-                                  onClick={() => handleSelectPerson(email, person.id)}
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100"
-                                >
-                                  <div className="font-medium">{person.display_name}</div>
-                                  {person.email && (
-                                    <div className="text-xs text-gray-500">{person.email}</div>
-                                  )}
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      <PersonSearchField
+                        searchQuery={currentResolution ? '' : searchQuery}
+                        disabled={!!currentResolution}
+                        showResults={!!searchQuery && !currentResolution}
+                        results={filteredPersons}
+                        onSearchChange={(query) => handleSearchChange(email, query)}
+                        onSelect={(personId) => handleSelectPerson(email, personId)}
+                      />
 
                       {/* Show selected resolution */}
                       {currentResolution && (
@@ -190,5 +164,62 @@ export function PersonMatchingPanel({
         </div>
       )}
     </div>
+  );
+}
+
+interface PersonSearchFieldProps {
+  searchQuery: string;
+  disabled: boolean;
+  showResults: boolean;
+  results: Person[];
+  onSearchChange: (query: string) => void;
+  onSelect: (personId: string) => void;
+}
+
+/** One row's search box; its results panel floats free of the list's scroll box. */
+function PersonSearchField({
+  searchQuery,
+  disabled,
+  showResults,
+  results,
+  onSearchChange,
+  onSelect,
+}: PersonSearchFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        placeholder="Search person..."
+        value={searchQuery}
+        onChange={(e) => onSearchChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+      />
+
+      {showResults && (
+        <AnchoredPanel anchorRef={inputRef} preferredMaxHeight={240}>
+          <div className="min-h-0 overflow-y-auto">
+            {results.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-gray-500">No persons found</div>
+            ) : (
+              results.map((person) => (
+                <button
+                  key={person.id}
+                  type="button"
+                  onClick={() => onSelect(person.id)}
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100"
+                >
+                  <div className="font-medium">{person.display_name}</div>
+                  {person.email && <div className="text-xs text-gray-500">{person.email}</div>}
+                </button>
+              ))
+            )}
+          </div>
+        </AnchoredPanel>
+      )}
+    </>
   );
 }

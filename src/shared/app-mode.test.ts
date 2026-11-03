@@ -12,6 +12,9 @@ import {
   allowedRoomTypes,
   allowedTaskTypes,
   isRestricted,
+  canRenameRoom,
+  canDeleteRoom,
+  categoryIdsOf,
 } from './app-mode';
 
 describe('parseAppMode', () => {
@@ -199,5 +202,47 @@ describe('returned arrays are safe to hand to callers', () => {
 
     allowedTaskTypes('cie').push('healTag');
     expect(allowedTaskTypes('cie')).toEqual(['roleUpdate', 'createRoom']);
+  });
+});
+
+describe('room actions', () => {
+  const root = 'root';
+  const category = { id: 'cat-cie', parent_id: root };
+  const flatCourse = { id: 'c1', parent_id: 'cat-cie' };
+  const archivedCourse = { id: 'c2', parent_id: 'year-folder' };
+  const categoryIds = categoryIdsOf([category, flatCourse, archivedCourse], root);
+
+  it('finds categories as the rows directly under root', () => {
+    expect([...categoryIds]).toEqual(['cat-cie']);
+    expect(categoryIdsOf([category], null).size).toBe(0);
+  });
+
+  it('allows everything in complete mode', () => {
+    for (const room of [category, flatCourse, archivedCourse]) {
+      expect(canRenameRoom('complete', room, categoryIds)).toBe(true);
+      expect(canDeleteRoom('complete', room, categoryIds)).toBe(true);
+    }
+  });
+
+  it('never offers rename or delete on the category folder in CIE mode', () => {
+    expect(canRenameRoom('cie', category, categoryIds)).toBe(false);
+    expect(canDeleteRoom('cie', category, categoryIds)).toBe(false);
+  });
+
+  it('renames any course in CIE mode', () => {
+    expect(canRenameRoom('cie', flatCourse, categoryIds)).toBe(true);
+    expect(canRenameRoom('cie', archivedCourse, categoryIds)).toBe(true);
+  });
+
+  it('deletes only courses sitting directly in a category in CIE mode', () => {
+    expect(canDeleteRoom('cie', flatCourse, categoryIds)).toBe(true);
+    expect(canDeleteRoom('cie', archivedCourse, categoryIds)).toBe(false);
+    expect(canDeleteRoom('cie', { id: 'c3', parent_id: null }, categoryIds)).toBe(false);
+  });
+
+  it('offers nothing in CIE mode when no categories are known', () => {
+    const none = new Set<string>();
+    expect(canRenameRoom('cie', flatCourse, none)).toBe(false);
+    expect(canDeleteRoom('cie', flatCourse, none)).toBe(false);
   });
 });

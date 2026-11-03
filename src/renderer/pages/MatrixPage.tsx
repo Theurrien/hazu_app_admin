@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useMatrixData } from '../hooks/useMatrixData';
 import { MatrixFilters } from '../components/MatrixFilters';
 import { MatrixGrid } from '../components/MatrixGrid';
@@ -6,7 +6,15 @@ import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
 import { RenameRoomModal } from '../components/RenameRoomModal';
 import { useAppMode } from '../contexts/AppModeContext';
-import { allowedPersonTypes, allowedRoomTypes, isRestricted } from '../../shared/app-mode';
+import {
+  allowedPersonTypes,
+  allowedRoomTypes,
+  isRestricted,
+  canRenameRoom,
+  canDeleteRoom,
+  categoryIdsOf,
+} from '../../shared/app-mode';
+import type { Room } from '../../shared/types';
 
 function MatrixPage() {
   const { mode } = useAppMode();
@@ -15,6 +23,7 @@ function MatrixPage() {
   const {
     persons,
     rooms,
+    allRooms,
     getAssignment,
     loading,
     error,
@@ -33,6 +42,25 @@ function MatrixPage() {
   );
 
   const { addRoleUpdateTask } = useTaskQueue();
+
+  // Category folders are told apart from courses by their parent being the root Hazu,
+  // so the header actions can keep away from the CIE folder itself.
+  const [rootHazuId, setRootHazuId] = useState<string | null>(null);
+  useEffect(() => {
+    window.electronAPI
+      .getSetting('root_hazu_id')
+      .then(setRootHazuId)
+      .catch((err) => console.error('[matrix] failed to read root_hazu_id:', err));
+  }, []);
+  const categoryIds = useMemo(() => categoryIdsOf(allRooms, rootHazuId), [allRooms, rootHazuId]);
+  const isRenamable = useCallback(
+    (room: Room) => canRenameRoom(mode, room, categoryIds),
+    [mode, categoryIds]
+  );
+  const isDeletable = useCallback(
+    (room: Room) => canDeleteRoom(mode, room, categoryIds),
+    [mode, categoryIds]
+  );
 
   // Optimistic overlay on top of the synced data, keyed `personId:roomId`.
   //
@@ -203,9 +231,11 @@ function MatrixPage() {
         getAssignment={getAssignmentWithOverrides}
         onRoleChange={handleRoleChange}
         allowedRoles={restricted ? allowedPersonTypes(mode) : undefined}
-        onDeleteRoom={restricted ? undefined : handleDeleteRoom}
+        onDeleteRoom={handleDeleteRoom}
         onDeletePerson={restricted ? undefined : handleDeletePerson}
-        onRenameRoom={restricted ? undefined : handleRenameRoom}
+        onRenameRoom={handleRenameRoom}
+        canRenameRoom={isRenamable}
+        canDeleteRoom={isDeletable}
       />
 
       {/* Delete Room Modal */}

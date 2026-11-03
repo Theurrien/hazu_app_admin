@@ -138,3 +138,56 @@ export function allowedRoomTypes(mode: AppMode): RoomType[] {
 export function allowedTaskTypes(mode: AppMode): TaskType[] {
   return [...(mode === 'complete' ? ALL_TASK_TYPES : CIE_TASK_TYPES)];
 }
+
+/** The fields of a `rooms` row the room-action rules below look at. */
+export interface RoomActionTarget {
+  id: string;
+  parent_id: string | null;
+}
+
+/**
+ * Category folders are the rows whose parent is the root Hazu — the same predicate
+ * CreateRoomModal uses to find a creation target (see the S8 notes in CLAUDE.md).
+ */
+export function categoryIdsOf(
+  rooms: readonly RoomActionTarget[],
+  rootHazuId: string | null | undefined
+): Set<string> {
+  if (!rootHazuId) return new Set();
+  return new Set(rooms.filter((r) => r.parent_id === rootHazuId).map((r) => r.id));
+}
+
+/**
+ * Rename from the Matrix header. Complete mode allows it on every column.
+ *
+ * CIE mode never allows it on a category folder: the CIE folder is itself a `cie` row, so
+ * it shows up as a Matrix column. With no categories known (root id not synced) nothing
+ * can be told apart, so nothing is offered.
+ */
+export function canRenameRoom(
+  mode: AppMode,
+  room: RoomActionTarget,
+  categoryIds: ReadonlySet<string>
+): boolean {
+  if (mode === 'complete') return true;
+  return categoryIds.size > 0 && room.parent_id !== null && !categoryIds.has(room.id);
+}
+
+/**
+ * Delete from the Matrix header. Complete mode allows it on every column.
+ *
+ * CIE mode deletes only courses sitting directly in a category folder — this year's
+ * courses, which land flat under the CIE Hazu (see the S9 spec), including ones created
+ * moments ago and not yet synced. A course filed into a year folder is the archive: its
+ * parent is not a category, so delete stays hidden. Deleting the CIE folder itself would
+ * remove the whole CIE Hazu; its parent is the root, never a category, so it is excluded
+ * by the same test.
+ */
+export function canDeleteRoom(
+  mode: AppMode,
+  room: RoomActionTarget,
+  categoryIds: ReadonlySet<string>
+): boolean {
+  if (mode === 'complete') return true;
+  return room.parent_id !== null && categoryIds.has(room.parent_id);
+}

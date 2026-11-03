@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import type { RoomType } from '../../../shared/types';
+import { AnchoredPanel } from '../AnchoredPanel';
 
 interface Room {
   id: string;
@@ -35,6 +36,9 @@ export function GroupedRoomSelector({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<RoomType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The panel is portalled out of `dropdownRef`, so it needs its own ref for outside clicks.
+  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Get selected room title
@@ -94,7 +98,12 @@ export function GroupedRoomSelector({
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target) &&
+        !panelRef.current?.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
@@ -145,6 +154,7 @@ export function GroupedRoomSelector({
     <div className="relative" ref={dropdownRef}>
       {/* Selected value display / trigger */}
       <button
+        ref={triggerRef}
         type="button"
         onClick={handleOpen}
         disabled={disabled}
@@ -179,10 +189,10 @@ export function GroupedRoomSelector({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
+        <AnchoredPanel anchorRef={triggerRef} panelRef={panelRef}>
           {!selectedType ? (
             // Type selection
-            <div className="py-1">
+            <div className="py-1 overflow-y-auto">
               {roomTypeOrder.map((type) => (
                 <button
                   key={type}
@@ -214,9 +224,9 @@ export function GroupedRoomSelector({
             </div>
           ) : (
             // Room selection within type
-            <div>
+            <div className="flex flex-col min-h-0">
               {/* Back button + search */}
-              <div className="border-b border-gray-200 p-2">
+              <div className="border-b border-gray-200 p-2 shrink-0">
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -242,7 +252,7 @@ export function GroupedRoomSelector({
               </div>
 
               {/* Room list */}
-              <div className="max-h-48 overflow-y-auto">
+              <div className="min-h-0 overflow-y-auto">
                 {filteredRooms.length === 0 ? (
                   <div className="px-4 py-3 text-sm text-gray-500 text-center">
                     No rooms found
@@ -265,7 +275,7 @@ export function GroupedRoomSelector({
               </div>
             </div>
           )}
-        </div>
+        </AnchoredPanel>
       )}
     </div>
   );
