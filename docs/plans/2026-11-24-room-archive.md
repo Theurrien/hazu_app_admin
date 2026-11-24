@@ -36,7 +36,9 @@
 
 ---
 
-### Task 0: Live check — how the Archive Hazu stays unlisted (gates Tasks 1–7)
+### Task 0: Live check — how the Archive Hazu stays unlisted (gates Tasks 1–7) — DONE 2026-11-24
+
+Result: Archive Hazu `privacy: 'private'`, per-room folder `privacy: 'unlisted'`, room privacy unchanged; no hide tags. Only a member's own Hazu favourites still reach the room (accepted).
 
 Controller task with the maintainer, no code. Spec §8.
 
@@ -56,7 +58,7 @@ Controller task with the maintainer, no code. Spec §8.
 - Create: `src/shared/archive-types.ts`
 
 **Interfaces:**
-- Consumes: `isRetryableError(status, networkOrTimeout)`, `backoffMs(attempt)` from `role-write.ts`; `ARCHIVE_HIDE_TAGS`, `ROOM_HIDE_TAGS` values from Task 0's ruling.
+- Consumes: `isRetryableError(status, networkOrTimeout)`, `backoffMs(attempt)` from `role-write.ts`; the privacy values from Task 0 (below).
 - Produces (in `room-archive.ts`):
   ```ts
   export interface HazuNode { id: string; parentId: string | null; title: string; tags: string[] }
@@ -64,14 +66,14 @@ Controller task with the maintainer, no code. Spec §8.
   export interface ArchiveDeps {
     read(id: string): Promise<HazuNode | null>;          // null only on 404
     list(parentId: string): Promise<HazuNode[]>;
-    create(parentId: string, title: string, tags: string[]): Promise<string>;  // returns new id
+    create(parentId: string, title: string, tags: string[], privacy: 'private' | 'unlisted'): Promise<string>;  // returns new id
     move(id: string, targetId: string): Promise<void>;
     addTags(id: string, tags: string[]): Promise<void>;
     removeTags(id: string, tags: string[]): Promise<void>;
     sleep(ms: number): Promise<void>;
   }
   export const ARCHIVE_ROOT_TAG, ROOM_FOLDER_TAG, GROUPS_FOLDER_TAG: string;
-  export const ARCHIVE_HIDE_TAGS: string[]; export const ROOM_HIDE_TAGS: string[];
+  export const ARCHIVE_ROOT_PRIVACY = 'private'; export const ROOM_FOLDER_PRIVACY = 'unlisted'; export const GROUPS_FOLDER_PRIVACY = 'private';
   export function buildRecordTags(r: { classId: string; fromParentId: string; roomType: ArchiveRoomType; archivedAt: number }): string[];
   export function parseRecordTags(tags: string[]): { classId: string; fromParentId: string; roomType: ArchiveRoomType; archivedAt: number } | null;  // null if any part missing
   export function classTagsFor(classId: string, roles: string[]): string[];   // hz-config-class-{classId}-{role}
@@ -92,10 +94,10 @@ Controller task with the maintainer, no code. Spec §8.
 
 `runArchive` steps (spec §6), each wrapped in the retry helper, each skipped when the live read shows it done:
 1. `read(room.id)`: null → fail « salle introuvable ». If its parent is a per-room folder whose tags hold `hz-config-archive-class-{classId}` → the room is already moved; continue with the remaining steps. Else if parent ∉ `categoryIds` or ≠ `expectedParentId` → fail « la salle a été déplacée depuis la dernière synchronisation ».
-2. Find the Archive Hazu among `list(adminId)` by `ARCHIVE_ROOT_TAG`; create it (`[ARCHIVE_ROOT_TAG, ...ARCHIVE_HIDE_TAGS]`) if missing.
-3. Find the per-room folder in `list(archiveId)` by `hz-config-archive-class-{classId}`; create it with `[ROOM_FOLDER_TAG, ...buildRecordTags(...), ...ARCHIVE_HIDE_TAGS]` if missing. Then the groups folder inside it by `GROUPS_FOLDER_TAG`.
+2. Find the Archive Hazu among `list(adminId)` by `ARCHIVE_ROOT_TAG`; create it (tags `[ARCHIVE_ROOT_TAG]`, privacy `ARCHIVE_ROOT_PRIVACY`) if missing.
+3. Find the per-room folder in `list(archiveId)` by `hz-config-archive-class-{classId}`; create it with tags `[ROOM_FOLDER_TAG, ...buildRecordTags(...)]`, privacy `ROOM_FOLDER_PRIVACY`, if missing. Then the groups folder inside it by `GROUPS_FOLDER_TAG` (privacy `GROUPS_FOLDER_PRIVACY`).
 4. Groups = `groupsOfClass(list(sharingContainerId))` plus those already in the groups folder; `move` each not yet in the groups folder; `read` it back — parent must be the groups folder.
-5. `move` the room into the per-room folder if not there; read back. Add `ROOM_HIDE_TAGS` if non-empty.
+5. `move` the room into the per-room folder if not there; read back. The room's own privacy is not touched.
 6. For each holder with `holderTagsToRemove(...)` non-empty: `removeTags`, then re-read via `read(personId)` up to 3× / 750 ms; done when none of those tags remain. The read decides, not the call's status.
 
 Success = room and every group read back inside the folder and no holder still carries a removed tag. Otherwise `success: false` with `remaining` naming what is left.
@@ -136,7 +138,7 @@ Success = room and every group read back inside the folder and no holder still c
   ```
   In `archive-types.ts`: `ArchivedRoom { folderId: string; roomId: string | null; title: string; classId: string; roomType: ArchiveRoomType; fromParentId: string; archivedAt: number }`; `RestoreOutcome { success; steps: StepResult[]; remaining: string[]; error?: string; addedTags: Array<{ personId: string; tags: string[] }>; unresolvedMembers: number; roomId?: string }`.
 
-`runRestore` (spec §7): `read(folderId)` → `parseRecordTags`, null → fail « dossier d'archive incomplet ». `read(fromParentId)` null → fail « catégorie d'origine introuvable » before any move. Then move the room (found in the folder by `hz-config-class-{classId}`, or already under `fromParentId`) back and read back; remove `ROOM_HIDE_TAGS`; move each group in the groups folder to `sharingContainerId` and read back; for each group's `membersOf`, `addTags(personId, [hz-config-class-{classId}-{role}])` where missing, verified by re-read; finally, if `list(groupsFolder)` is empty remove it, then if `list(folderId)` is empty remove the folder — `deps` gains `remove(id): Promise<void>` for this, used nowhere else.
+`runRestore` (spec §7): `read(folderId)` → `parseRecordTags`, null → fail « dossier d'archive incomplet ». `read(fromParentId)` null → fail « catégorie d'origine introuvable » before any move. Then move the room (found in the folder by `hz-config-class-{classId}`, or already under `fromParentId`) back and read back; move each group in the groups folder to `sharingContainerId` and read back; for each group's `membersOf`, `addTags(personId, [hz-config-class-{classId}-{role}])` where missing, verified by re-read; finally, if `list(groupsFolder)` is empty remove it, then if `list(folderId)` is empty remove the folder — `deps` gains `remove(id): Promise<void>` for this, used nowhere else.
 
 - [ ] **Step 1: Write the failing tests:**
   - Round trip: archive then restore on the fake → room and groups back under their original parents, every member tag back, both folders gone, `success: true`.
