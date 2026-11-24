@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { CompanyRow } from '../../../shared/formation-types';
 import {
   shareOf, planLabel, reportsCell, isDangerRate, semesterLabel, slotDisplay, evaluationKnown, kindState,
-  retiredLabel, panelFlags, latestReportLabel, hazuUrl, suiviState, semesterReportState,
+  retiredLabel, panelFlags, latestReportLabel, hazuUrl, suiviState, semesterReportState, mpeCell,
 } from './detail-logic';
 
 const company = (o: Partial<CompanyRow> = {}): CompanyRow => ({
@@ -105,6 +105,17 @@ describe('semesterReportState', () => {
   it('no state when the company Suivi is unreadable or not found', () => {
     expect(semesterReportState({ ...st({ failedParts: ['suivi-company'] }), reports }, 1)).toBeNull();
     expect(semesterReportState({ ...st({ suiviCompanyFound: false }), reports }, 1)).toBeNull();
+  });
+});
+
+describe('mpeCell', () => {
+  it('a bar for AFP/CFC in a formation with a catalogue', () => {
+    expect(mpeCell(true, 'cfc')).toBe('bar');
+    expect(mpeCell(true, 'afp')).toBe('bar');
+  });
+  it('« — » for an « autre niveau » apprentice or a formation without catalogue', () => {
+    expect(mpeCell(true, 'other')).toBe('dash');
+    expect(mpeCell(false, 'cfc')).toBe('dash');
   });
 });
 

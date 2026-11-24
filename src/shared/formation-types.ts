@@ -199,8 +199,11 @@ export interface FormationDetail extends Rates {
   cieReports: { sent: number; draft: number };
   companies: CompanyRow[];
   reportsBySemester: Array<{ semester: number; published: number; draft: number; missing: number }>;
-  /** `bar` is null when the apprentice's MPE statuses are unknown (see `flags`). */
-  students: Array<{ personId: string; name: string; company: string; currentSemester: number; bar: Bar | null; latestReport: ReportState | null; flags: string[] }>;
+  /** `bar` is null when the apprentice's MPE statuses are unknown (see `flags`) or its level is « autre niveau ». */
+  students: Array<{
+    personId: string; name: string; company: string; currentSemester: number; level: LevelCode | 'other';
+    bar: Bar | null; latestReport: ReportState | null; flags: string[];
+  }>;
 }
 
 /** The formation sync's status row. `failed` = apprentices whose read failed in the current/last run. */

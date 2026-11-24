@@ -84,6 +84,14 @@ export function semesterReportState(
   return m.reports.find(r => r.semester === semester)?.state ?? null;
 }
 
+/**
+ * The apprentice list's MPE cell: a bar for an AFP/CFC apprentice of a formation with a catalogue,
+ * « — » otherwise. An « autre niveau » apprentice has no expected mandates, which is not « inconnu ».
+ */
+export function mpeCell(hasCatalogue: boolean, level: 'afp' | 'cfc' | 'other'): 'bar' | 'dash' {
+  return hasCatalogue && level !== 'other' ? 'bar' : 'dash';
+}
+
 /** A retired slot key « cfc-3-12 » → « S3 · 12 »; anything else is shown as is. */
 export function retiredLabel(key: string): string {
   const m = /^(afp|cfc)-(\d+)-([A-Za-z0-9]+)$/.exec(key);

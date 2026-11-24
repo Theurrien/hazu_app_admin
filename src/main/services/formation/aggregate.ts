@@ -16,6 +16,7 @@ import type {
   Bar, CompanyRow, FormationAgg, FormationDetail, LevelAgg, LevelCode, MandateRow, Rates,
   ReportState, SchoolOverview, SlotResult, StudentContext, StudentModel,
 } from '../../../shared/formation-types';
+import { dayStart } from './model';
 
 const NO_COMPANY = 'sans entreprise';
 const UNREAD_PROFILE = 'profil illisible';
@@ -98,13 +99,25 @@ function tallyOf(models: StudentModel[]): Tally {
   return t;
 }
 
-/** Published / draft / missing company reports of the apprentices whose company Suivi was read. */
-function reportCounts(models: StudentModel[]): { published: number; draft: number; missing: number } {
+type Counted = 'published' | 'draft' | 'missing';
+const isCounted = (s: ReportState): s is Counted => s === 'published' || s === 'draft' || s === 'missing';
+
+/**
+ * The company reports that count: apprentices whose company Suivi was found and read, semesters
+ * that have ended (a report published early in a running semester waits until it ends).
+ */
+function countedReports(m: StudentModel, todayMs: number): Array<{ semester: number; state: Counted }> {
+  if (!isRated(m) || !knownOf(m).suiviCompany) return [];
+  const today = dayStart(todayMs);
+  const ended = new Set(m.semesters.filter(s => s.endMs < today).map(s => s.n));
+  return m.reports.filter(r => ended.has(r.semester))
+    .flatMap(r => (isCounted(r.state) ? [{ semester: r.semester, state: r.state }] : []));
+}
+
+/** Published / draft / missing company reports (see countedReports). */
+function reportCounts(models: StudentModel[], todayMs: number): Record<Counted, number> {
   const c = { published: 0, draft: 0, missing: 0 };
-  for (const m of models) {
-    if (!isRated(m) || !knownOf(m).suiviCompany) continue;
-    for (const r of m.reports) if (r.state === 'published' || r.state === 'draft' || r.state === 'missing') c[r.state] += 1;
-  }
+  for (const m of models) for (const r of countedReports(m, todayMs)) c[r.state] += 1;
   return c;
 }
 
@@ -129,6 +142,7 @@ export function aggregateOverview(
   ctx: StudentContext[],
   failed: SchoolOverview['failed'],
   syncedAt: number | null,
+  todayMs: number,
 ): SchoolOverview {
   const ctxOf = contextIndex(ctx);
 
@@ -166,7 +180,7 @@ export function aggregateOverview(
   }).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
 
   const classified = [...byKey.values()].flat();
-  const reps = reportCounts(classified);
+  const reps = reportCounts(classified, todayMs);
   return {
     students: read.length,
     ...tallyRates(tallyOf(classified)),
@@ -232,9 +246,9 @@ export function aggregateFormation(
   key: string,
   level: LevelCode | 'both',
   filters: { classId?: string; companyId?: string; semester?: number },
+  todayMs: number,
 ): FormationDetail {
   const ctxOf = contextIndex(ctx);
-  const tableLevel: LevelCode = level === 'both' ? 'cfc' : level;
 
   const inFormation = models.filter(m => m.readOk && formationKey(m, ctxOf(m)) === key);
   const title = inFormation[0]?.formationTitle ?? key;
@@ -247,6 +261,8 @@ export function aggregateFormation(
     return true;
   });
   const rated = population.filter(isRated);
+  // Both levels: the mandate tables show CFC when the filtered population has a CFC apprentice, else AFP.
+  const tableLevel: LevelCode = level !== 'both' ? level : rated.some(m => m.level === 'cfc') ? 'cfc' : 'afp';
 
   // Companies: an apprentice counts in each of its companies' rows; none → « sans entreprise ».
   const groups = new Map<string, { id: string | null; title: string; ms: StudentModel[] }>();
@@ -262,7 +278,7 @@ export function aggregateFormation(
   }
   const companyTallies: Array<{ row: CompanyRow; bar: Bar; allKnown: boolean }> = [...groups.values()].map(g => {
     const t = tallyOf(g.ms);
-    const reps = reportCounts(g.ms);
+    const reps = reportCounts(g.ms, todayMs);
     const row: CompanyRow = {
       id: g.id, title: g.title, students: g.ms.length, ...tallyRates(t), plan: planOf(g.ms),
       retired: g.ms.reduce((n, m) => n + m.retired.length, 0),
@@ -283,10 +299,9 @@ export function aggregateFormation(
 
   const reportSems = new Map<number, { semester: number; published: number; draft: number; missing: number }>();
   for (const m of rated) {
-    if (!knownOf(m).suiviCompany) continue;
-    for (const r of m.reports) {
+    for (const r of countedReports(m, todayMs)) {
       if (!reportSems.has(r.semester)) reportSems.set(r.semester, { semester: r.semester, published: 0, draft: 0, missing: 0 });
-      if (r.state === 'published' || r.state === 'draft' || r.state === 'missing') reportSems.get(r.semester)![r.state] += 1;
+      reportSems.get(r.semester)![r.state] += 1;
     }
   }
 
@@ -322,6 +337,7 @@ export function aggregateFormation(
         name: c.name,
         company: c.companies.length ? c.companies.map(co => co.title).join(', ') : NO_COMPANY,
         currentSemester: m.currentSemester,
+        level: m.level,
         bar: studentBar(m),
         latestReport: latestReport(m),
         flags: flagsOf(m),

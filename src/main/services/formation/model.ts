@@ -22,7 +22,7 @@ export function levelCode(title: string | null): LevelCode | null {
 }
 
 // Source: enterprise_dashboard.html — dayStart (local midnight)
-function dayStart(ms: number): number {
+export function dayStart(ms: number): number {
   const d = new Date(ms);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }

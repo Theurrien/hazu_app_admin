@@ -266,7 +266,7 @@ function loadAll(): Loaded {
 
 export function getFormationOverview(): SchoolOverview {
   const l = loadAll();
-  const overview = aggregateOverview(l.models, l.ctx, l.failed, getFormationSyncStatus().lastSyncedAt);
+  const overview = aggregateOverview(l.models, l.ctx, l.failed, getFormationSyncStatus().lastSyncedAt, Date.now());
   return { ...overview, stale: l.stale };
 }
 
@@ -276,7 +276,7 @@ export function getFormationDetail(
   filters: FormationDetailFilters,
 ): FormationDetail {
   const l = loadAll();
-  const detail = aggregateFormation(l.models, l.ctx, key, level, filters ?? {});
+  const detail = aggregateFormation(l.models, l.ctx, key, level, filters ?? {}, Date.now());
   return markStale(detail, new Set(l.stale.map(s => s.personId)));
 }
 

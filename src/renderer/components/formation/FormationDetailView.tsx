@@ -5,7 +5,7 @@ import type { FormationDetail, FormationDetailFilters, LevelCode } from '../../.
 import { StackedBar, BarLegend, formatRate } from './StackedBar';
 import { MandateTable } from './MandateTable';
 import { ApprenticePanel } from './ApprenticePanel';
-import { isDangerRate, latestReportLabel, planLabel, reportsCell, semesterLabel, shareOf } from './detail-logic';
+import { isDangerRate, latestReportLabel, mpeCell, planLabel, reportsCell, semesterLabel, shareOf } from './detail-logic';
 
 type Level = LevelCode | 'both';
 
@@ -266,7 +266,7 @@ export function FormationDetailView({ formationKey, title, hasCatalogue, level, 
                         <td className="py-2 pr-3" data-person-name style={{ color: 'var(--hazu-text)' }}>{s.name}</td>
                         <td className="py-2 pr-3" data-company-name style={{ color: 'var(--hazu-text-light)' }}>{s.company}</td>
                         <td className="py-2 pr-3" style={{ color: 'var(--hazu-text-light)' }}>{semesterLabel(s.currentSemester)}</td>
-                        <td className="py-2 pr-3">{hasCatalogue ? <StackedBar bar={s.bar} height={8} /> : <span className="italic" style={{ color: 'var(--hazu-text-muted)' }}>—</span>}</td>
+                        <td className="py-2 pr-3">{mpeCell(hasCatalogue, s.level) === 'bar' ? <StackedBar bar={s.bar} height={8} /> : <span className="italic" style={{ color: 'var(--hazu-text-muted)' }}>—</span>}</td>
                         <td className="py-2 pr-3" style={{ color: 'var(--hazu-text)' }}>{latestReportLabel(s.latestReport, s.flags)}</td>
                         <td className="py-2">
                           {s.flags.length > 0 && (
