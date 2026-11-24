@@ -414,6 +414,8 @@ export interface RestoreInput {
   adminId: string;
   sharingContainerId: string;
   roles: string[];
+  /** Live children of the school root: the only parents a room may be restored under. */
+  categoryIds: string[];
   /** The service resolves a group's ACL to profiles; members without a profile are only counted. */
   membersOf(groupId: string): Promise<{ personIds: string[]; unresolved: number }>;
 }
@@ -498,6 +500,7 @@ export async function runRestore(input: RestoreInput, deps: ArchiveDeps): Promis
   try {
     const origin = await withRetry(deps, () => deps.read(fromParentId));
     if (!origin) return stop('origin', "catégorie d'origine introuvable", [fromParentId]);
+    if (!input.categoryIds.includes(fromParentId)) return stop('origin', "catégorie d'origine invalide", [fromParentId]);
     steps.push({ step: 'origin', status: 'done' });
   } catch (e) {
     return stop('origin', failureMessage(e), [fromParentId]);

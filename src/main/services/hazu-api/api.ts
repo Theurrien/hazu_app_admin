@@ -87,6 +87,44 @@ export const sendApiRequestListChecked = async (parentId: string): Promise<unkno
 
 // WRITE OPERATIONS
 
+// Checked create / remove / move for the room archive: the originals swallow errors and return
+// null, which would hide the status code the retry logic needs. These rethrow the axios error.
+export const sendApiRequestCreateChecked = async (options: {
+  parentId: string; type: string; title: string; authorId: string; displayName: string;
+  privacy: string; tags: string[];
+}): Promise<any> => {
+  const response = await axios.post(`https://${getApiEndpoint()}/create`, options, {
+    headers: getAuthHeaders(),
+    timeout: 60_000,
+  });
+  return response.data;
+};
+
+export const sendApiRequestRemoveChecked = async (id: string): Promise<void> => {
+  await axios.delete(`https://${getApiEndpoint()}/remove`, {
+    headers: getAuthHeaders(),
+    params: { id },
+    timeout: 60_000,
+  });
+};
+
+// PUT /moveElement keeps the id; children follow. Success = 200 {"isSuccess":true}; the caller's
+// live read after it decides.
+export const sendApiRequestMoveChecked = async (
+  id: string,
+  targetHazuId: string,
+  loginId: string,
+): Promise<void> => {
+  const response = await axios.put(
+    `https://${getApiEndpoint()}/moveElement`,
+    { id, targetHazuId, loginId },
+    { headers: getAuthHeaders(), timeout: 60_000 },
+  );
+  if (response.data?.isSuccess !== true) {
+    throw new Error(`moveElement refused: ${JSON.stringify(response.data)}`);
+  }
+};
+
 export const sendApiRequestCreate = async (options: CreateOptions): Promise<any> => {
   try {
     const body: Record<string, any> = {

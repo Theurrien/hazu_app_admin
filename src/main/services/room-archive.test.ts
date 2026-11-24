@@ -406,6 +406,7 @@ describe('runRestore', () => {
       adminId: 'admin',
       sharingContainerId: 'share',
       roles: ROLES,
+      categoryIds: ['cat1'],
       membersOf: async gid => ({ personIds: membersByGroup[gid] ?? [], unresolved }),
       ...over,
     };
@@ -444,6 +445,15 @@ describe('runRestore', () => {
     const out = await runRestore(restoreInput(f), f.deps);
     expect(out.success).toBe(false);
     expect(out.error).toBe("catégorie d'origine introuvable");
+    expect(f.calls.slice(before).filter(c => WRITES.includes(c.op))).toEqual([]);
+  });
+
+  it('origin that is not a category: fails before any write', async () => {
+    const f = await archived();
+    const before = f.calls.length;
+    const out = await runRestore(restoreInput(f, { categoryIds: ['other'] }), f.deps);
+    expect(out.success).toBe(false);
+    expect(out.error).toBe("catégorie d'origine invalide");
     expect(f.calls.slice(before).filter(c => WRITES.includes(c.op))).toEqual([]);
   });
 

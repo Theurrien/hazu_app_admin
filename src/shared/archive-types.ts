@@ -43,3 +43,35 @@ export interface RestoreOutcome {
   unresolvedMembers: number;
   roomId?: string;
 }
+
+/** A room the Archive tab may archive; blocked ones are listed with the reason. */
+export interface ArchivableRoom {
+  id: string;
+  title: string;
+  roomType: ArchiveRoomType;
+  classId: string | null;
+  parentId: string;
+  memberCount: number;
+  blockedReason: string | null;
+}
+
+/** Local counts for the confirmation modal; live counts come at execution. */
+export interface ArchivePlan {
+  roomId: string;
+  title: string;
+  roomType: ArchiveRoomType;
+  classId: string;
+  groupCount: number;
+  holderCount: number;
+  memberCount: number;
+  /** Enterprise or state room with members: dashboards reading it will lose it. */
+  warnsDashboards: boolean;
+}
+
+export interface RestorePlan {
+  folderId: string;
+  title: string;
+  fromParentTitle: string | null;
+  fromParentExists: boolean;
+  groupCount: number;
+}
