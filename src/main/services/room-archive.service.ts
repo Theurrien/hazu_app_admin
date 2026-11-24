@@ -255,6 +255,8 @@ function reconcileArchive(room: RoomRow, outcome: ArchiveOutcome, roleNames: str
       const kept = tags.filter((t) => !classTags.has(t));
       if (kept.length !== tags.length) upd.run(JSON.stringify(kept), p.id);
     }
+    // A partial outcome keeps the room row so a retry of archiveRoom(roomId) can still find it.
+    if (outcome.success !== true) return;
     db.prepare('DELETE FROM person_room_assignments WHERE room_id = ?').run(room.id);
     db.prepare('DELETE FROM membership_issues WHERE room_id = ?').run(room.id);
     db.prepare('UPDATE distribution_groups SET room_id = NULL WHERE room_id = ?').run(room.id);
@@ -263,6 +265,14 @@ function reconcileArchive(room: RoomRow, outcome: ArchiveOutcome, roleNames: str
 }
 
 export async function archiveRoom(roomId: string): Promise<ArchiveOutcome> {
+  try {
+    return await archiveRoomUnsafe(roomId);
+  } catch (e) {
+    return { success: false, steps: [], remaining: [roomId], error: toFailure(e).message, removedTags: [] };
+  }
+}
+
+async function archiveRoomUnsafe(roomId: string): Promise<ArchiveOutcome> {
   const room = getDb().prepare('SELECT id, title, room_type, parent_id, class_id FROM rooms WHERE id = ?').get(roomId) as
     | RoomRow
     | undefined;
@@ -271,12 +281,16 @@ export async function archiveRoom(roomId: string): Promise<ArchiveOutcome> {
   });
   if (!room) return fail('salle introuvable');
   if (!room.class_id) return fail('identifiant de classe manquant');
+  const rootId = setting('root_hazu_id');
+  if (rootId && room.parent_id === rootId) return fail('dossier de catégorie');
   const adminId = setting('admin_id');
   const sharingContainerId = setting('sharing_container_id');
-  if (!adminId || !sharingContainerId || !setting('user_id')) return fail('synchronisation requise');
+  const roleNames = roles();
+  if (!adminId || !sharingContainerId || !setting('user_id') || roleNames.length === 0) {
+    return fail('synchronisation requise');
+  }
 
   const deps = buildDeps();
-  const roleNames = roles();
   let outcome: ArchiveOutcome;
   try {
     const categoryIds = await liveCategoryIds(deps);
@@ -350,8 +364,9 @@ async function buildMembersOf(): Promise<(groupId: string) => Promise<{ personId
   const exclude = new Set<string>();
   const superId = setting('superuser_group_id');
   if (superId) {
-    const acl = await sendApiRequestGetAclInfoChecked(superId); // a failed read must not silently re-tag them
-    for (const m of acl?.data || []) if (!m.isGroup && m.authorId) exclude.add(m.authorId);
+    const acl = await wrap(() => sendApiRequestGetAclInfoChecked(superId)); // a failed read must not silently re-tag them
+    if (!Array.isArray(acl?.data)) throw new Error("liste d'accès du groupe super-utilisateur illisible");
+    for (const m of acl.data) if (!m.isGroup && m.authorId) exclude.add(m.authorId);
   }
   return async (groupId) => {
     const acl = await wrap(() => sendApiRequestGetAclInfoChecked(groupId));
@@ -385,12 +400,26 @@ function reconcileRestore(outcome: RestoreOutcome): void {
 }
 
 export async function restoreRoom(folderId: string): Promise<RestoreOutcome> {
+  try {
+    return await restoreRoomUnsafe(folderId);
+  } catch (e) {
+    return {
+      success: false, steps: [], remaining: [folderId], error: toFailure(e).message,
+      addedTags: [], unresolvedMembers: 0,
+    };
+  }
+}
+
+async function restoreRoomUnsafe(folderId: string): Promise<RestoreOutcome> {
   const fail = (error: string): RestoreOutcome => ({
     success: false, steps: [], remaining: [folderId], error, addedTags: [], unresolvedMembers: 0,
   });
   const adminId = setting('admin_id');
   const sharingContainerId = setting('sharing_container_id');
-  if (!adminId || !sharingContainerId || !setting('user_id')) return fail('synchronisation requise');
+  const roleNames = roles();
+  if (!adminId || !sharingContainerId || !setting('user_id') || roleNames.length === 0) {
+    return fail('synchronisation requise');
+  }
 
   const deps = buildDeps();
   let outcome: RestoreOutcome;
@@ -398,7 +427,7 @@ export async function restoreRoom(folderId: string): Promise<RestoreOutcome> {
     const categoryIds = await liveCategoryIds(deps);
     const membersOf = await buildMembersOf();
     outcome = await runRestore(
-      { folderId, adminId, sharingContainerId, roles: roles(), categoryIds, membersOf },
+      { folderId, adminId, sharingContainerId, roles: roleNames, categoryIds, membersOf },
       deps,
     );
   } catch (e) {
