@@ -69,6 +69,21 @@ export function kindState(m: Knowable, kind: 'mpe' | 'mpc'): 'ok' | 'illisible' 
   return 'ok';
 }
 
+/** Whether a Suivi was found and read (same rule as the aggregate's knownOf). */
+export function suiviState(m: Knowable, which: 'company' | 'cie'): 'ok' | 'illisible' | 'introuvable' {
+  if (m.failedParts.includes(which === 'company' ? 'suivi-company' : 'suivi-cie')) return 'illisible';
+  if (!(which === 'company' ? m.suiviCompanyFound : m.suiviCieFound)) return 'introuvable';
+  return 'ok';
+}
+
+/** A semester's company report state in the panel strip; null when none, or the company Suivi is unknown. */
+export function semesterReportState(
+  m: Knowable & { reports: Array<{ semester: number; state: ReportState }> }, semester: number,
+): ReportState | null {
+  if (suiviState(m, 'company') !== 'ok') return null;
+  return m.reports.find(r => r.semester === semester)?.state ?? null;
+}
+
 /** A retired slot key « cfc-3-12 » → « S3 · 12 »; anything else is shown as is. */
 export function retiredLabel(key: string): string {
   const m = /^(afp|cfc)-(\d+)-([A-Za-z0-9]+)$/.exec(key);

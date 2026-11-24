@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare, faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons';
 import type { FormationStudent } from '../../../shared/formation-types';
-import { evaluationKnown, hazuUrl, kindState, latestReportLabel, panelFlags, retiredLabel, semesterLabel, slotDisplay } from './detail-logic';
+import {
+  evaluationKnown, hazuUrl, kindState, latestReportLabel, panelFlags, retiredLabel, semesterLabel, semesterReportState, slotDisplay, suiviState,
+} from './detail-logic';
 
 interface ApprenticePanelProps {
   personId: string;
@@ -86,6 +88,8 @@ export function ApprenticePanel({ personId, flags, onClose }: ApprenticePanelPro
 
 function Body({ student, flags }: { student: FormationStudent; flags: string[] }) {
   const evalKnown = evaluationKnown(student);
+  const suiviCompany = suiviState(student, 'company');
+  const suiviCie = suiviState(student, 'cie');
   const estimated = student.startSource !== 'plan';
   return (
     <>
@@ -105,7 +109,7 @@ function Body({ student, flags }: { student: FormationStudent; flags: string[] }
           <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${student.semesters.length}, minmax(0, 1fr))` }}>
             {student.semesters.map(s => {
               const current = s.n === student.currentSemester;
-              const report = student.reports.find(r => r.semester === s.n);
+              const report = semesterReportState(student, s.n);
               return (
                 <div
                   key={s.n}
@@ -117,7 +121,7 @@ function Body({ student, flags }: { student: FormationStudent; flags: string[] }
                   <div className="font-semibold">S{s.n}</div>
                   <div>{fmtDate(s.startMs)}</div>
                   <div>{fmtDate(s.endMs)}</div>
-                  {report && <div className="mt-1 italic">{latestReportLabel(report.state, [])}</div>}
+                  {report && <div className="mt-1 italic">{latestReportLabel(report, [])}</div>}
                 </div>
               );
             })}
@@ -150,8 +154,8 @@ function Body({ student, flags }: { student: FormationStudent; flags: string[] }
       )}
 
       <PanelSection title="Rapports">
-        {student.failedParts.includes('suivi-company')
-          ? <Muted>Suivi entreprise illisible.</Muted>
+        {suiviCompany !== 'ok'
+          ? <Muted>Suivi entreprise {suiviCompany}.</Muted>
           : student.reports.length === 0 ? <Muted>Aucun semestre.</Muted> : (
             <ul className="space-y-1 text-sm">
               {student.reports.map(r => (
@@ -168,8 +172,8 @@ function Body({ student, flags }: { student: FormationStudent; flags: string[] }
           <p className="mt-1 text-xs" style={{ color: 'var(--hazu-text-light)' }}>{student.untaggedReports} sans semestre</p>
         )}
         <p className="mt-2 text-sm" style={{ color: 'var(--hazu-text-light)' }}>
-          {student.failedParts.includes('suivi-cie')
-            ? 'Rapports de CIE : suivi CIE illisible'
+          {suiviCie !== 'ok'
+            ? `Rapports de CIE : suivi CIE ${suiviCie}`
             : `Rapports de CIE : ${student.cieReports.sent} envoyé(s) · ${student.cieReports.draft} brouillon(s)`}
         </p>
       </PanelSection>

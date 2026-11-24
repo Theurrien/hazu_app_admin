@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { CompanyRow } from '../../../shared/formation-types';
 import {
   shareOf, planLabel, reportsCell, isDangerRate, semesterLabel, slotDisplay, evaluationKnown, kindState,
-  retiredLabel, panelFlags, latestReportLabel, hazuUrl,
+  retiredLabel, panelFlags, latestReportLabel, hazuUrl, suiviState, semesterReportState,
 } from './detail-logic';
 
 const company = (o: Partial<CompanyRow> = {}): CompanyRow => ({
@@ -82,6 +82,29 @@ describe('kindState', () => {
     expect(kindState(st(), 'mpe')).toBe('ok');
     expect(kindState(st({ failedParts: ['mpc'] }), 'mpc')).toBe('illisible');
     expect(kindState(st({ mpeFound: false }), 'mpe')).toBe('introuvable');
+  });
+});
+
+describe('suiviState', () => {
+  it('ok / illisible / introuvable, per Suivi', () => {
+    expect(suiviState(st(), 'company')).toBe('ok');
+    expect(suiviState(st({ failedParts: ['suivi-company'] }), 'company')).toBe('illisible');
+    expect(suiviState(st({ suiviCompanyFound: false }), 'company')).toBe('introuvable');
+    expect(suiviState(st({ suiviCompanyFound: false }), 'cie')).toBe('ok');
+    expect(suiviState(st({ failedParts: ['suivi-cie'] }), 'cie')).toBe('illisible');
+    expect(suiviState(st({ suiviCieFound: false }), 'cie')).toBe('introuvable');
+  });
+});
+
+describe('semesterReportState', () => {
+  const reports = [{ semester: 1, state: 'missing' as const, reportId: null, publishedAt: null }];
+  it('the semester report state when the company Suivi is known', () => {
+    expect(semesterReportState({ ...st(), reports }, 1)).toBe('missing');
+    expect(semesterReportState({ ...st(), reports }, 2)).toBeNull();
+  });
+  it('no state when the company Suivi is unreadable or not found', () => {
+    expect(semesterReportState({ ...st({ failedParts: ['suivi-company'] }), reports }, 1)).toBeNull();
+    expect(semesterReportState({ ...st({ suiviCompanyFound: false }), reports }, 1)).toBeNull();
   });
 });
 
