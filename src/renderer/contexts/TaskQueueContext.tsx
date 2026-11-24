@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 // Task type discriminated union
-export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags';
+export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags' | 'archiveRoom' | 'restoreRoom';
 
 interface BaseTask {
   id: string;
@@ -75,7 +75,21 @@ export interface PruneDeadTagsTask extends BaseTask {
   skippedCount?: number;
 }
 
-export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask;
+export interface ArchiveRoomTask extends BaseTask {
+  type: 'archiveRoom';
+  roomId: string;
+  roomTitle: string;
+}
+
+export interface RestoreRoomTask extends BaseTask {
+  type: 'restoreRoom';
+  folderId: string;
+  roomTitle: string;
+  // Set on success, for the panel's success line.
+  unresolvedMembers?: number;
+}
+
+export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask | ArchiveRoomTask | RestoreRoomTask;
 
 // Input types for adding tasks to queue
 type AddRoleUpdateInput = Omit<RoleUpdateTask, 'id' | 'status' | 'type'>;
@@ -84,6 +98,8 @@ type AddCreatePersonInput = Omit<CreatePersonTask, 'id' | 'status' | 'type' | 'p
 type AddHealTagInput = Omit<HealTagTask, 'id' | 'status' | 'type'>;
 type AddRevokeAccessInput = Omit<RevokeOrphanAccessTask, 'id' | 'status' | 'type'>;
 type AddPruneTagsInput = Omit<PruneDeadTagsTask, 'id' | 'status' | 'type'>;
+type AddArchiveRoomInput = Omit<ArchiveRoomTask, 'id' | 'status' | 'type'>;
+type AddRestoreRoomInput = Omit<RestoreRoomTask, 'id' | 'status' | 'type' | 'unresolvedMembers'>;
 
 // Notification types (for already-completed operations like modal creates)
 type CreateRoomNotification = { type: 'createRoom'; roomName: string; roomId: string };
@@ -99,6 +115,8 @@ interface TaskQueueContextType {
   addHealTagTask: (task: AddHealTagInput) => string;
   addRevokeAccessTask: (task: AddRevokeAccessInput) => string;
   addPruneTagsTask: (task: AddPruneTagsInput) => string;
+  addArchiveRoomTask: (task: AddArchiveRoomInput) => string;
+  addRestoreRoomTask: (task: AddRestoreRoomInput) => string;
   // Add already-completed notification (for modals that call API directly)
   addNotification: (notification: NotificationInput) => string;
   dismissTask: (id: string) => void;
@@ -247,6 +265,38 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
             prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error: result.error } : t))
           );
         }
+      } else if (nextTask.type === 'archiveRoom') {
+        const task = nextTask as ArchiveRoomTask;
+        const outcome = await window.electronAPI.archiveRoom(task.roomId);
+
+        if (outcome.success) {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+          );
+        } else {
+          const error = outcome.error ?? outcome.remaining.join(', ');
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
+          );
+        }
+      } else if (nextTask.type === 'restoreRoom') {
+        const task = nextTask as RestoreRoomTask;
+        const outcome = await window.electronAPI.restoreRoom(task.folderId);
+
+        if (outcome.success) {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === task.id
+                ? { ...t, status: 'success' as const, unresolvedMembers: outcome.unresolvedMembers }
+                : t
+            )
+          );
+        } else {
+          const error = outcome.error ?? outcome.remaining.join(', ');
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
+          );
+        }
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -314,6 +364,22 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
+  // Add archive-room task
+  const addArchiveRoomTask = useCallback((taskData: AddArchiveRoomInput) => {
+    const id = `archive-${Date.now()}-${++taskIdCounter.current}`;
+    const task: ArchiveRoomTask = { ...taskData, id, type: 'archiveRoom', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
+  // Add restore-room task
+  const addRestoreRoomTask = useCallback((taskData: AddRestoreRoomInput) => {
+    const id = `restore-${Date.now()}-${++taskIdCounter.current}`;
+    const task: RestoreRoomTask = { ...taskData, id, type: 'restoreRoom', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
   // Add notification for already-completed operations (modals call API directly)
   const addNotification = useCallback((notification: NotificationInput) => {
     const id = `notif-${Date.now()}-${++taskIdCounter.current}`;
@@ -373,6 +439,8 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         addHealTagTask,
         addRevokeAccessTask,
         addPruneTagsTask,
+        addArchiveRoomTask,
+        addRestoreRoomTask,
         addNotification,
         dismissTask,
         dismissAllCompleted,

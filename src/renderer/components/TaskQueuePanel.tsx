@@ -44,6 +44,17 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         }
         return `Prune ${task.tagCount} tag(s): ${who}`;
       }
+      case 'archiveRoom':
+        return `Archiver ${task.roomTitle}`;
+      case 'restoreRoom': {
+        if (task.status === 'success') {
+          const unresolved = task.unresolvedMembers
+            ? ` — ${task.unresolvedMembers} membre(s) sans profil local`
+            : '';
+          return `Restaurer ${task.roomTitle} — Lancez une synchronisation pour voir la salle dans Matrix${unresolved}`;
+        }
+        return `Restaurer ${task.roomTitle}`;
+      }
     }
   };
 

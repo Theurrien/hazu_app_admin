@@ -15,6 +15,14 @@ import { reliableUpdateUserRole } from '../services/role-write.service';
 import { planOrphanRemoval, revokeOrphanAccess } from '../services/orphan-removal.service';
 import { planTagPrune, pruneDeadTags } from '../services/tag-prune.service';
 import { PruneItem } from '../services/tag-prune';
+import {
+  listArchivableRooms,
+  planArchive,
+  listArchivedRooms,
+  archiveRoom,
+  planRestore,
+  restoreRoom,
+} from '../services/room-archive.service';
 import { validateApiConfig } from '../services/config-probe.service';
 import { completeAndStoreNewRoom } from '../services/room-completion.service';
 
@@ -196,6 +204,53 @@ export function registerIpcHandlers(): void {
       console.error('Tag prune plan error:', error);
       throw error;
     }
+  });
+
+  // Room archive. List/plan handlers rethrow so the Archive page shows the error;
+  // execute handlers return the outcome (the service never rejects) so the Task Queue
+  // can render failure and offer a retry.
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_LIST_ROOMS, async () => {
+    try {
+      return listArchivableRooms();
+    } catch (error) {
+      console.error('Archive list rooms error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_LIST_ARCHIVED, async () => {
+    try {
+      return await listArchivedRooms();
+    } catch (error) {
+      console.error('Archive list archived error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_PLAN, async (_event, roomId: string) => {
+    try {
+      return planArchive(roomId);
+    } catch (error) {
+      console.error('Archive plan error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_EXECUTE, async (_event, roomId: string) => {
+    return archiveRoom(roomId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_RESTORE_PLAN, async (_event, folderId: string) => {
+    try {
+      return await planRestore(folderId);
+    } catch (error) {
+      console.error('Archive restore plan error:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_RESTORE_EXECUTE, async (_event, folderId: string) => {
+    return restoreRoom(folderId);
   });
 
   // Execute returns its failure: this runs inside a Task Queue task, which renders the
