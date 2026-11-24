@@ -368,4 +368,20 @@ describe('runArchive', () => {
     const folder = [...f.nodes.values()].find(n => n.tags.includes(ROOM_FOLDER_TAG))!;
     expect(folder.title).toBe('cls1');
   });
+
+  it('refuses a room under a look-alike archive folder located outside the Archive Hazu', async () => {
+    const f = createFakeHazu(
+      school([
+        node('fake', 'root', 'Faux', [ROOM_FOLDER_TAG, 'hz-config-archive-class-cls1']),
+        node('archive0', 'admin', 'Archive', [ARCHIVE_ROOT_TAG]),
+      ]),
+    );
+    f.nodes.get('room1')!.parentId = 'fake';
+    const out = await runArchive(input(), f.deps);
+    expect(out.success).toBe(false);
+    expect(out.error).toBe('la salle a été déplacée depuis la dernière synchronisation');
+    expect(f.count('move')).toBe(0);
+    expect(f.count('create')).toBe(0);
+    expect(f.nodes.get('room1')!.parentId).toBe('fake');
+  });
 });

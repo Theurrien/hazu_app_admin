@@ -235,11 +235,18 @@ export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promis
     roomNode = await withRetry(deps, () => deps.read(room.id));
     if (!roomNode) return fail('room-read', 'salle introuvable', [room.id]);
     const parent = roomNode.parentId ? await withRetry(deps, () => deps.read(roomNode!.parentId!)) : null;
+    let inArchiveFolder = false;
     if (
       parent &&
       parent.tags.includes(ROOM_FOLDER_TAG) &&
       parent.tags.includes(`${CLASS_PREFIX}${room.classId}`)
     ) {
+      // Tags alone prove nothing: the folder must itself sit in the Archive Hazu.
+      const adminChildren = await withRetry(deps, () => deps.list(input.adminId));
+      const archive = adminChildren.find(c => c.tags.includes(ARCHIVE_ROOT_TAG));
+      inArchiveFolder = !!archive && parent.parentId === archive.id;
+    }
+    if (inArchiveFolder && parent) {
       roomAlreadyArchived = true;
       folderId = parent.id;
     } else if (
