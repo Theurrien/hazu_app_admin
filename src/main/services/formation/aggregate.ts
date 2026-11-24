@@ -168,6 +168,7 @@ export function aggregateOverview(
     formations,
     unclassified,
     failed: failedOut,
+    stale: [], // filled by the caller from the stored read state (splitByReadState)
     syncedAt,
   };
 }
@@ -320,5 +321,45 @@ export function aggregateFormation(
         flags: flagsOf(m),
       };
     }).sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+// ── Stored read state (the service's split before aggregating) ───────────────
+
+/** Flag on an apprentice whose last read failed and whose figures come from an earlier read. */
+export const STALE_FLAG = 'données anciennes';
+/** Error of an apprentice the formation sync has not read yet (no stored row). */
+export const NEVER_READ = 'pas encore lu';
+const READ_FAILED = 'lecture échouée';
+
+export interface StoredReadState { readOk: boolean; stale: boolean; error: string | null }
+
+/**
+ * Splits the school's apprentices by what is stored for them. Each lands in exactly one of
+ * `read` (rows from a successful read exist — possibly an earlier one) or `failed` (no
+ * successful read ever). `stale` lists the read ones whose latest read failed.
+ */
+export function splitByReadState(
+  students: Array<{ personId: string; name: string }>,
+  states: Map<string, StoredReadState>,
+): { read: string[]; failed: SchoolOverview['failed']; stale: SchoolOverview['stale'] } {
+  const read: string[] = [];
+  const failed: SchoolOverview['failed'] = [];
+  const stale: SchoolOverview['stale'] = [];
+  for (const s of students) {
+    const st = states.get(s.personId);
+    if (!st) { failed.push({ ...s, error: NEVER_READ }); continue; }
+    if (!st.readOk) { failed.push({ ...s, error: st.error ?? READ_FAILED }); continue; }
+    read.push(s.personId);
+    if (st.stale) stale.push({ ...s, error: st.error ?? READ_FAILED });
+  }
+  return { read, failed, stale };
+}
+
+/** Appends the stale flag to the rows of the given apprentices. */
+export function markStale(detail: FormationDetail, staleIds: Set<string>): FormationDetail {
+  return {
+    ...detail,
+    students: detail.students.map(s => (staleIds.has(s.personId) ? { ...s, flags: [...s.flags, STALE_FLAG] } : s)),
   };
 }

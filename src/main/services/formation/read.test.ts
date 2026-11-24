@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { backoffMs } from '../role-write';
 import {
-  listWithRetry, readReference, readStudent, runPool, resolveSelfUid,
+  listWithRetry, readReference, readStudent, runPool, resolveSelfUid, runFormationSync,
   MPE_CATALOGUE_ROOT, type ReadDeps,
 } from './read';
 
@@ -224,5 +224,44 @@ describe('runPool', () => {
     expect(out).toEqual([50, 10, 40, 20, 30]);
     expect(peak).toBe(2);
     expect(done).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe('runFormationSync', () => {
+  const ref = (): Record<string, R[]> => ({
+    [MPE_CATALOGUE_ROOT]: [row('f-cui', { icon: 'ic-cui', tags: ['hz-config-template-mpe-cui'] })],
+    'f-cui': [row('s1', { tags: mpeTags(1, '1') })],
+    cfg: [row('prof', { tags: ['hz-config-professions'] }), row('lev', { tags: ['hz-config-levels'] })],
+    prof: [row('p1', { title: 'Cuisine', icon: 'ic-cui' })],
+    lev: [row('l1', { title: 'CFC', color: '#ABCDEF' })],
+  });
+  const tree = () => ({ ...ref(), ...fullTree(), 'prof-002': fullTree()['prof-001'] });
+  const profiles = [P, { ...P, personId: 'prof-002' }, { ...P, personId: 'prof-003' }];
+
+  it('reports progress after each apprentice until processed reaches the profile count', async () => {
+    const { deps } = fake(tree());
+    const progress: Array<{ processed: number; failed: number }> = [];
+    const out = await runFormationSync(deps, { profiles, configParentIds: ['cfg'], concurrency: 2, onProgress: p => progress.push(p) });
+    expect(progress.map(p => p.processed)).toEqual([1, 2, 3]);
+    expect(out.results.map(r => r.personId)).toEqual(['prof-001', 'prof-002', 'prof-003']);
+    expect(out.reference.slots.map(s => s.id)).toEqual(['s1']);
+    expect(out.reads).toBeGreaterThan(10);
+    expect(out.durationMs).toBeGreaterThanOrEqual(0);
+  });
+  it('completes when one apprentice fails every read, and counts it as failed', async () => {
+    const { deps } = fake(tree(), { 'prof-003': http(503) });
+    const progress: Array<{ processed: number; failed: number }> = [];
+    const out = await runFormationSync(deps, { profiles, configParentIds: ['cfg'], concurrency: 8, onProgress: p => progress.push(p) });
+    expect(out.results).toHaveLength(3);
+    expect(out.results.find(r => r.personId === 'prof-003')).toMatchObject({ ok: false });
+    expect(out.results.filter(r => r.ok)).toHaveLength(2);
+    expect(progress[progress.length - 1]).toEqual({ processed: 3, failed: 1 });
+  });
+  it('rejects the run when the catalogue root cannot be read, before any apprentice is read', async () => {
+    const { deps, calls } = fake(tree(), { [MPE_CATALOGUE_ROOT]: http(404) });
+    const progress: unknown[] = [];
+    await expect(runFormationSync(deps, { profiles, configParentIds: ['cfg'], concurrency: 8, onProgress: p => progress.push(p) })).rejects.toThrow();
+    expect(progress).toEqual([]);
+    expect(calls).not.toContain('prof-001');
   });
 });

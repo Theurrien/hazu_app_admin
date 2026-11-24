@@ -70,6 +70,21 @@ export const sendApiRequestList = async (
   }
 };
 
+// Checked variant of sendApiRequestList: the same readChildren request, but it rethrows instead
+// of returning null, so a caller can tell an empty listing from a failed one (the axios error
+// keeps `response.status`). Used by the formation sync, which retries transient failures itself.
+// The timeout turns a hung connection into an ECONNABORTED the caller retries, instead of a sync
+// stuck at "syncing" until the app restarts.
+export const sendApiRequestListChecked = async (parentId: string): Promise<unknown[]> => {
+  const response = await axios.get(`https://${getApiEndpoint()}/readChildren`, {
+    headers: getAuthHeaders(),
+    params: { parentId },
+    timeout: 60_000,
+  });
+  const data = response.data;
+  return Array.isArray(data) ? data : data?.data || [];
+};
+
 // WRITE OPERATIONS
 
 export const sendApiRequestCreate = async (options: CreateOptions): Promise<any> => {

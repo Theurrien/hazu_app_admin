@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Slot, StudentContext } from '../../../shared/formation-types';
 import type { SlotResult, SlotStatus, StudentModel } from './model';
-import { rates, aggregateOverview, aggregateFormation } from './aggregate';
+import { rates, aggregateOverview, aggregateFormation, splitByReadState, markStale, STALE_FLAG, NEVER_READ } from './aggregate';
 
 // ── Fixtures (invented) ──────────────────────────────────────────────────────
 
@@ -354,5 +354,41 @@ describe('aggregateFormation', () => {
     const f = aggregateFormation([model()], ctxAll([model()]), 'icon-none', 'afp', {});
     expect(f).toMatchObject({ key: 'icon-none', title: 'icon-none', tableLevel: 'afp', students: [], companies: [],
       importRate: null, evalRate: null, startEnteredShare: null, companiesWithoutTiers: { count: 0, total: 0 } });
+  });
+});
+
+describe('splitByReadState', () => {
+  const people = [
+    { personId: 'prof-101', name: 'Apprenti A' },
+    { personId: 'prof-102', name: 'Apprenti B' },
+    { personId: 'prof-103', name: 'Apprenti C' },
+    { personId: 'prof-104', name: 'Apprenti D' },
+  ];
+  const states = new Map([
+    ['prof-101', { readOk: true, stale: false, error: null }],
+    ['prof-102', { readOk: true, stale: true, error: 'http 503' }],
+    ['prof-103', { readOk: false, stale: false, error: 'http 404' }],
+  ]);
+  it('puts every apprentice in exactly one of read or failed; stale ones are read and listed as stale', () => {
+    const s = splitByReadState(people, states);
+    expect(s.read).toEqual(['prof-101', 'prof-102']);
+    expect(s.stale).toEqual([{ personId: 'prof-102', name: 'Apprenti B', error: 'http 503' }]);
+    expect(s.failed).toEqual([
+      { personId: 'prof-103', name: 'Apprenti C', error: 'http 404' },
+      { personId: 'prof-104', name: 'Apprenti D', error: NEVER_READ },
+    ]);
+    expect(s.read.length + s.failed.length).toBe(people.length);
+  });
+});
+
+describe('markStale', () => {
+  it('appends the stale flag to the stale apprentices only, without mutating the input', () => {
+    const a = model();
+    const b = model();
+    const f = aggregateFormation([a, b], ctxAll([a, b]), CUI, 'both', {});
+    const out = markStale(f, new Set([b.personId]));
+    expect(out.students.find(s => s.personId === b.personId)!.flags).toContain(STALE_FLAG);
+    expect(out.students.find(s => s.personId === a.personId)!.flags).not.toContain(STALE_FLAG);
+    expect(f.students.every(s => !s.flags.includes(STALE_FLAG))).toBe(true);
   });
 });

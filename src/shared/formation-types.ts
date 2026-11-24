@@ -112,6 +112,8 @@ export interface SchoolOverview extends Rates {
   formations: FormationAgg[];
   unclassified: Array<{ personId: string; name: string }>;
   failed: Array<{ personId: string; name: string; error: string }>;
+  /** Read OK earlier, latest read failed: counted from the earlier rows (`error` = latest failure). */
+  stale: Array<{ personId: string; name: string; error: string }>;
   syncedAt: number | null;
 }
 /** What the local DB knows about an apprentice. `icon` is the profession icon = the formation key. */
@@ -147,3 +149,16 @@ export interface FormationDetail extends Rates {
   /** `bar` is null when the apprentice's MPE statuses are unknown (see `flags`). */
   students: Array<{ personId: string; name: string; company: string; currentSemester: number; bar: Bar | null; latestReport: ReportState | null; flags: string[] }>;
 }
+
+/** The formation sync's status row. `failed` = apprentices whose read failed in the current/last run. */
+export interface FormationSyncStatus {
+  status: 'idle' | 'syncing' | 'error';
+  processed: number;
+  total: number;
+  failed: number;
+  lastSyncedAt: number | null;
+  lastError: string | null;
+}
+
+/** Filters of the formation detail; class/company are local room ids. */
+export interface FormationDetailFilters { classId?: string; companyId?: string; semester?: number }

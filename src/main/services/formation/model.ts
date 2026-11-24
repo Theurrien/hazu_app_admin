@@ -40,6 +40,9 @@ export interface StudentModel {
   failedParts: StudentRaw['failedParts'];
 }
 
+/** One apprentice as the FORMATION_STUDENT channel returns it. */
+export type FormationStudent = StudentModel & { name: string; companies: string[] };
+
 /** Sort key for an apprentice whose formation does not resolve: after every configured one. */
 const UNKNOWN_FORMATION_ORDER = Number.MAX_SAFE_INTEGER;
 

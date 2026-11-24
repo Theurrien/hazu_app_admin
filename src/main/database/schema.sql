@@ -183,6 +183,106 @@ CREATE TABLE IF NOT EXISTS membership_issues (
 CREATE INDEX IF NOT EXISTS idx_membership_issues_room ON membership_issues(room_id);
 
 -- ============================================================================
+-- MISSIONS — FORMATION OVERVIEW (raw-ish facts per apprentice; rules run at query time)
+-- ============================================================================
+
+-- One row per apprentice the formation sync has tried to read.
+-- read_ok = the stored rows come from a successful read; stale = the latest read failed,
+-- so the rows are from an earlier one (error = that latest failure).
+CREATE TABLE IF NOT EXISTS formation_student (
+    person_id TEXT PRIMARY KEY,
+    read_ok INTEGER NOT NULL,
+    error TEXT,
+    stale INTEGER NOT NULL DEFAULT 0,
+    profile_created INTEGER,
+    user_id_tag TEXT,
+    self_uid TEXT,
+    timeline_ok INTEGER NOT NULL,
+    mpe_found INTEGER NOT NULL,
+    mpc_found INTEGER NOT NULL,
+    plan_start_ms INTEGER,
+    empty_listings INTEGER NOT NULL DEFAULT 0,
+    failed_parts TEXT NOT NULL DEFAULT '[]',
+    synced_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS formation_copy (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    copy_id TEXT NOT NULL,
+    semester INTEGER,
+    mandate TEXT,
+    level TEXT,
+    profession TEXT,
+    title TEXT NOT NULL,
+    date_created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_copy_person ON formation_copy(person_id);
+
+CREATE TABLE IF NOT EXISTS formation_assessment (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    copy_id TEXT NOT NULL,
+    author_id TEXT,
+    author_name TEXT NOT NULL,
+    points REAL NOT NULL,
+    feedback TEXT,
+    date_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_assessment_person ON formation_assessment(person_id);
+
+CREATE TABLE IF NOT EXISTS formation_report (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    report_id TEXT NOT NULL,
+    semester INTEGER,
+    published INTEGER NOT NULL,
+    published_at INTEGER,
+    course_id TEXT,
+    date_created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_report_person ON formation_report(person_id);
+
+CREATE TABLE IF NOT EXISTS formation_plan_retired (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    slot_key TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_plan_retired_person ON formation_plan_retired(person_id);
+
+-- School-wide reference data, replaced as a whole by each successful run.
+CREATE TABLE IF NOT EXISTS formation_catalogue (
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    profession TEXT NOT NULL,
+    level TEXT NOT NULL,
+    semester INTEGER NOT NULL,
+    mandate TEXT NOT NULL,
+    title TEXT NOT NULL,
+    slot_id TEXT NOT NULL
+);
+
+-- professionsByIcon / levelsByColor / catalogueIcons, as JSON.
+CREATE TABLE IF NOT EXISTS formation_reference (
+    key TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS formation_sync_status (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    status TEXT NOT NULL DEFAULT 'idle',
+    processed INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    last_synced_at INTEGER,
+    last_error TEXT
+);
+-- Seeded: the old Missions tab broke because its status row was never created.
+INSERT OR IGNORE INTO formation_sync_status (id, status) VALUES (1, 'idle');
+
+-- ============================================================================
 -- SETTINGS
 -- ============================================================================
 

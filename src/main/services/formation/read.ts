@@ -269,3 +269,37 @@ function profileCreatedOf(profileId: string, raw: unknown[]): number | null {
   const env = parent.snapshot ?? parent.data ?? parent;
   return Number(env.dateCreated) || null;
 }
+
+export interface FormationSyncArgs {
+  profiles: ProfileInput[];
+  configParentIds: string[];
+  concurrency: number;
+  onProgress(p: { processed: number; failed: number }): void;
+}
+
+/**
+ * One whole formation sync: the reference data first, then every apprentice, `concurrency` at a
+ * time. Rejects when the reference read fails (no rates are computable without it, spec §7.2);
+ * an apprentice's failure never rejects — it is a result with `ok: false`. `reads` counts every
+ * list/ACL call of the run, reference included.
+ */
+export async function runFormationSync(
+  deps: ReadDeps,
+  args: FormationSyncArgs,
+): Promise<{ reference: Reference; results: StudentRaw[]; durationMs: number; reads: number }> {
+  const t0 = Date.now();
+  const counters: ReadCounters = { reads: 0 };
+  const reference = await readReference(deps, args.configParentIds, counters);
+  let failed = 0;
+  const results = await runPool(
+    args.profiles,
+    args.concurrency,
+    async p => {
+      const r = await readStudent(deps, p, counters);
+      if (!r.ok) failed += 1;
+      return r;
+    },
+    processed => args.onProgress({ processed, failed }),
+  );
+  return { reference, results, durationMs: Date.now() - t0, reads: counters.reads ?? 0 };
+}
