@@ -319,12 +319,18 @@ export function planFacts(rows: Row[]): PlanFacts {
   };
 }
 
-/** A child by tag, falling back to its normalised title. */
-export function findChild(rows: Row[], tag: string | null, titleFallback: string): Row | null {
-  if (tag) {
-    const byTag = rows.find(r => r.tags.includes(tag));
-    if (byTag) return byTag;
-  }
-  const want = normalizeTitle(titleFallback);
-  return rows.find(r => normalizeTitle(r.title) === want) ?? null;
+// Source: enterprise_dashboard.html — loadStudentMandates / loadStudentMandatesCie (study place lookup)
+// The child carrying `tag`, else the first whose stripped, lower-cased title contains `needle`.
+export function findStudyPlace(rows: Row[], tag: string, needle: string): Row | null {
+  return rows.find(r => r.tags.includes(tag)) ?? rows.find(r => stripHtml(r.title).toLowerCase().includes(needle)) ?? null;
+}
+
+// Source: enterprise_dashboard.html — loadSuiviHazu
+// A hazu carrying hz-config-suivi-company, else a fa-info hazu whose normalised title is « entreprise - suivi ».
+export function findSuiviCompany(rows: Row[]): Row | null {
+  return (
+    rows.find(r => r.type === 'hazu' && r.tags.includes('hz-config-suivi-company')) ??
+    rows.find(r => r.type === 'hazu' && r.icon === 'fa-info' && normalizeTitle(r.title) === 'entreprise - suivi') ??
+    null
+  );
 }

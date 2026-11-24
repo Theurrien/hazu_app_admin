@@ -15,7 +15,8 @@ import {
   companyReports,
   cieReports,
   planFacts,
-  findChild,
+  findStudyPlace,
+  findSuiviCompany,
   pickIdTag,
 } from './parse';
 
@@ -151,9 +152,20 @@ describe('planFacts', () => {
   it('returns nulls for no records', () => expect(planFacts([])).toEqual({ startMs: null, retiredSlots: [] }));
 });
 
-describe('findChild', () => {
-  const rows = [row({ id: 't', tags: ['tag-x'], title: 'Autre' }), row({ id: 'm', title: 'Mandats Entreprise' })];
-  it('prefers the tag', () => expect(findChild(rows, 'tag-x', 'mandats entreprise')?.id).toBe('t'));
-  it('falls back to the normalised title', () => expect(findChild(rows, 'nope', 'mandats entreprise')?.id).toBe('m'));
-  it('returns null otherwise', () => expect(findChild(rows, null, 'zzz')).toBeNull());
+describe('findStudyPlace', () => {
+  const rows = [row({ id: 't', tags: ['tag-x'], title: 'Autre' }), row({ id: 'm', title: '<p>Mes Mandats Entreprise 2025</p>' })];
+  it('prefers the tag', () => expect(findStudyPlace(rows, 'tag-x', 'mandats entreprise')?.id).toBe('t'));
+  it('falls back to a title that contains the needle, as loadStudentMandates does', () =>
+    expect(findStudyPlace(rows, 'nope', 'mandats entreprise')?.id).toBe('m'));
+  it('returns null otherwise', () => expect(findStudyPlace(rows, 'nope', 'mandats cie')).toBeNull());
+});
+
+describe('findSuiviCompany', () => {
+  const TAG = 'hz-config-suivi-company';
+  it('takes a hazu carrying the tag', () =>
+    expect(findSuiviCompany([row({ id: 'i', type: 'item', tags: [TAG] }), row({ id: 'h', tags: [TAG] })])?.id).toBe('h'));
+  it('falls back to a fa-info hazu titled Entreprise - Suivi', () =>
+    expect(findSuiviCompany([row({ id: 'x', title: 'Entreprise - Suivi' }), row({ id: 'y', title: 'Entreprise - Suivi', icon: 'fa-info' })])?.id).toBe('y'));
+  it('never takes an item, nor a title match without the fa-info icon', () =>
+    expect(findSuiviCompany([row({ id: 'i', type: 'item', tags: [TAG] }), row({ id: 'x', title: 'Entreprise - Suivi' })])).toBeNull());
 });

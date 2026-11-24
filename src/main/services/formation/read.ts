@@ -5,7 +5,7 @@
 import type { Row, AssessmentFact, Copy, ReportFact, PlanFacts, Slot, StudentRaw, Reference } from '../../../shared/formation-types';
 import { isRetryableError, backoffMs } from '../role-write';
 import {
-  childrenOf, findChild, normalizeTitle, stripHtml, facetFrom, pickIdTag, timelineFacts, professionCodeOf,
+  childrenOf, findStudyPlace, findSuiviCompany, normalizeTitle, stripHtml, facetFrom, pickIdTag, timelineFacts, professionCodeOf,
   isArchiveFolder, catalogueSlot, splitStudyChildren, companyReports, cieReports, planFacts,
 } from './parse';
 
@@ -236,7 +236,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
 
     const notes: DescentNotes = { depthCaps: 0, skippedSubtrees: 0 };
     const mandates = async (tag: string, title: string, kind: 'mpe' | 'mpc') => {
-      const place = findChild(kids, tag, title);
+      const place = findStudyPlace(kids, tag, title);
       if (!place) return;
       try {
         const copies = await collectCopies(deps, place.id, kind, 0, counters, notes);
@@ -254,7 +254,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     }
 
     // Entreprise - Suivi: company reports and the plan records.
-    const suiviCo = findChild(kids, 'hz-config-suivi-company', 'entreprise - suivi');
+    const suiviCo = findSuiviCompany(kids);
     if (suiviCo) {
       try {
         const rows = await listWithRetry(deps, suiviCo.id, counters);
