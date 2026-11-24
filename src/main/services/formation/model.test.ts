@@ -37,7 +37,8 @@ const CFC = { icon: 'icon-cui', color: '#f0b400' };
 function raw(o: Partial<StudentRaw> = {}): StudentRaw {
   return {
     personId: 'prof-001', ok: true, error: null, profileCreated: d(2025, 0, 10),
-    userIdTag: 'hz-config-userid-{value}', selfUid: SELF, timelineOk: true, facts: [],
+    userIdTag: 'hz-config-userid-{value}', selfUid: SELF, timelineOk: true, timelineFound: true, facts: [],
+    suiviCompanyFound: true, suiviCieFound: true,
     mpe: { found: true, copies: [] }, mpc: { found: true, copies: [] },
     reports: [], plan: { startMs: null, retiredSlots: [] }, failedParts: [], emptyListings: 0, skippedSubtrees: 0,
     ...o,
@@ -216,6 +217,11 @@ describe('buildStudentModel — formation, level, start', () => {
       { icon: null, color: '#f0b400' }, REF, TODAY);
     expect(none.profession).toBeNull();
     expect(none.mpe).toEqual([]);
+  });
+
+  it('carries the found bits of the timeline and both Suivis', () => {
+    const m = buildStudentModel(raw({ timelineFound: false, suiviCompanyFound: false, suiviCieFound: true }), CFC, REF, TODAY);
+    expect(m).toMatchObject({ timelineFound: false, suiviCompanyFound: false, suiviCieFound: true });
   });
 
   it('copies flags from the raw read', () => {

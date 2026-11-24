@@ -78,10 +78,15 @@ export interface StudentRaw {
   userIdTag: string | null;
   selfUid: string | null;
   timelineOk: boolean;
+  /** A timeline was located (pointer tag or hz-config-skills child). Not found ≠ found-empty. */
+  timelineFound: boolean;
   facts: AssessmentFact[];
   mpe: { found: boolean; copies: Copy[] };
   mpc: { found: boolean; copies: Copy[] };
   reports: ReportFact[];
+  /** « Entreprise - Suivi » / « CIE - Suivi » located among the profile's children. Not found ≠ found-empty. */
+  suiviCompanyFound: boolean;
+  suiviCieFound: boolean;
   plan: PlanFacts;
   failedParts: Array<'timeline' | 'mpe' | 'mpc' | 'suivi-company' | 'suivi-cie' | 'acl'>; // parts whose read failed after retries; `found` only means the folder was located
   emptyListings: number; // listings still empty after one re-read, during this apprentice's read
@@ -128,9 +133,12 @@ export interface StudentModel {
   cieReports: { sent: number; draft: number };
   identityKnown: boolean;
   timelineOk: boolean;
+  timelineFound: boolean;
   readOk: boolean;
   mpeFound: boolean;
   mpcFound: boolean;
+  suiviCompanyFound: boolean;
+  suiviCieFound: boolean;
   failedParts: StudentRaw['failedParts'];
 }
 

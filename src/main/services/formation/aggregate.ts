@@ -3,10 +3,12 @@
 //
 // A part that could not be read is unknown, never zero (spec §8):
 //   - MPE (or MPC) space unreadable or not found → the apprentice is in no MPE (MPC) rate, bar or table;
-//   - timeline unreadable or identity unknown    → counts in import rates, not in evaluation rates,
+//   - timeline unreadable or not found, or identity unknown
+//                                                → counts in import rates, not in evaluation rates,
 //                                                  and its statuses are painted in no bar;
-//   - company Suivi unreadable                   → out of report counts and the start-date/plan figures;
-//   - CIE Suivi unreadable                       → out of the CIE report counts.
+//   - company Suivi unreadable or not found      → out of report counts and the start-date/plan figures;
+//   - CIE Suivi unreadable or not found          → out of the CIE report counts.
+// Not found ≠ found-empty: each container has a found bit, read here alongside its failed part.
 // Each exclusion adds a short French flag to the apprentice's row. An apprentice whose profile could
 // not be read at all (`readOk: false`) is listed in `failed` and counted nowhere else.
 
@@ -35,9 +37,9 @@ function knownOf(m: StudentModel): Known {
   return {
     mpe: m.mpeFound && !failed('mpe'),
     mpc: m.mpcFound && !failed('mpc'),
-    evaluation: m.timelineOk && !failed('timeline') && m.identityKnown,
-    suiviCompany: !failed('suivi-company'),
-    suiviCie: !failed('suivi-cie'),
+    evaluation: m.timelineOk && m.timelineFound && !failed('timeline') && m.identityKnown,
+    suiviCompany: m.suiviCompanyFound && !failed('suivi-company'),
+    suiviCie: m.suiviCieFound && !failed('suivi-cie'),
   };
 }
 
@@ -49,10 +51,13 @@ function flagsOf(m: StudentModel): string[] {
   if (failed('mpc')) f.push('mandats CIE illisibles');
   else if (!m.mpcFound) f.push('mandats CIE introuvables');
   if (failed('timeline') || !m.timelineOk) f.push('timeline illisible');
+  else if (!m.timelineFound) f.push('timeline introuvable');
   if (failed('acl')) f.push('ACL illisible');
   else if (!m.identityKnown) f.push('identité inconnue');
   if (failed('suivi-company')) f.push('suivi entreprise illisible');
+  else if (!m.suiviCompanyFound) f.push('suivi entreprise introuvable');
   if (failed('suivi-cie')) f.push('suivi CIE illisible');
+  else if (!m.suiviCieFound) f.push('suivi CIE introuvable');
   if (m.level === 'other') f.push('autre niveau');
   return f;
 }
@@ -214,7 +219,7 @@ function studentBar(m: StudentModel): Bar | null {
   return b;
 }
 
-/** The newest semester already due (any state but future); null when none or the Suivi is unreadable. */
+/** The newest semester already due (any state but future); null when none or the Suivi is unreadable or not found. */
 function latestReport(m: StudentModel): ReportState | null {
   if (!knownOf(m).suiviCompany) return null;
   const due = m.reports.filter(r => r.state !== 'future').sort((a, b) => b.semester - a.semester);

@@ -203,8 +203,8 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
   const userIdTag = facetFrom(p.tags, USERID_PREFIX);
   const out: StudentRaw = {
     personId: p.personId, ok: true, error: null, profileCreated: null, userIdTag, selfUid: null,
-    timelineOk: true, facts: [], mpe: { found: false, copies: [] }, mpc: { found: false, copies: [] },
-    reports: [], plan: { startMs: null, retiredSlots: [] } as PlanFacts, emptyListings: 0, skippedSubtrees: 0, failedParts: [],
+    timelineOk: true, timelineFound: false, facts: [], mpe: { found: false, copies: [] }, mpc: { found: false, copies: [] },
+    reports: [], suiviCompanyFound: false, suiviCieFound: false, plan: { startMs: null, retiredSlots: [] } as PlanFacts, emptyListings: 0, skippedSubtrees: 0, failedParts: [],
   };
   const fail = (e: unknown, part?: StudentRaw['failedParts'][number]) => {
     if (!out.error) out.error = message(e);
@@ -227,6 +227,8 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     // Timeline: the pointer tag first, else the child tagged hz-config-skills.
     try {
       const timelineId = pickIdTag(p.tags, TIMELINE_PREFIX) ?? kids.find(k => k.tags.includes('hz-config-skills'))?.id ?? null;
+      // Not found is recorded, never read as an empty timeline (the statuses stay as the widget has them).
+      out.timelineFound = timelineId !== null;
       out.facts = timelineId ? timelineFacts(await listWithRetry(deps, timelineId, counters)) : [];
     } catch (e) {
       out.timelineOk = false;
@@ -254,7 +256,9 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     }
 
     // Entreprise - Suivi: company reports and the plan records.
+    // Source: enterprise_dashboard.html — loadSuiviHazu (null → the Suivi is unavailable, never « missing »)
     const suiviCo = findSuiviCompany(kids);
+    out.suiviCompanyFound = suiviCo !== null;
     if (suiviCo) {
       try {
         const rows = await listWithRetry(deps, suiviCo.id, counters);
@@ -266,6 +270,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     }
     // CIE - Suivi: rap_cie report copies.
     const suiviCie = kids.find(k => normalizeTitle(k.title) === 'cie - suivi') ?? null;
+    out.suiviCieFound = suiviCie !== null;
     if (suiviCie) {
       try {
         out.reports = out.reports.concat(cieReports(await listWithRetry(deps, suiviCie.id, counters)));

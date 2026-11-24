@@ -25,7 +25,8 @@ function model(o: Partial<StudentModel> = {}): StudentModel {
     startMs: 0, startSource: 'plan', semesterCount: 6, currentSemester: 2, semesters: [],
     mpe: [], mpc: [], ahead: [], retired: [], reports: [], untaggedReports: 0,
     cieReports: { sent: 0, draft: 0 },
-    identityKnown: true, timelineOk: true, readOk: true, mpeFound: true, mpcFound: true, failedParts: [],
+    identityKnown: true, timelineOk: true, timelineFound: true, readOk: true, mpeFound: true, mpcFound: true,
+    suiviCompanyFound: true, suiviCieFound: true, failedParts: [],
     ...o,
   };
 }
@@ -309,6 +310,42 @@ describe('aggregateFormation', () => {
     const s = Object.fromEntries(f.students.map(x => [x.personId, x]));
     expect(s[nf.personId]).toMatchObject({ bar: null, flags: ['mandats entreprise introuvables'] });
     expect(s[fl.personId]).toMatchObject({ bar: null, latestReport: null, flags: ['mandats entreprise illisibles', 'suivi entreprise illisible'] });
+  });
+
+  it('a company Suivi not found is unknown: out of report counts, plan and start share; flagged', () => {
+    const ok = model({ startSource: 'plan', reports: [{ semester: 1, state: 'published', reportId: 'r', publishedAt: 1 }] });
+    const nf = model({ suiviCompanyFound: false, startSource: 'default',
+      reports: [{ semester: 1, state: 'missing', reportId: null, publishedAt: null }] });
+    const ms = [ok, nf];
+    const f = aggregateFormation(ms, ms.map(m => ctxOf(m, { companies: [A] })), CUI, 'cfc', {});
+    expect(f.reportsBySemester).toEqual([{ semester: 1, published: 1, draft: 0, missing: 0 }]);
+    expect(f.companies[0]).toMatchObject({ plan: 'oui', reportsPublished: 1, reportsDue: 1 });
+    expect(f.startEnteredShare).toBe(1);
+    const s = Object.fromEntries(f.students.map(x => [x.personId, x]));
+    expect(s[nf.personId]).toMatchObject({ latestReport: null, flags: ['suivi entreprise introuvable'] });
+    const alone = aggregateFormation([nf], [ctxOf(nf, { companies: [A] })], CUI, 'cfc', {});
+    expect(alone.companies[0].plan).toBeNull();
+    expect(alone.startEnteredShare).toBeNull();
+    expect(aggregateOverview(ms, ctxAll(ms), [], null).reportsPublishedRate).toBe(1);
+  });
+
+  it('a CIE Suivi not found is out of the CIE report counts and flagged', () => {
+    const a = model({ cieReports: { sent: 1, draft: 0 } });
+    const nf = model({ suiviCieFound: false, cieReports: { sent: 0, draft: 0 } });
+    const f = aggregateFormation([a, nf], ctxAll([a, nf]), CUI, 'cfc', {});
+    expect(f.cieReports).toEqual({ sent: 1, draft: 0 });
+    expect(f.students.find(x => x.personId === nf.personId)!.flags).toEqual(['suivi CIE introuvable']);
+  });
+
+  it('a timeline not found: in import rates, out of evaluation rates, bar null, flagged', () => {
+    const a = model({ mpe: [res('tiers', 1, '01')] });
+    const nf = model({ timelineFound: false, mpe: [res('encours', 1, '01')] });
+    const f = aggregateFormation([a, nf], ctxAll([a, nf]), CUI, 'cfc', {});
+    expect(f.importRate).toBe(1);
+    expect(f.evalRate).toBe(1);
+    expect(f.mpe).toEqual([{ semester: 1, mandate: '01', title: 'Mandat S1·01', concerned: 2, imported: 2, assessable: 1, tiers: 1 }]);
+    const s = f.students.find(x => x.personId === nf.personId)!;
+    expect(s).toMatchObject({ bar: null, flags: ['timeline introuvable'] });
   });
 
   it('level cfc keeps only CFC apprentices; unread and other-formation models are left out', () => {

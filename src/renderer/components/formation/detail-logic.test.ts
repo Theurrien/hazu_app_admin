@@ -61,7 +61,8 @@ describe('slotDisplay', () => {
 });
 
 const st = (o: Partial<Parameters<typeof evaluationKnown>[0]> = {}) => ({
-  timelineOk: true, identityKnown: true, mpeFound: true, mpcFound: true, failedParts: [] as Array<'timeline' | 'mpe' | 'mpc' | 'suivi-company' | 'suivi-cie' | 'acl'>, ...o,
+  timelineOk: true, timelineFound: true, identityKnown: true, mpeFound: true, mpcFound: true,
+  suiviCompanyFound: true, suiviCieFound: true, failedParts: [] as Array<'timeline' | 'mpe' | 'mpc' | 'suivi-company' | 'suivi-cie' | 'acl'>, ...o,
 });
 
 describe('evaluationKnown', () => {
@@ -70,6 +71,9 @@ describe('evaluationKnown', () => {
     expect(evaluationKnown(st({ timelineOk: false }))).toBe(false);
     expect(evaluationKnown(st({ identityKnown: false }))).toBe(false);
     expect(evaluationKnown(st({ failedParts: ['timeline'] }))).toBe(false);
+  });
+  it('a timeline not found is not a known evaluation', () => {
+    expect(evaluationKnown(st({ timelineFound: false }))).toBe(false);
   });
 });
 
@@ -106,6 +110,7 @@ describe('latestReportLabel', () => {
   });
   it('null: « inconnu » when the Suivi is unreadable, else « — »', () => {
     expect(latestReportLabel(null, ['suivi entreprise illisible'])).toBe('inconnu');
+    expect(latestReportLabel(null, ['suivi entreprise introuvable'])).toBe('inconnu');
     expect(latestReportLabel(null, [])).toBe('—');
   });
 });

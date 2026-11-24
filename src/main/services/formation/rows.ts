@@ -15,8 +15,11 @@ export interface StudentRow {
   user_id_tag: string | null;
   self_uid: string | null;
   timeline_ok: number;
+  timeline_found: number;
   mpe_found: number;
   mpc_found: number;
+  suivi_company_found: number;
+  suivi_cie_found: number;
   plan_start_ms: number | null;
   empty_listings: number;
   skipped_subtrees: number;
@@ -61,8 +64,9 @@ export function studentToRows(raw: StudentRaw, syncedAt: number): StudentRows {
   return {
     student: {
       person_id, read_ok: bit(raw.ok), error: raw.error, stale: 0, profile_created: raw.profileCreated,
-      user_id_tag: raw.userIdTag, self_uid: raw.selfUid, timeline_ok: bit(raw.timelineOk),
-      mpe_found: bit(raw.mpe.found), mpc_found: bit(raw.mpc.found), plan_start_ms: raw.plan.startMs,
+      user_id_tag: raw.userIdTag, self_uid: raw.selfUid, timeline_ok: bit(raw.timelineOk), timeline_found: bit(raw.timelineFound),
+      mpe_found: bit(raw.mpe.found), mpc_found: bit(raw.mpc.found),
+      suivi_company_found: bit(raw.suiviCompanyFound), suivi_cie_found: bit(raw.suiviCieFound), plan_start_ms: raw.plan.startMs,
       empty_listings: raw.emptyListings, skipped_subtrees: raw.skippedSubtrees, failed_parts: JSON.stringify(raw.failedParts), synced_at: syncedAt,
     },
     copies: [...raw.mpe.copies.map(copy), ...raw.mpc.copies.map(copy)],
@@ -99,10 +103,13 @@ export function studentFromRows(r: StudentRows): StudentRaw {
     userIdTag: s.user_id_tag,
     selfUid: s.self_uid,
     timelineOk: s.timeline_ok === 1,
+    timelineFound: s.timeline_found === 1,
     facts,
     mpe: { found: s.mpe_found === 1, copies: copies('mpe') },
     mpc: { found: s.mpc_found === 1, copies: copies('mpc') },
     reports,
+    suiviCompanyFound: s.suivi_company_found === 1,
+    suiviCieFound: s.suivi_cie_found === 1,
     plan: { startMs: s.plan_start_ms, retiredSlots: byOrd(r.retired).map(x => x.slot_key) },
     failedParts: JSON.parse(s.failed_parts || '[]'),
     emptyListings: s.empty_listings,
@@ -137,7 +144,7 @@ const renumber = <T extends { ord: number }>(rows: T[]): T[] => rows.map((r, ord
 /**
  * The rows to store for an apprentice whose read was ok but lost some parts (`failed_parts`):
  * each failed part keeps its previous rows, each part read OK is replaced. Status columns
- * (failed_parts, timeline_ok, found flags, error) stay the fresh ones, so the UI still flags
+ * (failed_parts, timeline_ok, every found flag, error) stay the fresh ones, so the UI still flags
  * the part. Without previous rows from a successful read, the fresh rows stand as they are.
  *   timeline → assessments; mpe/mpc → that kind's copies; suivi-company → company reports +
  *   plan (start, retired slots); suivi-cie → CIE reports; acl → self_uid.

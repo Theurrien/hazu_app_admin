@@ -279,9 +279,12 @@ export function buildStudentModel(
     cieReports: { sent: cie.filter(r => r.published).length, draft: cie.filter(r => !r.published).length },
     identityKnown: raw.selfUid !== null && !raw.failedParts.includes('acl'),
     timelineOk: raw.timelineOk,
+    timelineFound: raw.timelineFound,
     readOk: raw.ok,
     mpeFound: raw.mpe.found,
     mpcFound: raw.mpc.found,
+    suiviCompanyFound: raw.suiviCompanyFound,
+    suiviCieFound: raw.suiviCieFound,
     failedParts: [...raw.failedParts],
   };
 }

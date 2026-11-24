@@ -24,8 +24,11 @@ CREATE TABLE IF NOT EXISTS formation_student (
     user_id_tag TEXT,
     self_uid TEXT,
     timeline_ok INTEGER NOT NULL,
+    timeline_found INTEGER NOT NULL DEFAULT 1,
     mpe_found INTEGER NOT NULL,
     mpc_found INTEGER NOT NULL,
+    suivi_company_found INTEGER NOT NULL DEFAULT 1,
+    suivi_cie_found INTEGER NOT NULL DEFAULT 1,
     plan_start_ms INTEGER,
     empty_listings INTEGER NOT NULL DEFAULT 0,
     skipped_subtrees INTEGER NOT NULL DEFAULT 0,
@@ -304,10 +307,17 @@ function runMigrations(): void {
       DROP TABLE IF EXISTS mission_sync_status;
     `);
     db.exec(FORMATION_SCHEMA);
-    // A formation_student created before skipped_subtrees existed (dev builds of this branch).
+    // A formation_student created before these columns existed (dev builds of this branch).
+    // The found bits default to 1, the meaning those rows were written with; the next run sets them.
     const cols = db.prepare('PRAGMA table_info(formation_student)').all() as Array<{ name: string }>;
-    if (!cols.some(c => c.name === 'skipped_subtrees')) {
-      db.exec('ALTER TABLE formation_student ADD COLUMN skipped_subtrees INTEGER NOT NULL DEFAULT 0');
+    const added: Array<[string, string]> = [
+      ['skipped_subtrees', 'INTEGER NOT NULL DEFAULT 0'],
+      ['timeline_found', 'INTEGER NOT NULL DEFAULT 1'],
+      ['suivi_company_found', 'INTEGER NOT NULL DEFAULT 1'],
+      ['suivi_cie_found', 'INTEGER NOT NULL DEFAULT 1'],
+    ];
+    for (const [name, decl] of added) {
+      if (!cols.some(c => c.name === name)) db.exec(`ALTER TABLE formation_student ADD COLUMN ${name} ${decl}`);
     }
     db.prepare(
       "UPDATE formation_sync_status SET status = 'idle', processed = 0, total = 0, failed = 0 WHERE id = 1 AND status = 'syncing'",

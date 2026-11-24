@@ -215,6 +215,31 @@ describe('readStudent', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
+  it('records each container as found on a full profile', async () => {
+    const s = await readStudent(fake(fullTree()).deps, P);
+    expect(s).toMatchObject({ timelineFound: true, suiviCompanyFound: true, suiviCieFound: true });
+  });
+  it('a missing « Entreprise - Suivi » is not found, not found-empty', async () => {
+    const t = fullTree();
+    t['prof-001'] = t['prof-001'].filter(r => r.key !== 'suivi-co');
+    const s = await readStudent(fake(t).deps, P);
+    expect(s).toMatchObject({ suiviCompanyFound: false, suiviCieFound: true, failedParts: [] });
+    expect(s.reports.map(r => r.kind)).toEqual(['cie']);
+  });
+  it('a missing « CIE - Suivi » is not found', async () => {
+    const t = fullTree();
+    t['prof-001'] = t['prof-001'].filter(r => r.key !== 'suivi-cie');
+    const s = await readStudent(fake(t).deps, P);
+    expect(s).toMatchObject({ suiviCompanyFound: true, suiviCieFound: false });
+  });
+  it('a located Suivi whose read fails is found (and failed)', async () => {
+    const s = await readStudent(fake(fullTree(), { 'suivi-co': http(503) }).deps, P);
+    expect(s).toMatchObject({ suiviCompanyFound: true, failedParts: ['suivi-company'] });
+  });
+  it('no timeline pointer and no hz-config-skills child: timeline not found, statuses still read', async () => {
+    const s = await readStudent(fake(fullTree()).deps, { personId: 'prof-001', tags: ['hz-config-userid-uid123'] });
+    expect(s).toMatchObject({ timelineFound: false, timelineOk: true, facts: [], failedParts: [] });
+  });
   it('does not read the ACL for a non-e-mail identity', async () => {
     const { deps } = fake(fullTree());
     const acl = vi.spyOn(deps, 'acl');

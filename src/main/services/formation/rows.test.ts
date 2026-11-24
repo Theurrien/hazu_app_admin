@@ -6,7 +6,8 @@ import { studentToRows, studentFromRows, referenceToRows, referenceFromRows, kee
 function fullRaw(): StudentRaw {
   return {
     personId: 'prof-001', ok: true, error: 'http 503', profileCreated: 1690000000000,
-    userIdTag: 'kid@example.invalid', selfUid: 'uid-001', timelineOk: false,
+    userIdTag: 'kid@example.invalid', selfUid: 'uid-001', timelineOk: false, timelineFound: true,
+    suiviCompanyFound: false, suiviCieFound: true,
     facts: [
       { copyId: 'copy-1', authorId: 'uid-009', authorName: 'Formateur', points: 3, feedback: 'bien', dateMs: 1700000000000 },
       { copyId: 'copy-2', authorId: null, authorName: '', points: 0, feedback: null, dateMs: 1700000000001 },
@@ -35,14 +36,18 @@ describe('student rows', () => {
   it('round-trips an unread profile', () => {
     const raw: StudentRaw = {
       personId: 'prof-002', ok: false, error: 'http 404', profileCreated: null, userIdTag: null, selfUid: null,
-      timelineOk: false, facts: [], mpe: { found: false, copies: [] }, mpc: { found: true, copies: [] },
+      timelineOk: false, timelineFound: false, suiviCompanyFound: true, suiviCieFound: false,
+      facts: [], mpe: { found: false, copies: [] }, mpc: { found: true, copies: [] },
       reports: [], plan: { startMs: 1700000000000, retiredSlots: [] }, failedParts: [], emptyListings: 0, skippedSubtrees: 0,
     };
     expect(studentFromRows(studentToRows(raw, 42))).toEqual(raw);
   });
   it('stores booleans as 0/1 and the sync time, never stale on a fresh write', () => {
     const r = studentToRows(fullRaw(), 42);
-    expect(r.student).toMatchObject({ read_ok: 1, stale: 0, timeline_ok: 0, mpe_found: 1, mpc_found: 0, synced_at: 42 });
+    expect(r.student).toMatchObject({
+      read_ok: 1, stale: 0, timeline_ok: 0, timeline_found: 1, mpe_found: 1, mpc_found: 0,
+      suivi_company_found: 0, suivi_cie_found: 1, synced_at: 42,
+    });
     expect(r.reports.map(x => x.published)).toEqual([1, 0]);
   });
   it('reorders child rows by ord when restoring', () => {

@@ -48,15 +48,18 @@ export function slotDisplay(status: BarKey, copiesKnown: boolean, evalKnown: boo
 
 type Knowable = {
   timelineOk: boolean;
+  timelineFound: boolean;
   identityKnown: boolean;
   mpeFound: boolean;
   mpcFound: boolean;
+  suiviCompanyFound: boolean;
+  suiviCieFound: boolean;
   failedParts: StudentRaw['failedParts'];
 };
 
-/** Same rule as the aggregate: the timeline was read and the apprentice's identity is known. */
+/** Same rule as the aggregate: the timeline was found and read, and the apprentice's identity is known. */
 export function evaluationKnown(m: Knowable): boolean {
-  return m.timelineOk && !m.failedParts.includes('timeline') && m.identityKnown && !m.failedParts.includes('acl');
+  return m.timelineOk && m.timelineFound && !m.failedParts.includes('timeline') && m.identityKnown && !m.failedParts.includes('acl');
 }
 
 /** Whether one mandate kind's copies were read. */
@@ -83,10 +86,10 @@ const REPORT_LABEL: Record<ReportState, string> = {
   published: 'publié', draft: 'brouillon', missing: 'à faire', optional: 'facultatif', future: 'à venir',
 };
 
-/** A report state; the apprentice list's null = none due yet, or the Suivi was unreadable. */
+/** A report state; the apprentice list's null = none due yet, or the Suivi was unreadable / not found. */
 export function latestReportLabel(state: ReportState | null, flags: string[]): string {
   if (state !== null) return REPORT_LABEL[state];
-  return flags.includes('suivi entreprise illisible') ? 'inconnu' : '—';
+  return flags.includes('suivi entreprise illisible') || flags.includes('suivi entreprise introuvable') ? 'inconnu' : '—';
 }
 
 /** The widgets' link to a Hazu item. */
