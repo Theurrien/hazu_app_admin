@@ -130,8 +130,8 @@ function writeRun(reference: Reference, results: StudentRaw[], syncedAt: number)
   const db = getDb();
   const ins = {
     student: db.prepare(`INSERT OR REPLACE INTO formation_student
-      (person_id, read_ok, error, stale, profile_created, user_id_tag, self_uid, timeline_ok, mpe_found, mpc_found, plan_start_ms, empty_listings, failed_parts, synced_at)
-      VALUES (@person_id, @read_ok, @error, @stale, @profile_created, @user_id_tag, @self_uid, @timeline_ok, @mpe_found, @mpc_found, @plan_start_ms, @empty_listings, @failed_parts, @synced_at)`),
+      (person_id, read_ok, error, stale, profile_created, user_id_tag, self_uid, timeline_ok, mpe_found, mpc_found, plan_start_ms, empty_listings, skipped_subtrees, failed_parts, synced_at)
+      VALUES (@person_id, @read_ok, @error, @stale, @profile_created, @user_id_tag, @self_uid, @timeline_ok, @mpe_found, @mpc_found, @plan_start_ms, @empty_listings, @skipped_subtrees, @failed_parts, @synced_at)`),
     copy: db.prepare(`INSERT INTO formation_copy (person_id, ord, kind, copy_id, semester, mandate, level, profession, title, date_created)
       VALUES (@person_id, @ord, @kind, @copy_id, @semester, @mandate, @level, @profession, @title, @date_created)`),
     assessment: db.prepare(`INSERT INTO formation_assessment (person_id, ord, copy_id, author_id, author_name, points, feedback, date_ms)

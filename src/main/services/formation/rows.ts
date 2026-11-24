@@ -19,6 +19,7 @@ export interface StudentRow {
   mpc_found: number;
   plan_start_ms: number | null;
   empty_listings: number;
+  skipped_subtrees: number;
   failed_parts: string; // JSON array
   synced_at: number;
 }
@@ -62,7 +63,7 @@ export function studentToRows(raw: StudentRaw, syncedAt: number): StudentRows {
       person_id, read_ok: bit(raw.ok), error: raw.error, stale: 0, profile_created: raw.profileCreated,
       user_id_tag: raw.userIdTag, self_uid: raw.selfUid, timeline_ok: bit(raw.timelineOk),
       mpe_found: bit(raw.mpe.found), mpc_found: bit(raw.mpc.found), plan_start_ms: raw.plan.startMs,
-      empty_listings: raw.emptyListings, failed_parts: JSON.stringify(raw.failedParts), synced_at: syncedAt,
+      empty_listings: raw.emptyListings, skipped_subtrees: raw.skippedSubtrees, failed_parts: JSON.stringify(raw.failedParts), synced_at: syncedAt,
     },
     copies: [...raw.mpe.copies.map(copy), ...raw.mpc.copies.map(copy)],
     assessments: raw.facts.map((f, ord) => ({
@@ -105,6 +106,7 @@ export function studentFromRows(r: StudentRows): StudentRaw {
     plan: { startMs: s.plan_start_ms, retiredSlots: byOrd(r.retired).map(x => x.slot_key) },
     failedParts: JSON.parse(s.failed_parts || '[]'),
     emptyListings: s.empty_listings,
+    skippedSubtrees: s.skipped_subtrees,
   };
 }
 

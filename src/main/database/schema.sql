@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS formation_student (
     mpc_found INTEGER NOT NULL,
     plan_start_ms INTEGER,
     empty_listings INTEGER NOT NULL DEFAULT 0,
+    skipped_subtrees INTEGER NOT NULL DEFAULT 0,
     failed_parts TEXT NOT NULL DEFAULT '[]',
     synced_at INTEGER NOT NULL
 );

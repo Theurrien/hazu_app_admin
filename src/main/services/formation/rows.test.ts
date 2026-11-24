@@ -23,6 +23,7 @@ function fullRaw(): StudentRaw {
     plan: { startMs: null, retiredSlots: ['cfc-3-12', 'cfc-1-01'] },
     failedParts: ['timeline', 'acl'],
     emptyListings: 2,
+    skippedSubtrees: 3,
   };
 }
 
@@ -35,7 +36,7 @@ describe('student rows', () => {
     const raw: StudentRaw = {
       personId: 'prof-002', ok: false, error: 'http 404', profileCreated: null, userIdTag: null, selfUid: null,
       timelineOk: false, facts: [], mpe: { found: false, copies: [] }, mpc: { found: true, copies: [] },
-      reports: [], plan: { startMs: 1700000000000, retiredSlots: [] }, failedParts: [], emptyListings: 0,
+      reports: [], plan: { startMs: 1700000000000, retiredSlots: [] }, failedParts: [], emptyListings: 0, skippedSubtrees: 0,
     };
     expect(studentFromRows(studentToRows(raw, 42))).toEqual(raw);
   });

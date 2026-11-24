@@ -39,7 +39,7 @@ function raw(o: Partial<StudentRaw> = {}): StudentRaw {
     personId: 'prof-001', ok: true, error: null, profileCreated: d(2025, 0, 10),
     userIdTag: 'hz-config-userid-{value}', selfUid: SELF, timelineOk: true, facts: [],
     mpe: { found: true, copies: [] }, mpc: { found: true, copies: [] },
-    reports: [], plan: { startMs: null, retiredSlots: [] }, failedParts: [], emptyListings: 0,
+    reports: [], plan: { startMs: null, retiredSlots: [] }, failedParts: [], emptyListings: 0, skippedSubtrees: 0,
     ...o,
   };
 }

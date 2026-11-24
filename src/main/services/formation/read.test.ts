@@ -179,6 +179,28 @@ describe('readStudent', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
+  it('retries a nested 429 and keeps its copies when it recovers', async () => {
+    const { deps } = fake(fullTree());
+    const list = deps.list.bind(deps);
+    let n = 0;
+    deps.list = async id => { if (id === 'import' && n++ === 0) throw http(429); return list(id); };
+    const s = await readStudent(deps, P);
+    expect(s.failedParts).toEqual([]);
+    expect(s.skippedSubtrees).toBe(0);
+    expect(s.mpe.copies.map(c => c.id).sort()).toEqual(['m1', 'm2']);
+  });
+  it('fails the kind on a nested 408 that keeps failing (transient, not skipped)', async () => {
+    const { deps, sleeps } = fake(fullTree(), { import: http(408) });
+    const s = await readStudent(deps, P);
+    expect(s.failedParts).toEqual(['mpe']);
+    expect(sleeps).toEqual([backoffMs(0), backoffMs(1)]);
+  });
+  it('skips and counts a nested 404', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const s = await readStudent(fake(fullTree(), { import: http(404) }).deps, P);
+    expect(s).toMatchObject({ failedParts: [], skippedSubtrees: 1 });
+    warn.mockRestore();
+  });
   it('still fails the kind on a 4xx at depth 0', async () => {
     const { deps } = fake(fullTree(), { 'study-co': http(401) });
     expect((await readStudent(deps, P)).failedParts).toEqual(['mpe']);

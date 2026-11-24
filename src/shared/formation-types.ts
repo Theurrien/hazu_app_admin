@@ -85,6 +85,7 @@ export interface StudentRaw {
   plan: PlanFacts;
   failedParts: Array<'timeline' | 'mpe' | 'mpc' | 'suivi-company' | 'suivi-cie' | 'acl'>; // parts whose read failed after retries; `found` only means the folder was located
   emptyListings: number; // listings still empty after one re-read, during this apprentice's read
+  skippedSubtrees: number; // nested mandate folders skipped on 401/403/404 (their copies are not counted)
 }
 
 /** School-wide reference data: the catalogue and the config Hazus. Colour keys are lower-cased. */

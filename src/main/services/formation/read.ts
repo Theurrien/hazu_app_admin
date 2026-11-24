@@ -32,10 +32,13 @@ const MAX_DEPTH = 3; // four levels, depths 0-3
 const CATALOGUE_CONCURRENCY = 5;
 const NETWORK_CODES = new Set(['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN']);
 
-// Transient = HTTP 5xx, or an error with no response that looks like network/timeout.
+// Transient = HTTP 5xx, 408 (request timeout) or 429 (rate limited), or an error with no response
+// that looks like network/timeout. 408/429 are local to the formation reads: role-write's rule is shared.
+const TRANSIENT_4XX = new Set([408, 429]);
 function isTransient(err: unknown): boolean {
   const e = err as { response?: { status?: number }; code?: string; request?: unknown } | null;
   const status = e?.response?.status;
+  if (status !== undefined && TRANSIENT_4XX.has(status)) return true;
   const network = status === undefined && !!(e && ((e.code && NETWORK_CODES.has(e.code)) || e.request));
   return isRetryableError(status, network);
 }
@@ -111,7 +114,7 @@ export async function readReference(deps: ReadDeps, configParentIds: string[], c
     .map(f => ({ folder: f, code: professionCodeOf(f) }))
     .filter((x): x is { folder: Row; code: string } => !!x.code);
 
-  const notes: DescentNotes = { depthCaps: 0 };
+  const notes: DescentNotes = { depthCaps: 0, skippedSubtrees: 0 };
   const slotsByFolder = await runPool(folders, CATALOGUE_CONCURRENCY, x => collectCatalogueSlots(deps, x.folder.id, x.code, 0, counters, notes));
   if (notes.depthCaps) console.warn(`[catalogue] depth cap (4 levels) hit in ${notes.depthCaps} folder(s) - deeper not collected`);
 
@@ -158,18 +161,18 @@ export function resolveSelfUid(userIdTag: string | null, acl: AclEntry[]): strin
   return hit?.authorId ?? null;
 }
 
-/** What one apprentice's mandate descents ran into; logged once per apprentice. */
-interface DescentNotes { depthCaps: number }
+/** What one apprentice's mandate descents ran into. Depth caps are logged once per apprentice. */
+interface DescentNotes { depthCaps: number; skippedSubtrees: number }
 
-const is4xx = (err: unknown): boolean => {
-  const s = (err as { response?: { status?: number } } | null)?.response?.status;
-  return s !== undefined && s >= 400 && s < 500;
-};
+// A nested folder we may not read, or that is gone: skipped. Anything else (5xx, 408/429, network,
+// after retries) still fails the kind.
+const SKIPPABLE = new Set([401, 403, 404]);
+const isSkippable = (err: unknown): boolean => SKIPPABLE.has((err as { response?: { status?: number } } | null)?.response?.status ?? 0);
 
 // Source: enterprise_dashboard.html — collectMandates
 // Bounded descent (4 levels); a tagged hazu is a copy, an untagged one is descended.
 // The study place itself (depth 0) failing throws, as does a 5xx/network failure after retries.
-// A nested folder answering 4xx is not ours to read (e.g. shared course content): skipped, one warning.
+// A nested folder answering 401/403/404 is not ours to read (e.g. course content): skipped, counted, one warning.
 async function collectCopies(
   deps: ReadDeps, id: string, kind: 'mpe' | 'mpc', depth: number, counters: ReadCounters, notes: DescentNotes,
 ): Promise<Copy[]> {
@@ -181,7 +184,8 @@ async function collectCopies(
   try {
     rows = await listWithRetry(deps, id, counters);
   } catch (err) {
-    if (depth === 0 || !is4xx(err)) throw err;
+    if (depth === 0 || !isSkippable(err)) throw err;
+    notes.skippedSubtrees += 1;
     console.warn(`[formation] ${kind} folder ${id} unreadable (${message(err)}) - subtree skipped`);
     return [];
   }
@@ -200,7 +204,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
   const out: StudentRaw = {
     personId: p.personId, ok: true, error: null, profileCreated: null, userIdTag, selfUid: null,
     timelineOk: true, facts: [], mpe: { found: false, copies: [] }, mpc: { found: false, copies: [] },
-    reports: [], plan: { startMs: null, retiredSlots: [] } as PlanFacts, emptyListings: 0, failedParts: [],
+    reports: [], plan: { startMs: null, retiredSlots: [] } as PlanFacts, emptyListings: 0, skippedSubtrees: 0, failedParts: [],
   };
   const fail = (e: unknown, part?: StudentRaw['failedParts'][number]) => {
     if (!out.error) out.error = message(e);
@@ -230,7 +234,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
       fail(e, 'timeline');
     }
 
-    const notes: DescentNotes = { depthCaps: 0 };
+    const notes: DescentNotes = { depthCaps: 0, skippedSubtrees: 0 };
     const mandates = async (tag: string, title: string, kind: 'mpe' | 'mpc') => {
       const place = findChild(kids, tag, title);
       if (!place) return;
@@ -244,6 +248,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     };
     await mandates('hz-config-study-company', 'mandats entreprise', 'mpe');
     await mandates('hz-config-study-cie', 'mandats cie', 'mpc');
+    out.skippedSubtrees = notes.skippedSubtrees;
     if (notes.depthCaps) {
       console.warn(`[formation] ${p.personId}: mandate descent hit the depth cap (4 levels) in ${notes.depthCaps} folder(s) - deeper mandates not collected`);
     }

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS formation_student (
     mpc_found INTEGER NOT NULL,
     plan_start_ms INTEGER,
     empty_listings INTEGER NOT NULL DEFAULT 0,
+    skipped_subtrees INTEGER NOT NULL DEFAULT 0,
     failed_parts TEXT NOT NULL DEFAULT '[]',
     synced_at INTEGER NOT NULL
 );
@@ -303,6 +304,11 @@ function runMigrations(): void {
       DROP TABLE IF EXISTS mission_sync_status;
     `);
     db.exec(FORMATION_SCHEMA);
+    // A formation_student created before skipped_subtrees existed (dev builds of this branch).
+    const cols = db.prepare('PRAGMA table_info(formation_student)').all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'skipped_subtrees')) {
+      db.exec('ALTER TABLE formation_student ADD COLUMN skipped_subtrees INTEGER NOT NULL DEFAULT 0');
+    }
     db.prepare(
       "UPDATE formation_sync_status SET status = 'idle', processed = 0, total = 0, failed = 0 WHERE id = 1 AND status = 'syncing'",
     ).run();
