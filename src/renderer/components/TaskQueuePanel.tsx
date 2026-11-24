@@ -45,7 +45,7 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         return `Prune ${task.tagCount} tag(s): ${who}`;
       }
       case 'archiveRoom':
-        return `Archiver ${task.roomTitle}`;
+        return task.status === 'success' ? `${task.roomTitle} archivée` : `Archiver ${task.roomTitle}`;
       case 'restoreRoom': {
         if (task.status === 'success') {
           const unresolved = task.unresolvedMembers

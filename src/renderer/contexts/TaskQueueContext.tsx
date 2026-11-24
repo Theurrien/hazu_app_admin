@@ -274,7 +274,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
             prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
           );
         } else {
-          const error = outcome.error ?? outcome.remaining.join(', ');
+          const error = outcome.error || outcome.remaining.join(', ') || 'Échec';
           setTasks((prev) =>
             prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
           );
@@ -292,7 +292,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
             )
           );
         } else {
-          const error = outcome.error ?? outcome.remaining.join(', ');
+          const error = outcome.error || outcome.remaining.join(', ') || 'Échec';
           setTasks((prev) =>
             prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
           );

@@ -7,6 +7,7 @@ import {
   faTableCells,
   faFileImport,
   faBullseye,
+  faBoxArchive,
   faTriangleExclamation,
   faCog,
   IconDefinition,
@@ -33,6 +34,7 @@ const navItems: NavItem[] = [
   { id: 'matrix', label: 'Matrix', icon: faTableCells },
   { id: 'import', label: 'Bulk Import', icon: faFileImport },
   { id: 'missions', label: 'Missions', icon: faBullseye },
+  { id: 'archive', label: 'Archive', icon: faBoxArchive },
   { id: 'discrepancies', label: 'Discrepancies', icon: faTriangleExclamation },
   { id: 'settings', label: 'Settings', icon: faCog },
 ];
