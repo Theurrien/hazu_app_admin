@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Reference, StudentRaw } from '../../../shared/formation-types';
-import { studentToRows, studentFromRows, referenceToRows, referenceFromRows, keepFailedParts } from './rows';
+import { studentToRows, studentFromRows, referenceToRows, referenceFromRows, keepFailedParts, planStudentWrite } from './rows';
 
 // Invented fixture values only.
 function fullRaw(): StudentRaw {
@@ -121,5 +121,39 @@ describe('keepFailedParts', () => {
     expect(keepFailedParts(f, null)).toEqual(f);
     const failedPrev = studentToRows({ ...prev(), ok: false }, 40);
     expect(keepFailedParts(f, failedPrev)).toEqual(f);
+  });
+});
+
+describe('planStudentWrite', () => {
+  const ok = (o: Partial<StudentRaw> = {}): StudentRaw => ({ ...fullRaw(), failedParts: [], error: null, ...o });
+  const failedRead = (): StudentRaw => ({ ...fullRaw(), ok: false, error: 'http 503', failedParts: [] });
+  const stored = (raw: StudentRaw) => studentToRows(raw, 40);
+
+  it('read failed with previous rows: mark them stale, write nothing new', () => {
+    expect(planStudentWrite(failedRead(), stored(ok()), 50)).toEqual({ kind: 'mark-stale', error: 'http 503' });
+  });
+  it('read failed with no error message still marks stale with a reason', () => {
+    expect(planStudentWrite({ ...failedRead(), error: null }, stored(ok()), 50)).toEqual({ kind: 'mark-stale', error: 'lecture échouée' });
+  });
+  it('read failed, never stored: the student row alone records the failure', () => {
+    const p = planStudentWrite(failedRead(), null, 50);
+    expect(p).toEqual({ kind: 'write', rows: studentToRows(failedRead(), 50), children: false });
+  });
+  it('read ok without failed parts: replaced by the fresh rows', () => {
+    const raw = ok();
+    expect(planStudentWrite(raw, stored(ok({ facts: [] })), 50)).toEqual({ kind: 'write', rows: studentToRows(raw, 50), children: true });
+    expect(planStudentWrite(raw, null, 50)).toEqual({ kind: 'write', rows: studentToRows(raw, 50), children: true });
+  });
+  it('read ok with failed parts over a successful previous read: the failed parts keep their rows', () => {
+    const before = stored(ok());
+    const raw = ok({ failedParts: ['timeline'], timelineOk: false, facts: [] });
+    const p = planStudentWrite(raw, before, 50);
+    expect(p).toEqual({ kind: 'write', rows: keepFailedParts(studentToRows(raw, 50), before), children: true });
+    expect(p.kind === 'write' && studentFromRows(p.rows).facts).toEqual(fullRaw().facts);
+  });
+  it('read ok with failed parts over a never-successful previous read: the fresh rows stand', () => {
+    const raw = ok({ failedParts: ['timeline'], timelineOk: false, facts: [] });
+    const before = stored(failedRead());
+    expect(planStudentWrite(raw, before, 50)).toEqual({ kind: 'write', rows: studentToRows(raw, 50), children: true });
   });
 });

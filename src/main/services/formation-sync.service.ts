@@ -14,7 +14,7 @@ import { runFormationSync, type ReadDeps, type ProfileInput } from './formation/
 import { buildStudentModel } from './formation/model';
 import { aggregateOverview, aggregateFormation, splitByReadState, markStale, type StoredReadState } from './formation/aggregate';
 import {
-  studentToRows, studentFromRows, referenceToRows, referenceFromRows, keepFailedParts, type StudentRows,
+  studentFromRows, referenceToRows, referenceFromRows, planStudentWrite, type StudentRows,
   type StudentRow, type CopyRow, type AssessmentRow, type ReportRow, type RetiredRow, type CatalogueRow, type ReferenceRow,
 } from './formation/rows';
 import type {
@@ -171,18 +171,18 @@ function writeRun(reference: Reference, results: StudentRaw[], syncedAt: number)
     for (const r of ref.reference) ins.reference.run(r);
 
     for (const raw of results) {
+      // The decision is pure (rows.ts planStudentWrite); previous rows are read before deleting.
       const before = previous.get(raw.personId) as StudentRow | undefined;
-      if (!raw.ok && before) {
-        // Read failed: keep the rows. stale = 1 only if they came from a successful read.
-        markFailed.run(raw.error ?? 'lecture échouée', raw.personId);
+      const plan = planStudentWrite(raw, before ? previousRows(before) : null, syncedAt);
+      if (plan.kind === 'mark-stale') {
+        // stale = 1 only if the kept rows came from a successful read.
+        markFailed.run(plan.error, raw.personId);
         continue;
       }
-      // Read ok but some parts lost: those parts keep their previous rows (read before deleting).
-      const fresh = studentToRows(raw, syncedAt);
-      const rows = raw.failedParts.length && before?.read_ok === 1 ? keepFailedParts(fresh, previousRows(before)) : fresh;
+      const { rows } = plan;
       for (const d of del) d.run(raw.personId);
       ins.student.run(rows.student);
-      if (!raw.ok) continue; // never read OK: the student row alone records the failure
+      if (!plan.children) continue;
       for (const c of rows.copies) ins.copy.run(c);
       for (const a of rows.assessments) ins.assessment.run(a);
       for (const r of rows.reports) ins.report.run(r);

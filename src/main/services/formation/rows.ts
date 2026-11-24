@@ -170,3 +170,25 @@ export function keepFailedParts(fresh: StudentRows, previous: StudentRows | null
     retired: plan.retired,
   };
 }
+
+/** Error stored on a failed read that carried no message. */
+export const READ_FAILED = 'lecture échouée';
+
+/**
+ * What writeRun does for one apprentice of a finished run:
+ *   - `mark-stale` — the read failed and rows are stored: keep them, set stale = read_ok and the error;
+ *   - `write` — delete the apprentice's rows, insert `rows.student`, and the child rows only when
+ *     `children` (a read that never succeeded stores its student row alone).
+ * A read OK with failed parts over a successful previous read keeps those parts' rows (keepFailedParts).
+ */
+export type StudentWritePlan =
+  | { kind: 'mark-stale'; error: string }
+  | { kind: 'write'; rows: StudentRows; children: boolean };
+
+export function planStudentWrite(raw: StudentRaw, before: StudentRows | null, syncedAt: number): StudentWritePlan {
+  if (!raw.ok && before) return { kind: 'mark-stale', error: raw.error ?? READ_FAILED };
+  const fresh = studentToRows(raw, syncedAt);
+  if (!raw.ok) return { kind: 'write', rows: fresh, children: false };
+  const rows = raw.failedParts.length && before?.student.read_ok === 1 ? keepFailedParts(fresh, before) : fresh;
+  return { kind: 'write', rows, children: true };
+}
