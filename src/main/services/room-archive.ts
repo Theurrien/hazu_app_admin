@@ -164,19 +164,43 @@ async function readUntil(
   return false;
 }
 
-/** Move `id` into `targetId` unless already there; the read-back decides. */
+/** Move `id` into `targetId` unless already there. The live read decides, never the status: after a
+ *  transient failure the node is read before any resend, and after a final failure it is read once
+ *  more, because a failed status says nothing about whether the move committed. */
 async function moveVerified(
   deps: ArchiveDeps,
   node: HazuNode,
   targetId: string,
 ): Promise<'moved' | 'skipped'> {
   if (node.parentId === targetId) return 'skipped';
-  await withRetry(deps, () => deps.move(node.id, targetId));
-  const landed = await readUntil(deps, node.id, n => n?.parentId === targetId);
-  if (!landed) throw { networkOrTimeout: false, message: `déplacement non confirmé pour ${node.id}` } as ApiFailure;
-  return 'moved';
+  const landedNow = () => readUntil(deps, node.id, n => n?.parentId === targetId);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      await deps.move(node.id, targetId);
+      lastError = null;
+      break;
+    } catch (e) {
+      lastError = e;
+      const f = e as Partial<ApiFailure>;
+      if (!isRetryableError(f?.status, f?.networkOrTimeout === true)) break;
+      const cur = await withRetry(deps, () => deps.read(node.id));
+      if (cur?.parentId === targetId) return 'moved';
+      if (attempt + 1 < MAX_ATTEMPTS) await deps.sleep(backoffMs(attempt));
+    }
+  }
+  if (await landedNow()) return 'moved';
+  if (lastError) throw lastError;
+  throw { networkOrTimeout: false, message: `déplacement non confirmé pour ${node.id}` } as ApiFailure;
 }
 
+/** Is this node the room of `classId`? Its class tag is `hz-config-class-{id}` or, on some live
+ *  rooms, `hz-config-class-{id}-` (room-tree.ts). Whole-tag match only: a role tag such as
+ *  `hz-config-class-{id}-student`, or another id that merely starts the same, is not the room. */
+export function isRoomOfClass(tags: string[], classId: string): boolean {
+  const t = `hz-config-class-${classId}`;
+  return tags.includes(t) || tags.includes(`${t}-`);
+}
 
 /** Strip tags, decode common entities, collapse whitespace. */
 export function stripHtml(html: string): string {
@@ -424,7 +448,7 @@ export interface RestoreInput {
 export function archivedEntry(folder: HazuNode, children: HazuNode[]): ArchivedRoom | null {
   const rec = parseRecordTags(folder.tags);
   if (!rec) return null;
-  const room = children.find(c => c.tags.includes(`hz-config-class-${rec.classId}`));
+  const room = children.find(c => isRoomOfClass(c.tags, rec.classId));
   return {
     folderId: folder.id,
     roomId: room ? room.id : null,
@@ -517,14 +541,14 @@ export async function runRestore(input: RestoreInput, deps: ArchiveDeps): Promis
 
   // 3. The room back under its origin (or already there).
   try {
-    const roomNode = inside.find(c => c.tags.includes(classTag));
+    const roomNode = inside.find(c => isRoomOfClass(c.tags, classId));
     if (roomNode) {
       roomId = roomNode.id;
       const r = await moveVerified(deps, roomNode, fromParentId);
       steps.push({ step: 'room', status: r === 'moved' ? 'done' : 'skipped' });
     } else {
       const atOrigin = await withRetry(deps, () => deps.list(fromParentId));
-      const there = atOrigin.find(c => c.tags.includes(classTag));
+      const there = atOrigin.find(c => isRoomOfClass(c.tags, classId));
       if (!there) return stop('room', 'salle introuvable', [folderId]);
       roomId = there.id;
       steps.push({ step: 'room', status: 'skipped' });

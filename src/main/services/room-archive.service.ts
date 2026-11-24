@@ -137,7 +137,9 @@ function buildDeps(): ArchiveDeps {
 async function liveCategoryIds(deps: ArchiveDeps): Promise<string[]> {
   const root = setting('root_hazu_id');
   if (!root) return [];
-  return (await deps.list(root)).map((n) => n.id);
+  // Only real room categories (tagged hz-config-room-*); root also holds the admin Hazu and the
+  // profile containers, which must never be accepted as an origin.
+  return (await deps.list(root)).filter((n) => n.tags.some((t) => t.startsWith('hz-config-room-'))).map((n) => n.id);
 }
 
 // ---------------------------------------------------------------------------------------------

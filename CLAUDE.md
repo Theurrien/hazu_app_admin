@@ -577,11 +577,24 @@ shows the room and every role group inside the folder and no holder profile stil
 a restore, when the room is back under its origin, the groups are back in the sharing container and
 every resolved member has the tag. Anything short of that is `success:false`, naming what is left
 (`remaining`); a failure status that the live state contradicts is not a failure. Transient errors
-(5xx / network / timeout) retry with `backoffMs`.
+(5xx / network / timeout) retry with `backoffMs`. This holds for moves too: after a transient move
+failure the node is read **before** any resend (a move that landed is never repeated), and after a
+final or non-retryable failure (4xx, `isSuccess:false`) it is read once more — a move whose status
+failed but whose live read shows it under the target counts as done.
+
+**A room's class tag has two forms**: `hz-config-class-{id}` and, on some live rooms,
+`hz-config-class-{id}-` (see room-tree.ts). Restore and the Archive list find the room with
+`isRoomOfClass`, which accepts exactly those two whole tags — never a role tag such as
+`hz-config-class-{id}-student`, nor another id that merely starts the same. The categories an
+archive or restore accepts as origin are the live children of root carrying an
+`hz-config-room-*` tag (the same tags the sync uses to recognise a category), so the admin Hazu and
+profile containers are never taken for one.
 
 ### Local reconcile
 After the run, in its own try/catch (a local failure cannot flip an API success): the confirmed
-removed tags are patched out of `persons.tags`. The `rooms` row, its `person_room_assignments` and
+archive strips every `hz-config-class-{classId}-{role}` tag from `persons.tags` of **every person not
+listed in `remaining`** — not only the tags this run removed, because a re-run whose profiles were
+already clean removes nothing in Hazu while the local copy may still be stale. The `rooms` row, its `person_room_assignments` and
 `membership_issues` are deleted and `distribution_groups.room_id` set to NULL **only on full
 success** — a partial archive keeps the room row so a retry can find it. Restore patches the added
 tags into `persons.tags`; the room returns to the app on the next sync. Matrix and Missions update
@@ -590,7 +603,7 @@ without a re-sync after an archive.
 ### Files
 - [room-archive.ts](src/main/services/room-archive.ts) — **pure core**, all IO injected (`read`,
   `list`, `create`, `move`, `addTags`, `removeTags`, `remove`, `sleep`): record tags, `groupsOfClass`,
-  `holderTagsToRemove`, `runArchive`, `runRestore`. Tests in `room-archive.test.ts`.
+  `holderTagsToRemove`, `isRoomOfClass`, `runArchive`, `runRestore`. Tests in `room-archive.test.ts`.
 - [room-archive.service.ts](src/main/services/room-archive.service.ts) — **thin IO layer**: the real
   calls, settings (`user_id`, `admin_id`, `sharing_container_id`), `archiveRoom`, `restoreRoom`,
   plans and live archive listing, the reconcile above.
@@ -676,7 +689,8 @@ Writes are never called directly — each workflow **enqueues** tasks into the T
 [TaskQueuePanel.tsx](src/renderer/components/TaskQueuePanel.tsx)). Tasks run **one at a time,
 sequentially**, each tracked `queued → processing → success/error` with individual retry. Bulk
 Import queues `createRoom`, `createPerson`, `roleUpdate`; the Discrepancies page queues `healTag`
-(S3) and `revokeOrphanAccess` (S6) — the full `TaskType` union is all five. The footer buttons only
+(S3) and `revokeOrphanAccess` (S6) — the full `TaskType` union is eight: `roleUpdate`, `createRoom`,
+`createPerson`, `healTag`, `revokeOrphanAccess`, `pruneDeadTags`, `archiveRoom`, `restoreRoom`. The footer buttons only
 queue tasks; nothing hits the API until the queue processes them. Modals (create room/person) call
 the API directly and push a completed `addNotification` into the same panel.
 
@@ -1043,7 +1057,7 @@ drops its assignments and shows them as false discrepancies. A 4xx is not retrie
 
 ## CIE Mode (S9)
 
-The app runs in one of two modes, stored in the `app_mode` setting: **`complete`** (all eight
+The app runs in one of two modes, stored in the `app_mode` setting: **`complete`** (all nine
 pages) and **`cie`** (Dashboard, Matrix, Bulk Import only, scoped to CIE rooms and to students
 and course teachers). `cie` is the default — `parseAppMode` treats anything that is not exactly
 the string `complete` as `cie`, so a missing or corrupted setting reduces the surface rather than

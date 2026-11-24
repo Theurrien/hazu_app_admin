@@ -17,6 +17,7 @@ import {
   runArchive,
   runRestore,
   archivedEntry,
+  isRoomOfClass,
   RestoreInput,
 } from './room-archive';
 
@@ -602,6 +603,79 @@ describe('runRestore', () => {
     expect(out.steps.find(s => s.status === 'failed')!.step).toBe('room');
     expect(out.remaining).toContain('room1');
     expect(f.nodes.get('room1')!.parentId).not.toBe('cat1');
+  });
+});
+
+describe('runArchive move verification and shared Archive Hazu', () => {
+  it('a 503 on the room move that actually landed counts as done, with one move call', async () => {
+    const f = createFakeHazu(school());
+    const raw = f.deps.move;
+    f.deps.move = async (id, t) => {
+      await raw(id, t);
+      if (id === 'room1') throw { status: 503, networkOrTimeout: false, message: 'busy' } as ApiFailure;
+    };
+    const out = await runArchive(input(), f.deps);
+    expect(out.success).toBe(true);
+    expect(f.calls.filter(c => c.op === 'move' && c.args[0] === 'room1')).toHaveLength(1);
+  });
+
+  it('a 4xx on the move that did not land fails the run', async () => {
+    const f = createFakeHazu(school(), c =>
+      c.op === 'move' && c.args[0] === 'room1' ? { status: 403, networkOrTimeout: false, message: 'refus' } : undefined,
+    );
+    const out = await runArchive(input(), f.deps);
+    expect(out.success).toBe(false);
+    expect(f.nodes.get('room1')!.parentId).toBe('cat1');
+  });
+
+  it('a second room goes into the existing Archive Hazu: one Archive, two room folders', async () => {
+    const f = createFakeHazu(school([
+      node('room2', 'cat1', 'Classe B', ['hz-config-room-class', 'hz-config-class-cls2']),
+      node('g2', 'share', 'g2', ['hz-share-student-cls2']),
+    ]));
+    expect((await runArchive(input(), f.deps)).success).toBe(true);
+    const out = await runArchive(
+      input({ room: { id: 'room2', classId: 'cls2', title: 'Classe B', roomType: 'class' }, holders: [] }),
+      f.deps,
+    );
+    expect(out.success).toBe(true);
+    const all = [...f.nodes.values()];
+    expect(all.filter(n => n.tags.includes(ARCHIVE_ROOT_TAG))).toHaveLength(1);
+    expect(all.filter(n => n.tags.includes(ROOM_FOLDER_TAG))).toHaveLength(2);
+  });
+});
+
+describe('runRestore with a trailing-hyphen room tag and a role-tagged look-alike', () => {
+  const hyphenSchool = () => school().map(n => (n.id === 'room1' ? { ...n, tags: ['hz-config-room-class', 'hz-config-class-cls1-'] } : n));
+  const members: Record<string, string[]> = { 'g-student': ['p1'], 'g-schoolteacher': ['p2'] };
+  const rin = (f: ReturnType<typeof createFakeHazu>): RestoreInput => ({
+    folderId: [...f.nodes.values()].find(n => n.tags.includes(ROOM_FOLDER_TAG))!.id,
+    adminId: 'admin', sharingContainerId: 'share', roles: ROLES, categoryIds: ['cat1'],
+    membersOf: async gid => ({ personIds: members[gid] ?? [], unresolved: 0 }),
+  });
+
+  it('restores a room whose class tag is hz-config-class-{id}-', async () => {
+    const f = createFakeHazu(hyphenSchool());
+    expect((await runArchive(input(), f.deps)).success).toBe(true);
+    const out = await runRestore(rin(f), f.deps);
+    expect(out.success).toBe(true);
+    expect(out.roomId).toBe('room1');
+    expect(f.nodes.get('room1')!.parentId).toBe('cat1');
+  });
+
+  it('archivedEntry finds the hyphen-form room', () => {
+    const rec = { classId: 'cls1', fromParentId: 'cat1', roomType: 'class' as const, archivedAt: 1 };
+    const folder = node('f1', 'arch', 'A', buildRecordTags(rec));
+    expect(archivedEntry(folder, [node('r', 'f1', 'A', ['hz-config-class-cls1-'])])!.roomId).toBe('r');
+  });
+
+  it('a role-tagged child is not taken for the room', () => {
+    const rec = { classId: 'cls1', fromParentId: 'cat1', roomType: 'class' as const, archivedAt: 1 };
+    const folder = node('f1', 'arch', 'A', buildRecordTags(rec));
+    expect(archivedEntry(folder, [node('x', 'f1', 'x', ['hz-config-class-cls1-student'])])!.roomId).toBeNull();
+    expect(isRoomOfClass(['hz-config-class-cls1x'], 'cls1')).toBe(false);
+    expect(isRoomOfClass(['hz-config-class-cls1x-'], 'cls1')).toBe(false);
+    expect(isRoomOfClass(['hz-config-class-cls1'], 'cls1')).toBe(true);
   });
 });
 
