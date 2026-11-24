@@ -92,6 +92,8 @@ hazu-admin/
 │   │       │   ├── aggregate.ts        #   school overview + formation drill-down
 │   │       │   └── rows.ts             #   StudentRaw ↔ table rows, keepFailedParts
 │   │       ├── formation-sync.service.ts # IO layer: background run, one-transaction write, queries
+│   │       ├── room-archive.ts         # Room Archive — pure core (archive/restore order, record tags)
+│   │       ├── room-archive.service.ts # Room Archive — IO layer, local reconcile
 │   │       │
 │   │       │   # Group-truth stages. Each splits into a PURE CORE with all IO
 │   │       │   # injected (vitest-runnable, no native module) + a thin *.service.ts
@@ -122,6 +124,7 @@ hazu-admin/
 │   │   │   ├── PersonsPage.tsx
 │   │   │   ├── MatrixPage.tsx
 │   │   │   ├── FormationPage.tsx      # Missions tab: school overview → formation drill-down
+│   │   │   ├── ArchivePage.tsx        # Archive tab: archive / restore rooms (complete mode)
 │   │   │   ├── BulkImportPage.tsx
 │   │   │   ├── DiscrepanciesPage.tsx  # Groups-vs-tags report + heal/revoke/prune
 │   │   │   └── SettingsPage.tsx
@@ -138,6 +141,7 @@ hazu-admin/
 │   │   │   │   ├── MandateTable.tsx
 │   │   │   │   ├── StackedBar.tsx         # bar colours/labels used everywhere in the tab
 │   │   │   │   └── sync-logic.ts, detail-logic.ts  # pure display decisions (+ tests)
+│   │   │   ├── archive/             # Archive tab: confirm modals, archive-logic.ts (+ tests)
 │   │   │   ├── bulk-import/         # Bulk Import workflow components (uploader, mapping, matching, preview, verify)
 │   │   │   ├── MatrixGrid.tsx       # Virtualized person × room assignment grid
 │   │   │   ├── MatrixFilters.tsx
@@ -159,6 +163,7 @@ hazu-admin/
 │   │
 │   └── shared/                 # Shared between main & renderer
 │       ├── app-mode.ts        # S9 — pure mode decisions (pages/workflows/roles)
+│       ├── archive-types.ts   # Room archive outcomes, plans, ArchivableRoom
 │       ├── formation-types.ts # Missions formation overview types (Row, StudentRaw, SchoolOverview…)
 │       ├── types.ts           # TypeScript interfaces
 │       └── ipc-channels.ts    # IPC channel constants
@@ -499,11 +504,118 @@ code were fixed (timeline items only; study-place title « contains »; Suivi on
 On 2026-11-24 one `npm start` during this work ran the formation migration there and dropped the
 old mission tables (derived cache, re-fetchable — but not ours to drop). Copy the userData folder
 to the scratchpad and start Electron with `--user-data-dir` pointing at the copy; live reads are
-fine, read-only, with that copy's key.
+fine, read-only, with that copy's key. The same holds for the Archive tab, which also writes to Hazu.
 
 ### Prerequisites
 - Run the main sync first (Dashboard > Sync): the apprentice list, icons/colours, companies and
   classes all come from `persons`, `rooms` and `person_room_assignments`.
+
+## Room Archive
+
+The Archive tab ([ArchivePage.tsx](src/renderer/pages/ArchivePage.tsx)) takes a finished room
+(class, CIE course, company, canton) out of the places that list it — its category folder in Hazu,
+the app's sync, Matrix, Missions, Discrepancies, and the widgets that find a person's rooms from
+the `hz-config-class-{id}-{role}` tags — **without destroying anything**, so it can be restored
+exactly. It is **complete mode only** (the tab appears after unlocking the padlock; registered in
+[app-mode.ts](src/shared/app-mode.ts), like Missions). Spec:
+[docs/specs/2026-11-24-room-archive-design.md](docs/specs/2026-11-24-room-archive-design.md); the
+live probes behind it: [docs/archive-move-probe-findings.md](docs/archive-move-probe-findings.md).
+
+### Layout in Hazu
+```
+admin Hazu (hz-config-admin)
+├── sharing container                  ← live role groups only
+└── Archive                            tag hz-config-archive, privacy private
+    └── {room title}                   one folder per room, privacy unlisted
+        │   tags: hz-config-archive-room, -class-{classId}, -from-{originalParentId},
+        │         -type-{class|cie|enterprise|state}, -at-{ms}
+        ├── {the room}                 same id, children, tags, ACL
+        └── Groupes de partage         tag hz-config-archive-groups, privacy private
+            └── the room's role groups same ids, ACLs (= membership) unchanged
+```
+The record lives in the folder's tags, so the archive is self-describing: no local table, and
+another machine running the app sees the same archive. The Archive Hazu is created on the first
+archive. A move (`PUT /moveElement`) keeps ids, children and tags and changes **no ACL**.
+
+### Access is never changed
+Decided 2026-11-24: archiving removes nobody's access. The Archive is `private` and the room folder
+`unlisted`, so the room leaves every list (check 0.1: it stays reachable only from a member's own
+favourites, and nobody can climb to other archived rooms) — but a member who has the room's id or a
+favourite can still open it. This is not a locked archive. The per-person/group access-removal
+recipe in the probe findings was dropped (it needs propagate calls on every child) and is kept only
+as reference. The room's own privacy is left as it was.
+
+### Archive order — and why moves come before tag removal
+Every step reads the live state first and skips what is already done, so a stopped run is finished
+by starting it again. Order: read room and groups live → Archive Hazu → room folder (record tags
+written **before anything moves**) → « Groupes de partage » → **move the role groups** → **move the
+room** → **remove `hz-config-class-{classId}-{role}`** from every holder (checked removal, verified
+by re-reading the profile). Moves precede the tags on purpose: a run that stops after the moves
+leaves an archived room whose tags still show in some widgets, finished by re-running; the reverse
+would leave a live room missing from widgets. The room must still sit under the category it was
+synced under (else « la salle a été déplacée depuis la dernière synchronisation »).
+
+A room is **blocked** (listed, no Archive action) when it has no `class_id` (« identifiant de
+classe manquant » — groups, tags and the folder are all found by it; a sync or room completion
+fills it) or when it is a category folder (« dossier de catégorie »).
+
+### Restore order
+The folder is read live from the Archive tab and must itself sit in the Archive Hazu with a
+complete record (the **containment check**: tags alone prove nothing). The **origin-category
+check**: the recorded origin parent must still exist and be a known category — otherwise the
+restore stops, never guessing a category. Then: room back to its origin → groups back to the
+sharing container → add the class tag (S3 add-only) for every current member of each group,
+resolved to profiles as the sync does (members with no local profile are counted, not guessed) →
+remove the then-empty « Groupes de partage » and the room folder, only after a live listing shows
+them empty. **When a restore is partial the folders are kept**: their tags are the only record of
+class id and origin, so a re-run can finish. Orphan tags (a profile holding the tag without being
+a group member) are **not restored** — groups are the truth, the tag only mirrors them.
+
+### Success rule
+**The live read decides, not the status code** (as S4/S6/S7). An archive is done when a live read
+shows the room and every role group inside the folder and no holder profile still carries the tag;
+a restore, when the room is back under its origin, the groups are back in the sharing container and
+every resolved member has the tag. Anything short of that is `success:false`, naming what is left
+(`remaining`); a failure status that the live state contradicts is not a failure. Transient errors
+(5xx / network / timeout) retry with `backoffMs`.
+
+### Local reconcile
+After the run, in its own try/catch (a local failure cannot flip an API success): the confirmed
+removed tags are patched out of `persons.tags`. The `rooms` row, its `person_room_assignments` and
+`membership_issues` are deleted and `distribution_groups.room_id` set to NULL **only on full
+success** — a partial archive keeps the room row so a retry can find it. Restore patches the added
+tags into `persons.tags`; the room returns to the app on the next sync. Matrix and Missions update
+without a re-sync after an archive.
+
+### Files
+- [room-archive.ts](src/main/services/room-archive.ts) — **pure core**, all IO injected (`read`,
+  `list`, `create`, `move`, `addTags`, `removeTags`, `remove`, `sleep`): record tags, `groupsOfClass`,
+  `holderTagsToRemove`, `runArchive`, `runRestore`. Tests in `room-archive.test.ts`.
+- [room-archive.service.ts](src/main/services/room-archive.service.ts) — **thin IO layer**: the real
+  calls, settings (`user_id`, `admin_id`, `sharing_container_id`), `archiveRoom`, `restoreRoom`,
+  plans and live archive listing, the reconcile above.
+- [hazu-api/api.ts](src/main/services/hazu-api/api.ts) — `sendApiRequestMoveChecked`,
+  `sendApiRequestReadChecked`, `sendApiRequestCreateChecked`, `sendApiRequestRemoveChecked`
+  (the originals swallow errors).
+- [shared/archive-types.ts](src/shared/archive-types.ts) — outcomes, plans, `ArchivableRoom`.
+- IPC `ARCHIVE_LIST_ROOMS`, `ARCHIVE_LIST_ARCHIVED`, `ARCHIVE_PLAN`, `ARCHIVE_EXECUTE`,
+  `ARCHIVE_RESTORE_PLAN`, `ARCHIVE_RESTORE_EXECUTE`; each action is one Task Queue task
+  (`archiveRoom` / `restoreRoom`, in [TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx)).
+- [ArchivePage.tsx](src/renderer/pages/ArchivePage.tsx) and `components/archive/` — live rooms and
+  archived lists with type filters, the two confirmation modals (counts; a warning for company or
+  canton rooms with members).
+
+### Known consequences
+- A stored **path** link to an archived room breaks while it is archived; links by id keep working.
+- Archiving a **company** whose apprentices are still in training removes its tag from their
+  profiles, so 5-Enterprise no longer finds their enterprise (the modal warns; the app does not
+  block it).
+- The role groups leave the sharing container, so the sync no longer sees them; an archived room
+  receives no role writes.
+- Persons whose only rooms are archived stay as they are.
+- Like Missions, **develop and test against a scratch userData copy**, never the real DB (see
+  [Development runs use a scratch userData copy](#development-runs-use-a-scratch-userdata-copy)):
+  archive and restore write to the live Hazu.
 
 ## Matrix
 
@@ -1148,6 +1260,9 @@ recovery, and one real self-update.
     differences: no « Évalué par moi » in the app; the app shows only slots due to date (later ones
     as « en avance »); « à faire » in 5-Enterprise is `future` or `missing` in the app; retired slots
     leave the app's count
+7c. Archive → archive the test class « Cui Test 2 » → check the Archive folder in Hazu (room and
+    « Groupes de partage » inside a per-room folder, record tags) → Restaurer → compare parent, link,
+    tags and children with before. Use a scratch userData copy, as in the Missions section.
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
 9. Go to Discrepancies → try "Heal all missing-tags" on a `missing-tag` row, then "Revoke access" on an `unknown` row (confirm the modal lists every grant, then verify against group truth — reverts to an error if not confirmed)
 9b. On the same page, click "Check & prune missing rooms" (probes every unmatched class id live);

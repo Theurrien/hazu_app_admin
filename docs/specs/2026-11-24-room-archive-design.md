@@ -1,6 +1,6 @@
 # Room archive — design
 
-Status: **design, approved in conversation 2026-11-24; not built.**
+Status: **implemented, 2026-11-24.** The privacy decision (Archive `private`, room folder `unlisted`; access never changed) is in §5.
 Evidence: [the move/access probe](../archive-move-probe-findings.md) (live, 2026-11-24).
 
 ## 1. Why
