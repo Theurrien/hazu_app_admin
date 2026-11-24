@@ -126,7 +126,7 @@ export interface CompanyRow extends Rates {
   id: string | null; // null = « sans entreprise »
   title: string;
   students: number;
-  plan: 'oui' | 'partiel' | 'non';
+  plan: 'oui' | 'partiel' | 'non' | null; // null = no apprentice's company Suivi could be read
   retired: number;
   reportsPublished: number;
   reportsDue: number;

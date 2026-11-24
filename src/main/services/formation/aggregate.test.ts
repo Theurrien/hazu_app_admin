@@ -190,6 +190,34 @@ describe('aggregateFormation', () => {
     expect(aggregateFormation([a, b, c], ctx, CUI, 'both', {}).companiesWithoutTiers).toEqual({ count: 1, total: 2 });
   });
 
+  it('plan is null when no apprentice of the company has a readable company Suivi', () => {
+    const a = model({ failedParts: ['suivi-company'], startSource: 'default' });
+    const f = aggregateFormation([a], [ctxOf(a, { companies: [A] })], CUI, 'cfc', {});
+    expect(f.companies[0].plan).toBeNull();
+  });
+
+  it('companiesWithoutTiers leaves out a no-tiers company with an unknown apprentice; tiers > 0 stays in the total', () => {
+    const evalUnknown = model({ identityKnown: false, mpe: [res('tiers')] });
+    const mpeUnknown = model({ mpeFound: false });
+    const knownNoTiers = model({ mpe: [res('auto')] });
+    const withTiers = model({ mpe: [res('tiers')] });
+    const alsoUnknown = model({ timelineOk: false, mpe: [res('encours')] });
+    const C = { id: 'room-ent-003', title: 'Entreprise Gamma' };
+    const D = { id: 'room-ent-004', title: 'Entreprise Delta' };
+    const ms = [evalUnknown, mpeUnknown, knownNoTiers, withTiers, alsoUnknown];
+    const ctx = [ctxOf(evalUnknown, { companies: [A] }), ctxOf(mpeUnknown, { companies: [B] }),
+      ctxOf(knownNoTiers, { companies: [C] }), ctxOf(withTiers, { companies: [D] }), ctxOf(alsoUnknown, { companies: [D] })];
+    // A (eval unknown, no tiers) and B (MPE unknown) are out; C counts; D has tiers → in the total only.
+    expect(aggregateFormation(ms, ctx, CUI, 'cfc', {}).companiesWithoutTiers).toEqual({ count: 1, total: 2 });
+  });
+
+  it('the same company listed twice for an apprentice is counted once', () => {
+    const a = model({ mpe: HALF });
+    const f = aggregateFormation([a], [ctxOf(a, { companies: [A, A] })], CUI, 'cfc', {});
+    expect(f.companies).toHaveLength(1);
+    expect(f.companies[0]).toMatchObject({ id: A.id, students: 1, importRate: 0.5 });
+  });
+
   it('company reports: published and due per company', () => {
     const a = model({ reports: [
       { semester: 1, state: 'published', reportId: 'rep-1', publishedAt: 1 },
@@ -245,6 +273,13 @@ describe('aggregateFormation', () => {
     expect(f.evalRate).toBeNull();
     expect(f.students.map(s => s.bar)).toEqual([null, null]);
     expect(f.students.map(s => s.flags)).toEqual([['identité inconnue'], ['timeline illisible']]);
+  });
+
+  it('a failed ACL read is flagged « ACL illisible », not « identité inconnue »', () => {
+    const a = model({ identityKnown: false, failedParts: ['acl'] });
+    const b = model({ identityKnown: false });
+    const f = aggregateFormation([a, b], ctxAll([a, b]), CUI, 'cfc', {});
+    expect(f.students.map(s => s.flags)).toEqual([['ACL illisible'], ['identité inconnue']]);
   });
 
   it('MPE unknown and company Suivi unreadable: out of the MPE tables, report counts and plan column', () => {

@@ -50,7 +50,8 @@ function flagsOf(m: StudentModel): string[] {
   if (failed('mpc')) f.push('mandats CIE illisibles');
   else if (!m.mpcFound) f.push('mandats CIE introuvables');
   if (failed('timeline') || !m.timelineOk) f.push('timeline illisible');
-  if (!m.identityKnown) f.push('identité inconnue');
+  if (failed('acl')) f.push('ACL illisible');
+  else if (!m.identityKnown) f.push('identité inconnue');
   if (failed('suivi-company')) f.push('suivi entreprise illisible');
   if (failed('suivi-cie')) f.push('suivi CIE illisible');
   if (m.level === 'other') f.push('autre niveau');
@@ -198,6 +199,7 @@ function mandateRows(models: StudentModel[], kind: 'mpe' | 'mpc'): MandateRow[] 
 
 function planOf(models: StudentModel[]): CompanyRow['plan'] {
   const known = models.filter(m => knownOf(m).suiviCompany);
+  if (!known.length) return null; // no apprentice's Suivi read: the plan is unknown, not absent
   const n = known.filter(m => m.startSource === 'plan').length;
   return n === 0 ? 'non' : n === known.length ? 'oui' : 'partiel';
 }
@@ -242,7 +244,7 @@ export function aggregateFormation(
   // Companies: an apprentice counts in each of its companies' rows; none → « sans entreprise ».
   const groups = new Map<string, { id: string | null; title: string; ms: StudentModel[] }>();
   for (const m of rated) {
-    const cos = ctxOf(m).companies;
+    const cos = ctxOf(m).companies.filter((co, i, all) => all.findIndex(x => x.id === co.id) === i);
     const targets = cos.length ? cos : [{ id: null as string | null, title: NO_COMPANY }];
     for (const co of targets) {
       if (filters.companyId !== undefined && co.id !== filters.companyId) continue;
@@ -251,7 +253,7 @@ export function aggregateFormation(
       groups.get(gk)!.ms.push(m);
     }
   }
-  const companyTallies: Array<{ row: CompanyRow; bar: Bar }> = [...groups.values()].map(g => {
+  const companyTallies: Array<{ row: CompanyRow; bar: Bar; allKnown: boolean }> = [...groups.values()].map(g => {
     const t = tallyOf(g.ms);
     const reps = reportCounts(g.ms);
     const row: CompanyRow = {
@@ -259,9 +261,12 @@ export function aggregateFormation(
       retired: g.ms.reduce((n, m) => n + m.retired.length, 0),
       reportsPublished: reps.published, reportsDue: reps.published + reps.draft + reps.missing,
     };
-    return { row, bar: t.bar };
+    const allKnown = g.ms.every(m => { const k = knownOf(m); return k.mpe && k.evaluation; });
+    return { row, bar: t.bar, allKnown };
   }).sort((a, b) => (a.row.id === null ? 1 : 0) - (b.row.id === null ? 1 : 0) || a.row.title.localeCompare(b.row.title));
-  const realCompanies = companyTallies.filter(c => c.row.id !== null);
+  // A company with no tiers but an apprentice whose MPE or evaluation is unknown may have tiers we
+  // cannot see: it is left out of both the count and the total.
+  const realCompanies = companyTallies.filter(c => c.row.id !== null && (c.bar.tiers > 0 || c.allKnown));
 
   const semesters = new Map<number, StudentModel[]>();
   for (const m of rated) {
