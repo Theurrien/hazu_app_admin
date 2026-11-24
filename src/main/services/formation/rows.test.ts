@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Reference, StudentRaw } from '../../../shared/formation-types';
-import { studentToRows, studentFromRows, referenceToRows, referenceFromRows } from './rows';
+import { studentToRows, studentFromRows, referenceToRows, referenceFromRows, keepFailedParts } from './rows';
 
 // Invented fixture values only.
 function fullRaw(): StudentRaw {
@@ -67,5 +67,53 @@ describe('reference rows', () => {
   });
   it('restores an empty reference when nothing is stored', () => {
     expect(referenceFromRows([], [])).toEqual({ slots: [], professionsByIcon: {}, levelsByColor: {}, catalogueIcons: {} });
+  });
+});
+
+describe('keepFailedParts', () => {
+  // The previous successful read, then a fresh read that is ok but lost some parts.
+  const prev = (): StudentRaw => fullRaw();
+  const fresh = (failedParts: StudentRaw['failedParts']): StudentRaw => ({
+    ...fullRaw(), error: 'http 503', timelineOk: !failedParts.includes('timeline'), failedParts,
+    facts: [], selfUid: null,
+    mpe: { found: true, copies: failedParts.includes('mpe') ? [] : [{ kind: 'mpe', id: 'copy-new', semester: 1, mandate: '01', level: 'cfc', profession: 'cui', title: 'N', dateCreated: 9 }] },
+    mpc: { found: true, copies: [] },
+    reports: [{ kind: 'cie', id: 'rep-new', semester: 1, published: true, publishedAt: 1, courseId: 'course-1', dateCreated: 9 }],
+    plan: { startMs: null, retiredSlots: [] },
+  });
+  const merged = (parts: StudentRaw['failedParts'], previous: StudentRaw | null = prev()) =>
+    studentFromRows(keepFailedParts(studentToRows(fresh(parts), 50), previous ? studentToRows(previous, 40) : null));
+
+  it('keeps the previous facts when the timeline failed, and the part stays flagged', () => {
+    const m = merged(['timeline']);
+    expect(m.facts).toEqual(prev().facts);
+    expect(m.failedParts).toEqual(['timeline']);
+    expect(m.timelineOk).toBe(false);
+    expect(m.mpe.copies.map(c => c.id)).toEqual(['copy-new']); // a part read OK is replaced
+  });
+  it('keeps only the failed kind of copies', () => {
+    const m = merged(['mpe']);
+    expect(m.mpe.copies).toEqual(prev().mpe.copies);
+    expect(m.mpc.copies).toEqual([]);
+  });
+  it('keeps company reports and the plan when the company Suivi failed, but takes fresh CIE reports', () => {
+    const m = merged(['suivi-company']);
+    expect(m.reports.map(r => r.id)).toEqual(['rep-1', 'rep-new']);
+    expect(m.plan).toEqual(prev().plan);
+  });
+  it('keeps CIE reports when the CIE Suivi failed, taking nothing fresh for them', () => {
+    const m = merged(['suivi-cie']);
+    expect(m.reports.map(r => r.id)).toEqual(['rep-2']);
+    expect(m.plan).toEqual({ startMs: null, retiredSlots: [] });
+  });
+  it('keeps the previous self uid when the ACL failed', () => {
+    expect(merged(['acl']).selfUid).toBe('uid-001');
+    expect(merged([]).selfUid).toBeNull();
+  });
+  it('writes the fresh read unchanged without previous rows, or when they came from a failed read', () => {
+    const f = studentToRows(fresh(['timeline']), 50);
+    expect(keepFailedParts(f, null)).toEqual(f);
+    const failedPrev = studentToRows({ ...prev(), ok: false }, 40);
+    expect(keepFailedParts(f, failedPrev)).toEqual(f);
   });
 });

@@ -8,13 +8,13 @@
 // Queries: every `persons` student yields exactly one model or one `failed` entry — none vanish.
 
 import { getDb, get, query, run } from '../database';
-import { sendApiRequestListChecked, sendApiRequestGetAclInfo } from './hazu-api/api';
+import { sendApiRequestListChecked, sendApiRequestGetAclInfoChecked } from './hazu-api/api';
 import { isConfigured } from './hazu-api/config';
 import { runFormationSync, type ReadDeps, type ProfileInput } from './formation/read';
 import { buildStudentModel, type FormationStudent, type StudentModel } from './formation/model';
 import { aggregateOverview, aggregateFormation, splitByReadState, markStale, type StoredReadState } from './formation/aggregate';
 import {
-  studentToRows, studentFromRows, referenceToRows, referenceFromRows,
+  studentToRows, studentFromRows, referenceToRows, referenceFromRows, keepFailedParts, type StudentRows,
   type StudentRow, type CopyRow, type AssessmentRow, type ReportRow, type RetiredRow, type CatalogueRow, type ReferenceRow,
 } from './formation/rows';
 import type {
@@ -102,7 +102,7 @@ async function runInBackground(profiles: ProfileInput[], parents: string[]): Pro
   };
   const deps: ReadDeps = {
     list: id => timed(() => sendApiRequestListChecked(id)),
-    acl: id => timed(() => sendApiRequestGetAclInfo(id)),
+    acl: id => timed(() => sendApiRequestGetAclInfoChecked(id)),
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   };
   try {
@@ -145,7 +145,19 @@ function writeRun(reference: Reference, results: StudentRaw[], syncedAt: number)
   };
   const childTables = ['formation_copy', 'formation_assessment', 'formation_report', 'formation_plan_retired'];
   const del = childTables.map(t => db.prepare(`DELETE FROM ${t} WHERE person_id = ?`));
-  const previous = db.prepare('SELECT read_ok FROM formation_student WHERE person_id = ?');
+  const previous = db.prepare('SELECT * FROM formation_student WHERE person_id = ?');
+  const prevChildren = ['formation_copy', 'formation_assessment', 'formation_report', 'formation_plan_retired']
+    .map(t => db.prepare(`SELECT * FROM ${t} WHERE person_id = ?`));
+  const previousRows = (student: StudentRow): StudentRows => {
+    const [copies, assessments, reports, retired] = prevChildren.map(s => s.all(student.person_id));
+    return {
+      student,
+      copies: copies as CopyRow[],
+      assessments: assessments as AssessmentRow[],
+      reports: reports as ReportRow[],
+      retired: retired as RetiredRow[],
+    };
+  };
   const markFailed = db.prepare('UPDATE formation_student SET stale = read_ok, error = ? WHERE person_id = ?');
 
   db.transaction(() => {
@@ -156,14 +168,16 @@ function writeRun(reference: Reference, results: StudentRaw[], syncedAt: number)
     for (const r of ref.reference) ins.reference.run(r);
 
     for (const raw of results) {
-      const before = previous.get(raw.personId) as { read_ok: number } | undefined;
+      const before = previous.get(raw.personId) as StudentRow | undefined;
       if (!raw.ok && before) {
         // Read failed: keep the rows. stale = 1 only if they came from a successful read.
         markFailed.run(raw.error ?? 'lecture échouée', raw.personId);
         continue;
       }
+      // Read ok but some parts lost: those parts keep their previous rows (read before deleting).
+      const fresh = studentToRows(raw, syncedAt);
+      const rows = raw.failedParts.length && before?.read_ok === 1 ? keepFailedParts(fresh, previousRows(before)) : fresh;
       for (const d of del) d.run(raw.personId);
-      const rows = studentToRows(raw, syncedAt);
       ins.student.run(rows.student);
       if (!raw.ok) continue; // never read OK: the student row alone records the failure
       for (const c of rows.copies) ins.copy.run(c);

@@ -527,6 +527,17 @@ export const sendApiRequestGetAclInfo = async (itemId: string): Promise<any> => 
   }
 };
 
+// Same /acl read as sendApiRequestGetAclInfo (throws on failure, returns `{ data: [...] }`), with
+// the formation sync's timeout so a hung connection is a retryable ECONNABORTED, not a stuck run.
+export const sendApiRequestGetAclInfoChecked = async (itemId: string): Promise<any> => {
+  const response = await axios.get(`https://${getApiEndpoint()}/acl`, {
+    headers: getAuthHeaders(),
+    params: { id: itemId },
+    timeout: 60_000,
+  });
+  return response.data;
+};
+
 export const sendApiRequestPropagate = async (parameters: ApiParametersPropagate): Promise<any> => {
   const isRemove = parameters.type === "deleteAll" || parameters.type === "deletePublic";
   const onlyPublic = parameters.type === "public" || parameters.type === "deletePublic";

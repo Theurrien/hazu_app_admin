@@ -129,3 +129,35 @@ export function referenceFromRows(catalogue: CatalogueRow[], reference: Referenc
   }));
   return { slots, professionsByIcon: json('professionsByIcon'), levelsByColor: json('levelsByColor'), catalogueIcons: json('catalogueIcons') };
 }
+
+const renumber = <T extends { ord: number }>(rows: T[]): T[] => rows.map((r, ord) => ({ ...r, ord }));
+
+/**
+ * The rows to store for an apprentice whose read was ok but lost some parts (`failed_parts`):
+ * each failed part keeps its previous rows, each part read OK is replaced. Status columns
+ * (failed_parts, timeline_ok, found flags, error) stay the fresh ones, so the UI still flags
+ * the part. Without previous rows from a successful read, the fresh rows stand as they are.
+ *   timeline → assessments; mpe/mpc → that kind's copies; suivi-company → company reports +
+ *   plan (start, retired slots); suivi-cie → CIE reports; acl → self_uid.
+ */
+export function keepFailedParts(fresh: StudentRows, previous: StudentRows | null): StudentRows {
+  if (!previous || previous.student.read_ok !== 1 || fresh.student.read_ok !== 1) return fresh;
+  const failed = new Set<string>(JSON.parse(fresh.student.failed_parts || '[]'));
+  if (!failed.size) return fresh;
+  const from = (part: string) => (failed.has(part) ? previous : fresh);
+
+  const copiesOf = (kind: MandateKind) => byOrd(from(kind).copies.filter(c => c.kind === kind));
+  const reportsOf = (kind: 'company' | 'cie', part: string) => byOrd(from(part).reports.filter(r => r.kind === kind));
+  const plan = from('suivi-company');
+  return {
+    student: {
+      ...fresh.student,
+      self_uid: from('acl').student.self_uid,
+      plan_start_ms: plan.student.plan_start_ms,
+    },
+    copies: renumber([...copiesOf('mpe'), ...copiesOf('mpc')]),
+    assessments: from('timeline').assessments,
+    reports: renumber([...reportsOf('company', 'suivi-company'), ...reportsOf('cie', 'suivi-cie')]),
+    retired: plan.retired,
+  };
+}

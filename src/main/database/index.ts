@@ -303,7 +303,9 @@ function runMigrations(): void {
       DROP TABLE IF EXISTS mission_sync_status;
     `);
     db.exec(FORMATION_SCHEMA);
-    db.prepare("UPDATE formation_sync_status SET status = 'idle' WHERE id = 1 AND status = 'syncing'").run();
+    db.prepare(
+      "UPDATE formation_sync_status SET status = 'idle', processed = 0, total = 0, failed = 0 WHERE id = 1 AND status = 'syncing'",
+    ).run();
   } catch (error) {
     console.error('Migration error (formation tables):', error);
   }
