@@ -11,14 +11,15 @@ import { getDb, get, query, run } from '../database';
 import { sendApiRequestListChecked, sendApiRequestGetAclInfoChecked } from './hazu-api/api';
 import { isConfigured } from './hazu-api/config';
 import { runFormationSync, type ReadDeps, type ProfileInput } from './formation/read';
-import { buildStudentModel, type FormationStudent, type StudentModel } from './formation/model';
+import { buildStudentModel } from './formation/model';
 import { aggregateOverview, aggregateFormation, splitByReadState, markStale, type StoredReadState } from './formation/aggregate';
 import {
   studentToRows, studentFromRows, referenceToRows, referenceFromRows, keepFailedParts, type StudentRows,
   type StudentRow, type CopyRow, type AssessmentRow, type ReportRow, type RetiredRow, type CatalogueRow, type ReferenceRow,
 } from './formation/rows';
 import type {
-  FormationDetail, FormationDetailFilters, FormationSyncStatus, LevelCode, Reference, SchoolOverview, StudentContext, StudentRaw,
+  FormationDetail, FormationDetailFilters, FormationStudent, FormationSyncStatus, LevelCode, Reference, SchoolOverview,
+  StudentContext, StudentModel, StudentRaw,
 } from '../../shared/formation-types';
 
 const CONCURRENCY = 8;

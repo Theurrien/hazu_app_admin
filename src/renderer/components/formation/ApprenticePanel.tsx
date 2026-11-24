@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowUpRightFromSquare, faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons';
-import type { FormationStudent } from '../../../main/services/formation/model';
+import type { FormationStudent } from '../../../shared/formation-types';
 import { evaluationKnown, hazuUrl, kindState, latestReportLabel, panelFlags, retiredLabel, semesterLabel, slotDisplay } from './detail-logic';
 
 interface ApprenticePanelProps {

@@ -99,6 +99,47 @@ export interface Reference {
 /** State of one semester's company report in an apprentice's report line. */
 export type ReportState = 'published' | 'draft' | 'missing' | 'optional' | 'future';
 
+// ── Per-apprentice model (formation/model.ts builds it; the panel shows it) ──
+
+export type SlotStatus = 'tiers' | 'auto' | 'encours' | 'manquant';
+export interface SlotResult {
+  slot: Slot;
+  status: SlotStatus;
+  copyIds: string[];
+  assessments: Array<{ authorName: string; isSelf: boolean; points: number; dateMs: number; feedback: string | null }>;
+}
+export interface StudentModel {
+  personId: string;
+  formationTitle: string | null;
+  formationOrder: number;
+  profession: string | null;
+  level: LevelCode | 'other';
+  startMs: number;
+  startSource: 'plan' | 'report' | 'mandate' | 'profile' | 'default';
+  semesterCount: number;
+  currentSemester: number;
+  semesters: Array<{ n: number; startMs: number; endMs: number }>;
+  mpe: SlotResult[];
+  mpc: SlotResult[];
+  ahead: Copy[];
+  retired: string[];
+  reports: Array<{ semester: number; state: ReportState; reportId: string | null; publishedAt: number | null }>;
+  untaggedReports: number;
+  cieReports: { sent: number; draft: number };
+  identityKnown: boolean;
+  timelineOk: boolean;
+  readOk: boolean;
+  mpeFound: boolean;
+  mpcFound: boolean;
+  failedParts: StudentRaw['failedParts'];
+}
+
+/**
+ * One apprentice as the FORMATION_STUDENT channel returns it. `skippedSubtrees` = nested mandate
+ * folders the read skipped on 401/403/404 (their copies are not counted).
+ */
+export type FormationStudent = StudentModel & { name: string; companies: string[]; skippedSubtrees: number };
+
 // ── Aggregates (spec §5–§6). Rates are ratios in 0..1, null when the denominator is 0. ──
 
 /** Four-part status bar, in display order. Holds only slots whose status is known. */

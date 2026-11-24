@@ -12,9 +12,8 @@
 
 import type {
   Bar, CompanyRow, FormationAgg, FormationDetail, LevelAgg, LevelCode, MandateRow, Rates,
-  ReportState, SchoolOverview, StudentContext,
+  ReportState, SchoolOverview, SlotResult, StudentContext, StudentModel,
 } from '../../../shared/formation-types';
-import type { SlotResult, StudentModel } from './model';
 
 const NO_COMPANY = 'sans entreprise';
 const UNREAD_PROFILE = 'profil illisible';

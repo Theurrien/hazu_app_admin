@@ -3,48 +3,12 @@
 // Rules are ported from the enterprise dashboard widget
 // (34 - Hazu Artifacts/5-Enterprise/enterprise_dashboard.html).
 
-import type { Copy, LevelCode, MandateKind, ReportFact, ReportState, Slot, StudentRaw, Reference } from '../../../shared/formation-types';
+import type {
+  Copy, LevelCode, MandateKind, ReportFact, ReportState, Slot, SlotResult, SlotStatus, StudentModel, StudentRaw, Reference,
+} from '../../../shared/formation-types';
 import { slotKey } from './parse';
 
-export type SlotStatus = 'tiers' | 'auto' | 'encours' | 'manquant';
-export interface SlotResult {
-  slot: Slot;
-  status: SlotStatus;
-  copyIds: string[];
-  assessments: Array<{ authorName: string; isSelf: boolean; points: number; dateMs: number; feedback: string | null }>;
-}
-export type { ReportState };
-export interface StudentModel {
-  personId: string;
-  formationTitle: string | null;
-  formationOrder: number;
-  profession: string | null;
-  level: LevelCode | 'other';
-  startMs: number;
-  startSource: 'plan' | 'report' | 'mandate' | 'profile' | 'default';
-  semesterCount: number;
-  currentSemester: number;
-  semesters: Array<{ n: number; startMs: number; endMs: number }>;
-  mpe: SlotResult[];
-  mpc: SlotResult[];
-  ahead: Copy[];
-  retired: string[];
-  reports: Array<{ semester: number; state: ReportState; reportId: string | null; publishedAt: number | null }>;
-  untaggedReports: number;
-  cieReports: { sent: number; draft: number };
-  identityKnown: boolean;
-  timelineOk: boolean;
-  readOk: boolean;
-  mpeFound: boolean;
-  mpcFound: boolean;
-  failedParts: StudentRaw['failedParts'];
-}
-
-/**
- * One apprentice as the FORMATION_STUDENT channel returns it. `skippedSubtrees` = nested mandate
- * folders the read skipped on 401/403/404 (their copies are not counted).
- */
-export type FormationStudent = StudentModel & { name: string; companies: string[]; skippedSubtrees: number };
+export type { SlotStatus, SlotResult, StudentModel, FormationStudent, ReportState } from '../../../shared/formation-types';
 
 /** Sort key for an apprentice whose formation does not resolve: after every configured one. */
 const UNKNOWN_FORMATION_ORDER = Number.MAX_SAFE_INTEGER;

@@ -1,9 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 // Type-only: erased at compile time, so the sandboxed preload still loads no shared module.
 import type {
-  FormationDetail, FormationDetailFilters, FormationSyncStatus, LevelCode, SchoolOverview,
+  FormationDetail, FormationDetailFilters, FormationStudent, FormationSyncStatus, LevelCode, SchoolOverview,
 } from '../shared/formation-types';
-import type { FormationStudent } from './services/formation/model';
 
 // Inline IPC channels to avoid module resolution issues in preload sandbox
 const IPC_CHANNELS = {
