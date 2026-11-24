@@ -56,6 +56,15 @@ describe('timeline parsing', () => {
     expect(timelineFacts(rows).map(f => f.copyId)).toEqual(['c1', 'c2']);
     expect(timelineFacts(rows)[0]).toMatchObject({ points: 2, authorId: 'u1', dateMs: 10 });
   });
+  it('counts only item rows, as loadStudentTimeline does (any other type is ignored)', () => {
+    const base = { parentId: 'tl', title: '', tags: [], icon: null, color: null, dateCreated: 1, authorId: 'u1', authorName: 'A', order: null };
+    const rows = [
+      { ...base, id: 'i1', type: 'item', description: '1 Point hazu.swiss/c1' },
+      { ...base, id: 'f1', type: 'file', description: '1 Point hazu.swiss/c2' },
+      { ...base, id: 'l1', type: '', description: '1 Point hazu.swiss/c3' },
+    ];
+    expect(timelineFacts(rows).map(f => f.copyId)).toEqual(['c1']);
+  });
 });
 
 const row = (p: Partial<Row>): Row => ({ id: 'r', parentId: null, type: 'hazu', title: '', description: '', tags: [], icon: null, color: null, dateCreated: 0, authorId: null, authorName: null, order: null, ...p });

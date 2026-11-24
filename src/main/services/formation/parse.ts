@@ -118,11 +118,12 @@ export function parseFeedback(text: string): string | null {
 }
 
 // Source: enterprise_dashboard.html — parseTimelineItem (author resolution + 'Inconnu' fallback)
-// One fact per (timeline item, linked MPE copy). Rows of type 'hazu' are folders, not entries.
+// One fact per (timeline item, linked MPE copy). Only type:"item" rows are entries, as in
+// loadStudentTimeline's `rows.filter(n => n.type === 'item')`; folders and any other type are ignored.
 export function timelineFacts(rows: Row[]): AssessmentFact[] {
   const facts: AssessmentFact[] = [];
   for (const row of rows) {
-    if (row.type === 'hazu') continue;
+    if (row.type !== 'item') continue;
     const points = parsePoints(row.description);
     const feedback = parseFeedback(row.description);
     for (const copyId of extractHazuLinks(row.description)) {
