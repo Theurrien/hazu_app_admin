@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faRotate } from '@fortawesome/free-solid-svg-icons';
 import type { FormationSyncStatus, SchoolOverview } from '../../../shared/formation-types';
+import { shouldReload } from './sync-logic';
 
 const POLL_MS = 1000;
 
@@ -10,7 +11,7 @@ interface SyncHeaderProps {
   overview: SchoolOverview | null;
   /** No formation data stored yet: the header says so instead of the date and counts. */
   empty: boolean;
-  /** Called once a run this header watched has returned to `idle`: reload the overview. */
+  /** Called when the stored data is newer than `overview` (see `shouldReload`): reload the overview. */
   onSynced: () => void;
 }
 
@@ -18,13 +19,14 @@ const formatDate = (ms: number | null) => (ms === null ? '—' : new Date(ms).to
 
 /**
  * Data date, « n lu·es, m en échec » (m = never read + read failed this run; the list opens on
- * click) and « Mettre à jour ». While a run is `syncing` the status is polled every second; the
- * overview is reloaded only when a run seen here ends `idle`. An `error` keeps the old data.
+ * click) and « Mettre à jour ». While a run is `syncing` the status is polled every second. The
+ * overview is reloaded whenever the status is `idle` with a `lastSyncedAt` newer than the loaded
+ * overview's — so a run that ended while this header was unmounted, or one already `idle` when
+ * `formationSyncStart` returns, still reloads. An `error` keeps the old data.
  */
 export function SyncHeader({ overview, empty, onSynced }: SyncHeaderProps) {
   const [status, setStatus] = useState<FormationSyncStatus | null>(null);
   const [showFailures, setShowFailures] = useState(false);
-  const watching = useRef(false); // a `syncing` run was seen by this header
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const onSyncedRef = useRef(onSynced);
@@ -47,13 +49,7 @@ export function SyncHeader({ overview, empty, onSynced }: SyncHeaderProps) {
     }
     if (!mounted.current) return;
     setStatus(s);
-    if (s.status === 'syncing') {
-      watching.current = true;
-      schedule(poll);
-    } else if (watching.current) {
-      watching.current = false;
-      if (s.status === 'idle') onSyncedRef.current();
-    }
+    if (s.status === 'syncing') schedule(poll);
   }, []);
 
   useEffect(() => {
@@ -70,10 +66,7 @@ export function SyncHeader({ overview, empty, onSynced }: SyncHeaderProps) {
       const s = await window.electronAPI.formationSyncStart();
       if (!mounted.current) return;
       setStatus(s);
-      if (s.status === 'syncing') {
-        watching.current = true;
-        schedule(poll);
-      }
+      if (s.status === 'syncing') schedule(poll);
     } catch (error) {
       setStatus(prev => ({
         status: 'error', processed: 0, total: 0, failed: 0, lastSyncedAt: prev?.lastSyncedAt ?? null,
@@ -81,6 +74,14 @@ export function SyncHeader({ overview, empty, onSynced }: SyncHeaderProps) {
       }));
     }
   };
+
+  // Reload once the loaded overview is older than the stored data. After a reload the overview's
+  // syncedAt equals lastSyncedAt, so this settles; a failed reload leaves both unchanged (no loop).
+  const loaded = overview !== null;
+  const loadedSyncedAt = overview?.syncedAt ?? null;
+  useEffect(() => {
+    if (loaded && status && shouldReload(status, loadedSyncedAt)) onSyncedRef.current();
+  }, [status, loaded, loadedSyncedAt]);
 
   const syncing = status?.status === 'syncing';
   const failed = overview?.failed ?? [];
@@ -95,7 +96,9 @@ export function SyncHeader({ overview, empty, onSynced }: SyncHeaderProps) {
     >
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="text-sm" style={{ color: 'var(--hazu-text-light)' }}>
-          {empty ? (
+          {!loaded ? (
+            <span>Chargement…</span>
+          ) : empty ? (
             <span className="text-base" style={{ color: 'var(--hazu-text)' }}>Aucune donnée — lancez Mettre à jour</span>
           ) : (
             <>

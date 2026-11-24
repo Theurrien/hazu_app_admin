@@ -58,9 +58,6 @@ export function BarLegend() {
   );
 }
 
-/** A rate in 0..1 as a rounded percentage; `null` → « — ». */
-export function formatRate(rate: number | null): string {
-  return rate === null ? '—' : `${Math.round(rate * 100)} %`;
-}
+export { formatRate } from './sync-logic';
 
 export default StackedBar;

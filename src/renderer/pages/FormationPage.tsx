@@ -31,22 +31,7 @@ function FormationPage() {
   // Before the first run every apprentice is listed in `failed` (« pas encore lu »), so `failed` is not tested.
   const empty = overview !== null && overview.syncedAt === null && overview.students === 0;
 
-  if (selected) {
-    const f = overview?.formations.find(x => x.key === selected.key);
-    return (
-      <div className="space-y-6">
-        <button
-          type="button"
-          onClick={() => setSelected(null)}
-          className="text-sm flex items-center gap-2"
-          style={{ color: 'var(--hazu-primary)' }}
-        >
-          <FontAwesomeIcon icon={faArrowLeft} /> Toutes les formations
-        </button>
-        <h2 className="text-xl font-semibold" style={{ color: 'var(--hazu-text)' }}>{f?.title ?? selected.key}</h2>
-      </div>
-    );
-  }
+  const detail = selected && overview?.formations.find(x => x.key === selected.key);
 
   return (
     <div className="space-y-6">
@@ -54,7 +39,20 @@ function FormationPage() {
 
       {loadError && <div className="p-4 rounded-lg bg-red-50 text-red-800 text-sm">{loadError}</div>}
 
-      {overview && !empty && (
+      {/* The header stays mounted above both views, so a run's progress and its reload carry on in the drill-down. */}
+      {selected ? (
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setSelected(null)}
+            className="text-sm flex items-center gap-2"
+            style={{ color: 'var(--hazu-primary)' }}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} /> Toutes les formations
+          </button>
+          <h2 className="text-xl font-semibold" style={{ color: 'var(--hazu-text)' }}>{detail ? detail.title : selected.key}</h2>
+        </div>
+      ) : overview && !empty && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <Tile title="Apprenti·es" value={String(overview.students)} />
