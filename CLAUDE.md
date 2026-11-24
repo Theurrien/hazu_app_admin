@@ -85,7 +85,13 @@ hazu-admin/
 │   │       │   ├── helpers.ts  # Utilities
 │   │       │   └── interfaces.ts
 │   │       ├── sync.service.ts # Hazu → SQLite sync
-│   │       ├── mission-sync.service.ts # Mission data sync
+│   │       ├── formation/              # Missions formation overview — pure cores + tests
+│   │       │   ├── parse.ts            #   row normalisation, timeline, catalogue, copies, Suivi
+│   │       │   ├── read.ts             #   read orchestration (IO injected), runFormationSync
+│   │       │   ├── model.ts            #   one apprentice → StudentModel
+│   │       │   ├── aggregate.ts        #   school overview + formation drill-down
+│   │       │   └── rows.ts             #   StudentRaw ↔ table rows, keepFailedParts
+│   │       ├── formation-sync.service.ts # IO layer: background run, one-transaction write, queries
 │   │       │
 │   │       │   # Group-truth stages. Each splits into a PURE CORE with all IO
 │   │       │   # injected (vitest-runnable, no native module) + a thin *.service.ts
@@ -115,7 +121,7 @@ hazu-admin/
 │   │   │   ├── RoomsPage.tsx
 │   │   │   ├── PersonsPage.tsx
 │   │   │   ├── MatrixPage.tsx
-│   │   │   ├── MissionAnalysisPage.tsx
+│   │   │   ├── FormationPage.tsx      # Missions tab: school overview → formation drill-down
 │   │   │   ├── BulkImportPage.tsx
 │   │   │   ├── DiscrepanciesPage.tsx  # Groups-vs-tags report + heal/revoke/prune
 │   │   │   └── SettingsPage.tsx
@@ -124,13 +130,14 @@ hazu-admin/
 │   │   │   │   ├── Sidebar.tsx
 │   │   │   │   ├── Header.tsx
 │   │   │   │   └── ModeLock.tsx     # Header padlock + unlock prompt
-│   │   │   ├── mission-analysis/   # Mission dashboard viz components
-│   │   │   │   ├── MissionSyncButton.tsx
-│   │   │   │   ├── MissionFilterBar.tsx
-│   │   │   │   ├── MissionTreemap.tsx
-│   │   │   │   ├── MissionHeatmap.tsx
-│   │   │   │   ├── MissionSummaryBar.tsx
-│   │   │   │   └── MissionStudentList.tsx
+│   │   │   ├── formation/           # Missions tab components
+│   │   │   │   ├── SyncHeader.tsx         # « Mettre à jour », progress, en échec list
+│   │   │   │   ├── FormationCard.tsx      # one formation on the overview
+│   │   │   │   ├── FormationDetailView.tsx # drill-down: semesters, mandates, companies, reports, list
+│   │   │   │   ├── ApprenticePanel.tsx    # one apprentice's slots, reports, flags
+│   │   │   │   ├── MandateTable.tsx
+│   │   │   │   ├── StackedBar.tsx         # bar colours/labels used everywhere in the tab
+│   │   │   │   └── sync-logic.ts, detail-logic.ts  # pure display decisions (+ tests)
 │   │   │   ├── bulk-import/         # Bulk Import workflow components (uploader, mapping, matching, preview, verify)
 │   │   │   ├── MatrixGrid.tsx       # Virtualized person × room assignment grid
 │   │   │   ├── MatrixFilters.tsx
@@ -152,6 +159,7 @@ hazu-admin/
 │   │
 │   └── shared/                 # Shared between main & renderer
 │       ├── app-mode.ts        # S9 — pure mode decisions (pages/workflows/roles)
+│       ├── formation-types.ts # Missions formation overview types (Row, StudentRaw, SchoolOverview…)
 │       ├── types.ts           # TypeScript interfaces
 │       └── ipc-channels.ts    # IPC channel constants
 │
@@ -199,9 +207,20 @@ const result = await window.electronAPI.runSync();
 - `settings` - App configuration (API key, environment, etc.)
 - `tag_mappings` - Hazu tag → semantic type mappings
 
-### Mission Analysis Tables
-- `mission_tracking` - Per-student mission records (person_id, mission_name, is_official, lieu_de_formation, item_count, total_points)
-- `mission_sync_status` - Tracks sync progress (students_processed, total_students, last_synced_at, status)
+### Missions formation tables
+Raw-ish facts from the last formation sync; every figure is computed from them at query time, so a
+rule change needs no re-sync. See [Missions (formation overview)](#missions-formation-overview).
+- `formation_student` - One row per apprentice the sync tried to read: read status / error, `stale`,
+  identity tag and resolved `self_uid`, `plan_start_ms`, `failed_parts`, `skipped_subtrees`
+- `formation_copy`, `formation_assessment`, `formation_report`, `formation_plan_retired` - Per
+  apprentice: MPE/MPC copies, timeline facts (one per item × linked copy), company and CIE reports,
+  retired plan slots
+- `formation_catalogue`, `formation_reference` - The MPE/MPC catalogue slots and the
+  professions/levels/catalogue-icon maps of the last run
+- `formation_sync_status` - Single row (`id = 1`, seeded): status, processed / total / failed, last
+  sync, last error
+
+The old `mission_tracking` / `mission_sync_status` tables are dropped by a migration.
 
 ### Room Types (identified by tags)
 | Tag | Type |
@@ -351,26 +370,124 @@ Uses new import syntax:
 ```
 With `@tailwindcss/postcss` plugin (not direct tailwindcss).
 
-## Mission Analysis
+## Missions (formation overview)
 
-The Missions tab provides a visual dashboard of student mission (MPE) completion across professions and levels (AFP/CFC).
+The Missions tab ([FormationPage.tsx](src/renderer/pages/FormationPage.tsx)) is a **read-only,
+school-wide overview** of every apprentice's practical mandates — **MPE** (company) and **MPC**
+(CIE) — and semester reports. It writes nothing to Hazu. Complete mode only (not one of the CIE-mode
+pages). Spec: [docs/specs/2026-11-24-missions-redesign-design.md](docs/specs/2026-11-24-missions-redesign-design.md);
+data inventory beside it.
 
-### How it works
-1. **Sync missions**: Click "Sync Missions" on the Missions tab. This fetches each student's mission data from the Hazu API and stores it locally in `mission_tracking`.
-2. **Visualize**: Two chart views are available:
-   - **Treemap** — Nested rectangles grouped by profession > level > mission count, sized by student count
-   - **Heatmap** — Grid with profession+level on Y-axis, mission count on X-axis, colored by student count
-3. **Filter**: Use the filter bar to narrow by lieu de formation (entreprise/ecole/cie), profession, level (AFP/CFC), or class.
-4. **Drill down**: Click any chart cell to see the matching students with name, enterprise, mission count, and a link to their Hazu profile.
+### How it is used
+1. **Mettre à jour** ([SyncHeader.tsx](src/renderer/components/formation/SyncHeader.tsx)) starts a
+   background run and polls its progress; the header then shows the last sync and « n en échec »
+   (never-read apprentices plus « données anciennes » ones, listed).
+2. **Overview** — one card per formation (titles from the Professions config: CUI, RES, DHI), with
+   its levels, apprentice counts, MPE import rate and evaluation rate. A formation with no MPE
+   catalogue (RES today) says « pas de catalogue MPE »; a rate with a zero base shows « — ».
+3. **Drill-down** ([FormationDetailView.tsx](src/renderer/components/formation/FormationDetailView.tsx))
+   — by semester, each catalogue mandate (MPE and MPC), each company, the reports, and the
+   apprentice list, filterable; **click an apprentice** → [ApprenticePanel.tsx](src/renderer/components/formation/ApprenticePanel.tsx)
+   with every slot, the start date (« estimé » when guessed), reports per semester and the flags.
 
-### Key files
-- `src/main/services/mission-sync.service.ts` — Fetches and parses mission data from the API
-- `src/renderer/pages/MissionAnalysisPage.tsx` — Main page with filters, charts, and student list
-- `src/renderer/components/mission-analysis/` — All visualization components
+Bars use one order and palette everywhere ([StackedBar.tsx](src/renderer/components/formation/StackedBar.tsx)):
+« évalué par un tiers » `#1baf7a`, « auto-évalué seulement » `#eda100`, « importé, en cours »
+`#2a78d6`, « pas encore importé » `#d3d1c7`. The renderer displays the aggregate's own counts and
+rates; it never recomputes a rate from a bar.
+
+### Files
+- [formation/parse.ts](src/main/services/formation/parse.ts) — row normalisation (`normalizeRow`,
+  any API envelope), timeline facts, catalogue slots, study-place children, company/CIE reports,
+  plan records, and the study-place / Suivi lookups.
+- [formation/read.ts](src/main/services/formation/read.ts) — read orchestration, all IO injected
+  (`list`, `acl`, `sleep`): `readReference`, `readStudent`, `runFormationSync`.
+- [formation/model.ts](src/main/services/formation/model.ts) — one apprentice → `StudentModel`:
+  level, start date, semesters, per-slot status, « en avance » copies, retired slots, report line.
+- [formation/aggregate.ts](src/main/services/formation/aggregate.ts) — `aggregateOverview`,
+  `aggregateFormation`, the flags, and what a failed part removes from which rate.
+- [formation/rows.ts](src/main/services/formation/rows.ts) — `StudentRaw` ↔ table rows, and
+  `keepFailedParts`.
+- [formation-sync.service.ts](src/main/services/formation-sync.service.ts) — **the only IO layer**:
+  starts the run, writes it, answers the queries. Tests for every pure core live beside it as
+  `*.test.ts`; renderer display decisions in `components/formation/*-logic.ts`.
+- IPC: `FORMATION_SYNC_START`, `FORMATION_SYNC_STATUS`, `FORMATION_OVERVIEW`, `FORMATION_DETAIL`,
+  `FORMATION_STUDENT`. Types in [shared/formation-types.ts](src/shared/formation-types.ts).
+
+### Read flow (`runFormationSync`)
+1. **Reference, once per run** — the catalogue under `MPE_CATALOGUE_ROOT` (`eIWK3uyTqf910NF6Cg0a`):
+   profession folders by `hz-config-template-mpe-{code}`, MPE and MPC masters in one descent,
+   archive folders skipped; the Professions/Levels config from the Entreprise category, else
+   `hz-config-admin`. **A reference failure rejects the run** — no rate is computable without it.
+2. **Each apprentice** (`persons.person_type = 'student'`), 8 at a time: profile children →
+   skills timeline (bare `hz-config-skills-timeline-{id}` pointer via `pickIdTag`, else the
+   `hz-config-skills` child) → Mandats Entreprise → Mandats CIE → Entreprise - Suivi (company
+   reports + plan) → CIE - Suivi (`rap_cie` copies) → the profile ACL, only when the identity tag
+   holds an e-mail.
+   - Retry 3 attempts with `backoffMs`; transient = 5xx, 408, 429, network/timeout (60 s per read).
+     An empty listing is re-read once.
+   - Mandate descent, 4 levels: a tagged hazu is a copy, an untagged hazu is descended, the planning
+     overview is skipped by title, a child tagged `hz-config-room-*` (a CIE course filed in a study
+     place) is never descended, and a nested folder answering **401/403/404** is skipped and counted
+     in `skipped_subtrees` — the apprentice's other copies still count. Any other failure fails the
+     part.
+   - **A part never fails the apprentice.** It lands in `failedParts` (`timeline`, `mpe`, `mpc`,
+     `suivi-company`, `suivi-cie`, `acl`); only a failed profile listing makes the read `ok: false`.
+3. **Measured** (`output/formation-sync-timing.txt`, 2026-11-24, 264 apprentices): **~151 s**,
+   ~5,500 reads at ~0.49 s each, 0 failed.
+
+### Write: one transaction
+The run's results stay in memory; `writeRun` writes them in **one** SQLite transaction when the run
+resolves. A run that rejects writes nothing (status `error`, previous data intact). Per apprentice:
+- **read failed, previous rows exist** → the rows are kept and marked `stale` with the error
+  (« données anciennes »); never read OK → only the `formation_student` row records the failure;
+- **read OK but some parts failed** → `keepFailedParts`: each failed part keeps its previous rows
+  instead of being replaced by nothing (a transient timeline failure must not erase stored facts);
+- otherwise → its rows are replaced.
+
+A status left at `syncing` by a crash is reset at startup. Every query rebuilds each stored
+apprentice's model with today's date, so semesters advance without a re-sync.
+
+### Rules ported from 5-Enterprise
+Each port names its source function (`enterprise_dashboard.html`) in a comment. The agreement
+target is **5-Enterprise, including for MPC**: the CIE rule is 5-Enterprise's CIE tab (the same
+timeline link join as MPE, a non-self author = assessed), **not** the CIE dashboard's code
+aggregation — so courses assessed « en bloc » show as not evaluated in the MPC section.
+- **Status of a slot** — best of its copies: *tiers* (a linked timeline item by someone else),
+  *auto* (linked items, all by the apprentice), *en cours* (copy, no linked item), *manquant*.
+  There is **no `moi`**: the admin is never the assessor.
+- **Expected to date** — catalogue slots of the profession × level with semester ≤ the current
+  semester, minus slots the mentor retired (`hz-plan-skip`); later copies are « en avance ».
+- **Start** — the newest `hz-plan-settings` start, else `guessStartDate` (earliest S1 report, MPE
+  copy or profile creation → 1 August of that school year). Before the start the current
+  semester is 0 and nothing is expected. AFP 4 semesters, CFC 6.
+- **Reports** — per semester: published / draft / *missing* once the semester ended / *future*
+  before (the widget says « à faire » for both); the last semester is optional. Untagged reports
+  are counted, never placed. CIE reports: `rap_cie`, sent = `hz-config-report-sent`.
+- **Identity rule** — « self » means the timeline author equals the apprentice's account id.
+  `hz-config-userid-{value}` holds a UID on some profiles and an e-mail on others: a UID is used as
+  is, an e-mail is resolved through the profile's own ACL (`description` → `authorId`).
+  **Unresolved → identity unknown**: the apprentice is left out of evaluation rates and flagged,
+  never treated as « not self », which would turn self-assessments into « évalué par un tiers ».
+- **Unknown is not zero** — a failed or missing part takes the apprentice out of that part's rates
+  and adds a flag; an apprentice of another level than AFP/CFC is « autre niveau »; one whose
+  formation does not resolve is « à classer ». Nobody silently disappears from the counts.
+
+**Cross-checked 2026-11-24** (`output/formation-crosscheck.md`): the widget's own functions,
+extracted verbatim, on the same live listings as the app for four apprentices (CUI CFC, CUI AFP,
+DHI CFC, one with a plan) — catalogue, every slot status, start date and report per semester
+agree, apart from the documented differences above. Three port differences found by reading the
+code were fixed (timeline items only; study-place title « contains »; Suivi only a `fa-info` hazu).
+
+### Development runs use a scratch userData copy
+**Never start the app against the real user DB** (`~/Library/Application Support/hazu-admin`).
+On 2026-11-24 one `npm start` during this work ran the formation migration there and dropped the
+old mission tables (derived cache, re-fetchable — but not ours to drop). Copy the userData folder
+to the scratchpad and start Electron with `--user-data-dir` pointing at the copy; live reads are
+fine, read-only, with that copy's key.
 
 ### Prerequisites
-- Run the main sync first (Dashboard > Sync) so persons have `icon` and `color` populated
-- Then run "Sync Missions" on the Missions tab
+- Run the main sync first (Dashboard > Sync): the apprentice list, icons/colours, companies and
+  classes all come from `persons`, `rooms` and `person_room_assignments`.
 
 ## Matrix
 
@@ -1008,7 +1125,13 @@ recovery, and one real self-update.
 4. Click "Sync Now" on Dashboard
 5. View synced data in Rooms/Persons pages
 6. Open the Matrix tab → edit an assignment cell (optimistic update; runs through the reliable role-write path — verified against group truth, reverts if the change isn't confirmed)
-7. Go to Missions tab → Click "Sync Missions" → View mission analysis charts
+7. Missions → Mettre à jour → open a formation → open an apprentice
+7b. **Acceptance (Urs):** pick three apprentices (one per formation). Open each in the app's
+    apprentice panel and in the live 5-Enterprise synthesis page (Entreprise and CIE tabs) and
+    compare every MPE and MPC slot status, the start date and the report per semester. Expected
+    differences: no « Évalué par moi » in the app; the app shows only slots due to date (later ones
+    as « en avance »); « à faire » in 5-Enterprise is `future` or `missing` in the app; retired slots
+    leave the app's count
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
 9. Go to Discrepancies → try "Heal all missing-tags" on a `missing-tag` row, then "Revoke access" on an `unknown` row (confirm the modal lists every grant, then verify against group truth — reverts to an error if not confirmed)
 9b. On the same page, click "Check & prune missing rooms" (probes every unmatched class id live);

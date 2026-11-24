@@ -1,6 +1,6 @@
 # Missions tab redesign — school-wide formation overview
 
-Status: **design, awaiting approval** (builder check done 2026-11-24). Companion: [the data inventory](2026-11-24-missions-data-inventory.md)
+Status: **implemented** (2026-11-24, branch feat/missions-formation-overview; cross-checked against 5-Enterprise, see CLAUDE.md « Missions (formation overview) »). Companion: [the data inventory](2026-11-24-missions-data-inventory.md)
 (where every piece of data lives on Hazu, and what a full read costs).
 
 ## 1. Intent
