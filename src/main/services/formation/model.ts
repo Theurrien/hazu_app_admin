@@ -3,7 +3,7 @@
 // Rules are ported from the enterprise dashboard widget
 // (34 - Hazu Artifacts/5-Enterprise/enterprise_dashboard.html).
 
-import type { Copy, LevelCode, MandateKind, ReportFact, Slot, StudentRaw, Reference } from '../../../shared/formation-types';
+import type { Copy, LevelCode, MandateKind, ReportFact, ReportState, Slot, StudentRaw, Reference } from '../../../shared/formation-types';
 import { slotKey } from './parse';
 
 export type SlotStatus = 'tiers' | 'auto' | 'encours' | 'manquant';
@@ -13,7 +13,7 @@ export interface SlotResult {
   copyIds: string[];
   assessments: Array<{ authorName: string; isSelf: boolean; points: number; dateMs: number; feedback: string | null }>;
 }
-export type ReportState = 'published' | 'draft' | 'missing' | 'optional' | 'future';
+export type { ReportState };
 export interface StudentModel {
   personId: string;
   formationTitle: string | null;

@@ -94,3 +94,56 @@ export interface Reference {
   levelsByColor: Record<string, string>;
   catalogueIcons: Record<string, string>; // profession folder icon -> profession code
 }
+
+/** State of one semester's company report in an apprentice's report line. */
+export type ReportState = 'published' | 'draft' | 'missing' | 'optional' | 'future';
+
+// ── Aggregates (spec §5–§6). Rates are ratios in 0..1, null when the denominator is 0. ──
+
+/** Four-part status bar, in display order. Holds only slots whose status is known. */
+export interface Bar { tiers: number; auto: number; encours: number; manquant: number; }
+export interface Rates { importRate: number | null; evalRate: number | null; }
+export interface LevelAgg extends Rates { level: LevelCode | 'other'; students: number; bar: Bar | null; }
+/** One formation card. `key` is the profession icon. */
+export interface FormationAgg { key: string; title: string; icon: string; order: number; students: number; levels: LevelAgg[]; }
+export interface SchoolOverview extends Rates {
+  students: number;
+  reportsPublishedRate: number | null;
+  formations: FormationAgg[];
+  unclassified: Array<{ personId: string; name: string }>;
+  failed: Array<{ personId: string; name: string; error: string }>;
+  syncedAt: number | null;
+}
+/** What the local DB knows about an apprentice. `icon` is the profession icon = the formation key. */
+export interface StudentContext { personId: string; name: string; icon: string | null; companies: Array<{ id: string; title: string }>; classIds: string[]; }
+/**
+ * One catalogue mandate of the formation. `concerned` = apprentices expecting it; `imported` = of
+ * those, with a copy; `assessable` = of the concerned, those whose evaluation is known (timeline and
+ * identity read) — the denominator for `tiers`.
+ */
+export interface MandateRow { semester: number; mandate: string; title: string; concerned: number; imported: number; assessable: number; tiers: number; }
+export interface CompanyRow extends Rates {
+  id: string | null; // null = « sans entreprise »
+  title: string;
+  students: number;
+  plan: 'oui' | 'partiel' | 'non';
+  retired: number;
+  reportsPublished: number;
+  reportsDue: number;
+}
+export interface FormationDetail extends Rates {
+  key: string;
+  title: string;
+  level: LevelCode | 'both';
+  tableLevel: LevelCode;
+  startEnteredShare: number | null;
+  companiesWithoutTiers: { count: number; total: number };
+  bySemester: Array<{ semester: number; students: number; bar: Bar }>;
+  mpe: MandateRow[];
+  mpc: MandateRow[];
+  cieReports: { sent: number; draft: number };
+  companies: CompanyRow[];
+  reportsBySemester: Array<{ semester: number; published: number; draft: number; missing: number }>;
+  /** `bar` is null when the apprentice's MPE statuses are unknown (see `flags`). */
+  students: Array<{ personId: string; name: string; company: string; currentSemester: number; bar: Bar | null; latestReport: ReportState | null; flags: string[] }>;
+}
