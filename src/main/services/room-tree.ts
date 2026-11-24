@@ -116,9 +116,12 @@ export interface RoomTreeConfig {
   maxDepth?: number;
 }
 
-// One level beyond where every hidden room sits today, leaving headroom for the CIE
-// year-folder structure without walking the calendar subtree's grandchildren.
-export const DEFAULT_MAX_DEPTH = 4;
+// Category -> room, and stop. Every room the app manages sits directly under its category
+// (depth 2). Folders beside the rooms — "Calendrier scolaire", "Professions"/"Levels", and the
+// CIE year folders that hold last years' courses — are recorded in `truncatedAt` and never
+// opened: the CIE archive is deliberately out of scope (decided 2026-11-24), and opening those
+// folders cost ~70 of the ~77 listChildren calls the old depth-4 walk made, most of them 401s.
+export const DEFAULT_MAX_DEPTH = 2;
 
 /**
  * Walk the room tree from `rootId`, collecting categories and rooms.

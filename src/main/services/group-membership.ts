@@ -1,3 +1,5 @@
+import { isRetryableError, backoffMs } from './role-write';
+
 export interface AclMember {
   authorId: string;
   description: string;
@@ -75,35 +77,88 @@ export function resolvePerson(
   return { issue: isEmail ? 'unknown' : 'unresolved' };
 }
 
+export interface ComputeOptions {
+  // How many group ACLs are read at once. One read takes ~0.35 s and a sync reads ~835 groups,
+  // so a sequential loop alone was ~4–5 minutes. Measured 2026-11-24: 10 parallel reads brought
+  // the effective cost to ~0.09 s/read with no errors; 8 leaves headroom.
+  concurrency?: number;
+  // Attempts per group for transient failures (5xx / network / timeout). More parallel reads
+  // make an intermittent 500 likelier, and a skipped group silently drops its assignments
+  // (and surfaces them as false discrepancies), so retry before giving up.
+  maxAttempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export const DEFAULT_ACL_CONCURRENCY = 8;
+const DEFAULT_ACL_ATTEMPTS = 3;
+
+// Transient = an HTTP 5xx, or an axios error with no response at all (network/timeout).
+// Anything else (4xx, or a non-HTTP error) is not worth retrying.
+function isTransientAclError(err: unknown): boolean {
+  const e = err as { response?: { status?: number }; isAxiosError?: boolean; code?: string } | null;
+  const status = e?.response?.status;
+  const networkOrTimeout = status === undefined && !!(e?.isAxiosError || e?.code);
+  return isRetryableError(status, networkOrTimeout);
+}
+
 // Preconditions on `byEmail` / `byUid`: see resolvePerson.
 // `excludeUids` holds account UIDs (ACL authorId) to drop entirely — e.g. super-user
 // group members, who are granted access everywhere without a real role/tag and would
 // otherwise flood assignments/issues as noise. An excluded member yields neither.
+//
+// ACLs are read `concurrency` at a time; results are assembled in `groups` order, so the
+// output is identical to a sequential run.
 export async function computeGroupAssignments(
   groups: RoleGroup[],
   getAcl: (id: string) => Promise<{ data: AclMember[] }>,
   byEmail: Map<string, string>,
   excludeUids: Set<string> = new Set(),
   byUid: Map<string, string> = new Map(),
+  options: ComputeOptions = {},
 ): Promise<ComputeResult> {
+  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_ACL_CONCURRENCY);
+  const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_ACL_ATTEMPTS);
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  const readWithRetry = async (groupId: string): Promise<{ data: AclMember[] }> => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await getAcl(groupId);
+      } catch (err) {
+        if (attempt + 1 >= maxAttempts || !isTransientAclError(err)) throw err;
+        await sleep(backoffMs(attempt));
+      }
+    }
+  };
+
+  // null = the read failed for good; that group is skipped.
+  const acls: Array<{ data: AclMember[] } | null> = new Array(groups.length).fill(null);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < groups.length) {
+      const i = next++;
+      const g = groups[i];
+      try {
+        acls[i] = await readWithRetry(g.groupId);
+      } catch (err) {
+        // One group's ACL read failing (e.g. an intermittent Hazu 500) must not
+        // abort the whole batch and blank person_room_assignments. Log and skip.
+        console.error(
+          `[group-membership] Failed to read ACL for group ${g.groupId} (room ${g.roomId}, role ${g.role}); skipping:`,
+          err,
+        );
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, groups.length) }, worker));
+
   const assignments: GroupAssignment[] = [];
   const issues: MembershipIssue[] = [];
 
-  for (const g of groups) {
-    let acl: { data: AclMember[] };
-    try {
-      acl = await getAcl(g.groupId);
-    } catch (err) {
-      // One group's ACL read failing (e.g. an intermittent Hazu 500) must not
-      // abort the whole batch and blank person_room_assignments. Log and skip,
-      // matching syncAssignments/syncPersonsRecursive in sync.service.ts.
-      console.error(
-        `[group-membership] Failed to read ACL for group ${g.groupId} (room ${g.roomId}, role ${g.role}); skipping:`,
-        err,
-      );
-      continue;
-    }
-    for (const m of acl?.data || []) {
+  groups.forEach((g, i) => {
+    const acl = acls[i];
+    if (!acl) return;
+    for (const m of acl.data || []) {
       if (m.isGroup) continue; // nested group refs are not members
       if (m.authorId && excludeUids.has(m.authorId)) continue; // super-user group members: excluded everywhere
       const rawEmail = (m.description || '').trim();
@@ -123,7 +178,7 @@ export async function computeGroupAssignments(
         });
       }
     }
-  }
+  });
 
   return { assignments, issues };
 }

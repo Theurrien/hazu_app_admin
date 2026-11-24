@@ -9,7 +9,7 @@ import { sendApiRequestList, sendApiRequestGetAclInfo } from "./hazu-api/api";
 import { getRootHazuId, isConfigured } from "./hazu-api/config";
 import { HazuEntity } from "./hazu-api/interfaces";
 import { computeGroupAssignments, RoleGroup } from "./group-membership";
-import { walkRoomTree, summarizeWalkNotes, DEFAULT_MAX_DEPTH, WalkNote } from "./room-tree";
+import { walkRoomTree, summarizeWalkNotes, WalkNote } from "./room-tree";
 
 // Tag patterns for identifying entity types
 const PERSON_TAG_PATTERNS = {
@@ -99,14 +99,12 @@ async function syncRooms(): Promise<void> {
   console.log('[SYNC] Walking the room tree from root...');
   syncProgress.message = "Fetching rooms from Hazu...";
 
-  // Rooms live at varying depths: directly under a category, and (for CIE) inside year
-  // sub-folders below it. walkRoomTree finds both; it throws if the root listing fails,
-  // which matters because clearOldData() has already emptied the rooms table.
+  // Rooms sit directly under their category (category -> room, and stop). walkRoomTree
+  // lists root and each category, nothing else; it throws if the root listing fails, which
+  // matters because clearOldData() has already emptied the rooms table.
   //
-  // The walk is strictly sequential and runs to ~77 calls on the first sync (vs. 5 under the
-  // old two-level walk), so wrap the injected child-lister to keep syncProgress.message moving
-  // — otherwise the Dashboard sits on one unchanging string for the whole walk. This is the
-  // injected-IO pattern doing its job: room-tree.ts gets no progress callback of its own.
+  // The child-lister is still wrapped to keep syncProgress.message moving — the injected-IO
+  // pattern: room-tree.ts gets no progress callback of its own.
   let roomListCalls = 0;
   const listChildrenWithProgress = async (id: string) => {
     roomListCalls++;
@@ -165,11 +163,8 @@ async function syncRooms(): Promise<void> {
     syncProgress.roomsProcessed++;
   }
 
-  // Group both read-failure and truncation notes by parent before logging. A flat list of
-  // ~62 names (one per Calendrier scolaire calendar entry, each 401ing when the walk tries to
-  // read ITS children) would be a permanent wall of text that trains the operator to scroll
-  // past it — which defeats the point of surfacing it at all. "62 entries under Calendrier
-  // scolaire" is one actionable line instead. Titles are stripped here, at the IO boundary, so
+  // Group notes by parent before logging, so a batch of failures under one folder reads as
+  // one line rather than a wall of names. Titles are stripped here, at the IO boundary, so
   // room-tree.ts's summarizeWalkNotes stays pure (it has no stripHtml to call).
   const cleaned = (notes: WalkNote[]): WalkNote[] =>
     notes.map((n) => ({
@@ -199,9 +194,11 @@ async function syncRooms(): Promise<void> {
     );
   }
   if (tree.truncatedAt.length > 0) {
-    console.warn(
-      `[SYNC] Depth cap ${DEFAULT_MAX_DEPTH} reached — ${tree.truncatedAt.length} folder(s) ` +
-      `visited but not descended into: ${summarizeWalkNotes(cleaned(tree.truncatedAt))}`
+    // Expected on every sync: folders beside the rooms (calendar, CIE year folders, …) are
+    // deliberately not opened. Informational, not a warning.
+    console.log(
+      `[SYNC] ${tree.truncatedAt.length} non-room folder(s) beside the rooms not opened (by design): ` +
+      summarizeWalkNotes(cleaned(tree.truncatedAt))
     );
   }
   console.log(`[SYNC] Synced ${syncProgress.roomsProcessed} rooms total`);

@@ -103,7 +103,7 @@ hazu-admin/
 │   │       ├── orphan-removal.service.ts
 │   │       ├── tag-prune.ts            # S7 — delete dead breadcrumb tags (404-only)
 │   │       ├── tag-prune.service.ts
-│   │       └── room-tree.ts            # S8 — whole-tree room walk
+│   │       └── room-tree.ts            # S8 — category → room walk (flat)
 │   │
 │   ├── renderer/               # React Frontend (Vite)
 │   │   ├── App.tsx            # Main app with routing
@@ -717,81 +717,61 @@ where it could not, the delete's status code decides.
 
 ## Room Tree Sync (S8)
 
-`syncRooms` (in [sync.service.ts](src/main/services/sync.service.ts)) walks the **whole** Hazu room
-tree instead of stopping two levels below root. The old code assumed every room sat directly under
-its category; in practice CIE rooms live inside year sub-folders, so a fixed-depth walk missed them.
+`syncRooms` (in [sync.service.ts](src/main/services/sync.service.ts)) reads **category → room,
+and stops**: it lists root, then each room category (Cantons, École professionnelle, Entreprise
+formatrice, Cours interentreprises), and keeps the class-tagged children. Nothing below that
+level is opened — not the inside of a class, and not the folders that sit *beside* the classes.
+
+### Why flat (changed 2026-11-24)
+S8 originally walked to depth 4 to pick up CIE courses filed in year folders (`CIE 2024`,
+`CIE 2025`). That walk cost ~77 `listChildren` calls per sync, ~70 of them on folders that hold
+no managed room: *Calendrier scolaire* beside the classes (and every holiday entry inside it,
+each a 401), *Professions*/*Levels* beside the enterprises, and the CIE year folders. The decision
+is that **the CIE archive is out of scope**: only this year's courses, which sit directly under
+the CIE category, are managed. The walk now makes ~5 calls.
+
+Consequences of dropping the archive:
+- The ~31 archived CIE courses no longer appear in Matrix/Rooms, and their distribution groups
+  end up with `room_id = NULL`, so their memberships are not read.
+- Profiles still carry breadcrumb tags for those archived classes, so they show up as
+  **unmatched class ids** on the Discrepancies page. *Check & prune missing rooms* is safe
+  against them: the rooms still exist, so the probe answers 200 and they are skipped as
+  "Still exists" (the S7 404-only rule).
 
 ### Files
-- [room-tree.ts](src/main/services/room-tree.ts) — **pure core**, no DB/HTTP/Electron import (only
-  `RoomType` from `shared/types`): tag classification (`classifyNode`, `identifyRoomType`,
-  `extractClassId`), the depth-capped `walkRoomTree` orchestrator, and `summarizeWalkNotes` — the
-  log-line grouping renderer described below. The child-lister (`listChildren`) is injected, so the
-  whole walk runs under vitest without the native SQLite module or the network.
-- [room-tree.test.ts](src/main/services/room-tree.test.ts) — covers classification, walk depth /
-  truncation / read-failure / cycle behavior, and `summarizeWalkNotes` grouping, entirely against
-  fake in-memory trees.
-- `syncRooms` itself supplies the real IO (`sendApiRequestList`, wrapped to bump
-  `syncProgress.message` — see below) and writes the walk's `categories`/`rooms` into SQLite.
+- [room-tree.ts](src/main/services/room-tree.ts) — **pure core**, no DB/HTTP/Electron import:
+  tag classification (`classifyNode`, `identifyRoomType`, `extractClassId`), the depth-capped
+  `walkRoomTree` (`DEFAULT_MAX_DEPTH = 2`), and `summarizeWalkNotes`, which groups log lines by
+  parent. The child-lister is injected. The walker itself stays generic (tests drive it at
+  depth 4); the flat behaviour is only the default.
+- [room-tree.test.ts](src/main/services/room-tree.test.ts) — classification, walk depth /
+  truncation / read failures / cycles, and the flat default.
 
-### What changed for rooms already in the database
-Nothing observable for the 123 rooms synced under the old two-level walk — same `id`, `class_id`,
-`room_type`, `parent_id`. What changes is what else now shows up:
+### Invariants that still hold
+- **Never descends into a room.** A class-tagged node's children are course content.
+- **A failed root listing throws.** `clearOldData()` has already emptied `rooms`, so swallowing
+  it would wipe every room. A failed *category* listing is recorded in `readFailures` instead
+  (and logged as a warning).
+- **A room at depth 1** (directly under root) is recorded in `unexpectedRooms` and dropped:
+  `parent_id = rootId` would collide with the category predicate
+  [CreateRoomModal.tsx:86](src/renderer/components/CreateRoomModal.tsx) relies on.
+- **Every room's `parent_id` is a category**, now that the walk is flat. The CIE-mode delete
+  gate (`canDeleteRoom`, S9) therefore offers delete on every CIE course shown.
 
-- **`parent_id` may name a folder that has no row of its own.** A room found three or four levels
-  down (e.g. inside a CIE year sub-folder) is written with `parent_id` set to that sub-folder's Hazu
-  id — a container the walk passed through but never wrote to `rooms`, since only categories and
-  rooms are persisted. Anything that assumes `parent_id` always resolves to a row in `rooms` needs
-  to handle a miss.
-- **`room_type` resolution order changed.** It used to be inherited from the category
-  unconditionally; now it's **self-tag first, nearest typed ancestor as fallback** — a room several
-  folders under an "état" category but itself carrying `hz-config-room-cie` is typed `cie`, not
-  `state`. See `classifyNode` in room-tree.ts.
-- **Category folders still keep `parent_id = root_hazu_id`.**
-  [CreateRoomModal.tsx:86](src/renderer/components/CreateRoomModal.tsx) finds a category container
-  by exactly `room_type === type && parent_id === rootHazuId` — the walk never emits a category at
-  any other depth, and (see below) never emits a *room* at depth 1 either, so that predicate keeps
-  meaning exactly one thing.
+Folders beside the rooms land in `truncatedAt` and are logged as one **informational** line
+(`N non-room folder(s) beside the rooms not opened (by design)`), not a warning.
 
-### Depth cap and what it never does
-`walkRoomTree` defaults to `maxDepth = 4` (`DEFAULT_MAX_DEPTH`), counted from root: depth 1 is the
-category layer, depth 2 is directly under a category, and so on. Two things it deliberately never
-does, plus one guard:
+## Group Membership Reads
 
-- **It never descends into a room.** A `hz-config-class-*` node's children are course content
-  (missions, assignments), not rooms — walking into them would misclassify content as rooms.
-- **It never treats an unreadable subtree as empty.** If `listChildren` returns `null` for a
-  container, that container is recorded in `readFailures` and skipped — its absence from `rooms`
-  reads as "unknown", not "confirmed empty". A failed **root** listing is the one exception: it
-  *throws*, because `clearOldData()` has already emptied the `rooms` table before `syncRooms` runs,
-  so swallowing that failure would silently wipe every room in the app.
-- A room found at **depth 1** (directly under root, bypassing the category layer) is recorded in
-  `unexpectedRooms` and dropped rather than written — writing it would give it `parent_id = rootId`,
-  indistinguishable from the category predicate above. No root child was class-tagged when this
-  shipped, so the case is theoretical — but it now fails loudly (a console warning) instead of
-  silently misdirecting `CreateRoomModal`.
-
-### Expect a standing baseline of warnings on every sync
-Two sources of noise are expected on **every** sync, not signs of new breakage:
-- *Calendrier scolaire*'s ~62 calendar-entry children each return 401 when the walk tries to list
-  their own children — they land in `readFailures`.
-- Some CIE course nodes sit exactly at the depth-4 cap and are recorded in `truncatedAt` rather than
-  descended into.
-
-Both are logged **grouped by parent**, via the exported `summarizeWalkNotes(notes, maxGroups?)` —
-e.g. `62 under "Calendrier scolaire" (62 total)` instead of 62 separate lines. A flat per-node list
-at that volume trains the reader to stop scanning it, which is exactly what a *new*, unexpected
-failure needs not to happen to it. `summarizeWalkNotes` is pure — it takes already-HTML-stripped
-`WalkNote[]`, since `room-tree.ts` has no `stripHtml` to call; `syncRooms` strips titles as it
-builds the input. The total count is always printed, capped group lines or not, so the summary can
-never read as complete when a group got collapsed.
-
-### Progress reporting
-The walk is strictly sequential and runs to roughly 77 `listChildren` calls on the first sync
-(vs. 5 under the old two-level walk). `syncRooms` wraps the injected `listChildren` in a closure
-that bumps a counter and updates `syncProgress.message` before delegating to `sendApiRequestList` —
-the same pattern `syncDistributionGroups` and `syncGroupMemberships` use for their own phases — so
-the Dashboard doesn't sit on one unchanging string for a long silent stretch. `room-tree.ts` itself
-gets no progress callback; the injected-IO seam already does that job.
+`syncGroupMemberships` reads one ACL per role group (~835 groups at the 2026-11-24 count), and
+it dominates sync time: each `/acl` read takes ~0.35 s, so the old sequential loop alone was
+~4–5 minutes. `computeGroupAssignments` in
+[group-membership.ts](src/main/services/group-membership.ts) now reads **8 at a time**
+(`DEFAULT_ACL_CONCURRENCY`; measured: 10 in parallel gave ~0.09 s/read effective, no errors)
+and assembles results in group order, so the output is identical to a sequential run.
+A transient failure (5xx / network / timeout) is retried up to 3 times with `backoffMs`
+backoff before the group is skipped and logged. This matters because a skipped group silently
+drops its assignments and shows them as false discrepancies. A 4xx is not retried.
 
 ## CIE Mode (S9)
 

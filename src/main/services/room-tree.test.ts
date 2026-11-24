@@ -182,7 +182,7 @@ describe('walkRoomTree', () => {
       ],
       FolderD3000000000001: [child('RoomD4000000000000001', roomTags('RoomD4000000000000001'))],
     });
-    const r = await walkRoomTree(ROOT, deps);
+    const r = await walkRoomTree(ROOT, deps, { maxDepth: 4 });
     expect(r.rooms.map((x) => [x.node.key, x.parentId, x.depth])).toEqual([
       ['RoomD3000000000000001', 'FolderD2000000000001', 3],
       ['RoomD4000000000000001', 'FolderD3000000000001', 4],
@@ -221,7 +221,7 @@ describe('walkRoomTree', () => {
       Unreadable0000000001: null,
       OkFolder000000000001: [child('RoomOk00000000000001', roomTags('RoomOk00000000000001'))],
     });
-    const r = await walkRoomTree(ROOT, deps);
+    const r = await walkRoomTree(ROOT, deps, { maxDepth: 4 });
     expect(r.readFailures).toEqual([
       { id: 'Unreadable0000000001', title: 'Locked Folder', depth: 2, parentId: CAT, parentTitle: CAT },
     ]);
@@ -250,7 +250,7 @@ describe('walkRoomTree', () => {
       [CAT]: [child('DeepCat00000000000001', ['hz-config-room-state'])],
       DeepCat00000000000001: [child('RoomDeep000000000001', roomTags('RoomDeep000000000001'))],
     });
-    const r = await walkRoomTree(ROOT, deps);
+    const r = await walkRoomTree(ROOT, deps, { maxDepth: 4 });
     expect(r.categories.map((c) => c.node.key)).toEqual([CAT]);
     expect(r.rooms[0].roomType).toBe('state');
   });
@@ -261,7 +261,7 @@ describe('walkRoomTree', () => {
       [CAT]: [child('LoopFolder0000000001')],
       LoopFolder0000000001: [child(CAT, catTags)],
     });
-    const r = await walkRoomTree(ROOT, deps);
+    const r = await walkRoomTree(ROOT, deps, { maxDepth: 4 });
     expect(deps.calls).toEqual([ROOT, CAT, 'LoopFolder0000000001']);
     expect(r.categories).toHaveLength(1);
   });
@@ -272,7 +272,7 @@ describe('walkRoomTree', () => {
       [CAT]: [child('RoomC000000000000001', roomTags('RoomC000000000000001')), child('FolderC00000000000001')],
       FolderC00000000000001: [],
     });
-    const r = await walkRoomTree(ROOT, deps);
+    const r = await walkRoomTree(ROOT, deps, { maxDepth: 4 });
     expect(r.calls).toBe(3);
     expect(deps.calls).toEqual([ROOT, CAT, 'FolderC00000000000001']);
   });
@@ -319,18 +319,22 @@ describe('walkRoomTree', () => {
     expect(r.rooms.map((x) => x.node.key)).toEqual(['RoomOk20000000000001']);
   });
 
-  it('defaults maxDepth to 4', async () => {
-    expect(DEFAULT_MAX_DEPTH).toBe(4);
+  it('defaults to category -> room: folders beside the rooms are noted, never opened', async () => {
+    expect(DEFAULT_MAX_DEPTH).toBe(2);
     const deps = fakeDeps({
-      [ROOT]: [child(CAT, catTags)],
-      [CAT]: [child('F2000000000000000001')],
-      F2000000000000000001: [child('F3000000000000000001')],
-      F3000000000000000001: [child('F4000000000000000001')],
-      F4000000000000000001: [child('RoomD5000000000000001', roomTags('RoomD5000000000000001'))],
+      [ROOT]: [child(CAT, catTags, 'Cours interentreprises')],
+      [CAT]: [
+        child('RoomFlat000000000001', roomTags('RoomFlat000000000001')),
+        child('Calendar000000000001', [], 'Calendrier scolaire'),
+        child('YearFolder0000000001', [], 'CIE 2025'),
+      ],
+      Calendar000000000001: [child('Holiday0000000000001')],
+      YearFolder0000000001: [child('RoomArch000000000001', roomTags('RoomArch000000000001'))],
     });
     const r = await walkRoomTree(ROOT, deps);
-    expect(r.rooms).toEqual([]);
-    expect(r.truncatedAt.map((t) => t.depth)).toEqual([4]);
+    expect(r.rooms.map((x) => x.node.key)).toEqual(['RoomFlat000000000001']);
+    expect(r.truncatedAt.map((t) => t.title)).toEqual(['Calendrier scolaire', 'CIE 2025']);
+    expect(deps.calls).toEqual([ROOT, CAT]);
   });
 });
 

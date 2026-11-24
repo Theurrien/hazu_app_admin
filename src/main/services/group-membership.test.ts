@@ -174,3 +174,68 @@ describe('computeGroupAssignments (CUI-C c fixture)', () => {
     expect(res.issues).toEqual([]);
   });
 });
+
+describe('computeGroupAssignments — parallel reads', () => {
+  const groups = Array.from({ length: 12 }, (_, i) => ({
+    groupId: `G${i}`, roomId: `R${i}`, role: 'student',
+  }));
+  const byEmail = new Map(groups.map((_, i) => [`p${i}@example.invalid`, `P${i}`]));
+  const aclFor = (id: string) => ({ data: [student(`U${id}`, `p${id.slice(1)}@example.invalid`)] });
+  const noSleep = async () => {};
+  const httpErr = (status: number) => Object.assign(new Error(`HTTP ${status}`), {
+    isAxiosError: true, response: { status },
+  });
+
+  it('keeps output in group order even when reads finish out of order', async () => {
+    const getAcl = (id: string) =>
+      new Promise<{ data: ReturnType<typeof student>[] }>((r) =>
+        setTimeout(() => r(aclFor(id)), (12 - Number(id.slice(1))) * 2));
+    const res = await computeGroupAssignments(groups, getAcl, byEmail, new Set(), new Map(), { concurrency: 5 });
+    expect(res.assignments.map((a) => a.roomId)).toEqual(groups.map((g) => g.roomId));
+  });
+
+  it('never has more than `concurrency` reads in flight', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const getAcl = async (id: string) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return aclFor(id);
+    };
+    await computeGroupAssignments(groups, getAcl, byEmail, new Set(), new Map(), { concurrency: 3 });
+    expect(peak).toBe(3);
+  });
+
+  it('retries a transient 5xx and keeps the group', async () => {
+    let calls = 0;
+    const getAcl = async (id: string) => {
+      if (id === 'G0' && calls++ < 2) throw httpErr(500);
+      return aclFor(id);
+    };
+    const res = await computeGroupAssignments(groups.slice(0, 1), getAcl, byEmail, new Set(), new Map(), { sleep: noSleep });
+    expect(calls).toBe(3);
+    expect(res.assignments).toHaveLength(1);
+  });
+
+  it('does not retry a 4xx, and skips that group', async () => {
+    let calls = 0;
+    const getAcl = async () => { calls++; throw httpErr(404); };
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await computeGroupAssignments(groups.slice(0, 1), getAcl, byEmail, new Set(), new Map(), { sleep: noSleep });
+    errSpy.mockRestore();
+    expect(calls).toBe(1);
+    expect(res.assignments).toEqual([]);
+  });
+
+  it('gives up after maxAttempts transient failures and skips the group', async () => {
+    let calls = 0;
+    const getAcl = async () => { calls++; throw Object.assign(new Error('timeout'), { isAxiosError: true, code: 'ECONNABORTED' }); };
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await computeGroupAssignments(groups.slice(0, 1), getAcl, byEmail, new Set(), new Map(), { sleep: noSleep, maxAttempts: 3 });
+    errSpy.mockRestore();
+    expect(calls).toBe(3);
+    expect(res.assignments).toEqual([]);
+  });
+});
