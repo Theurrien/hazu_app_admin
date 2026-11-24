@@ -576,14 +576,25 @@ export async function runRestore(input: RestoreInput, deps: ArchiveDeps): Promis
     for (const personId of members.personIds) {
       try {
         const live = await withRetry(deps, () => deps.read(personId));
-        if (!live || live.tags.includes(tag)) continue;
+        if (!live) {
+          unresolvedMembers++; // profile gone: listed, not guessed
+          continue;
+        }
+        if (live.tags.includes(tag)) continue;
         let callError = '';
         try {
           await withRetry(deps, () => deps.addTags(personId, [tag]));
         } catch (e) {
           callError = failureMessage(e); // a failed call may still have landed: the read decides
         }
-        if (await readUntil(deps, personId, n => !n || n.tags.includes(tag))) {
+        let gone = false;
+        const confirmed = await readUntil(deps, personId, n => {
+          if (!n) gone = true;
+          return !n || n.tags.includes(tag);
+        });
+        if (confirmed && gone) {
+          unresolvedMembers++; // profile vanished after the write: not an added tag
+        } else if (confirmed) {
           addedAny = true;
           const entry = addedTags.find(a => a.personId === personId);
           if (entry) entry.tags.push(tag);
@@ -615,8 +626,13 @@ export async function runRestore(input: RestoreInput, deps: ArchiveDeps): Promis
       note(step, failureMessage(e), [id]);
     }
   };
-  if (groupsFolder) await cleanup('groups-folder-remove', groupsFolder.id);
-  await cleanup('folder-remove', folderId);
+  if (failed) {
+    // The folder tags are the only record of classId / origin: keep them so a re-run can finish.
+    steps.push({ step: 'cleanup', status: 'skipped', detail: 'dossiers conservés pour reprise' });
+  } else {
+    if (groupsFolder) await cleanup('groups-folder-remove', groupsFolder.id);
+    await cleanup('folder-remove', folderId);
+  }
 
   return outcome();
 }

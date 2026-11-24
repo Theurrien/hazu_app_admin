@@ -539,13 +539,48 @@ describe('runRestore', () => {
     expect(out.addedTags.map(a => a.personId)).toEqual(['p2']);
   });
 
-  it('fails the tags step when an added tag does not show on re-read', async () => {
+  it('fails the tags step when an added tag does not show on re-read, keeps both folders, and a re-run finishes', async () => {
     const f = await archived();
+    const folderId = [...f.nodes.values()].find(n => n.tags.includes(ROOM_FOLDER_TAG))!.id;
+    const gfId = [...f.nodes.values()].find(n => n.tags.includes(GROUPS_FOLDER_TAG))!.id;
+    const realAdd = f.deps.addTags;
     f.deps.addTags = async () => {};
     const out = await runRestore(restoreInput(f), f.deps);
     expect(out.success).toBe(false);
     expect(out.steps.find(s => s.status === 'failed')!.step).toBe('tags');
     expect(out.remaining).toEqual(['p1', 'p2']);
+    expect(f.nodes.has(folderId)).toBe(true);
+    expect(f.nodes.has(gfId)).toBe(true);
+    expect(out.steps.find(s => s.step === 'cleanup')!.status).toBe('skipped');
+
+    f.deps.addTags = realAdd;
+    const again = await runRestore(restoreInput(f, { folderId }), f.deps);
+    expect(again.success).toBe(true);
+    expect(f.nodes.get('p1')!.tags).toContain('hz-config-class-cls1-student');
+    expect(f.nodes.has(folderId)).toBe(false);
+    expect(f.nodes.has(gfId)).toBe(false);
+  });
+
+  it('counts a member whose profile answers 404 as unresolved, not as added', async () => {
+    const f = await archived();
+    f.nodes.delete('p2');
+    const out = await runRestore(restoreInput(f), f.deps);
+    expect(out.success).toBe(true);
+    expect(out.unresolvedMembers).toBe(1);
+    expect(out.addedTags.map(a => a.personId)).toEqual(['p1']);
+  });
+
+  it('a profile that vanishes after addTags is unresolved and not recorded in addedTags', async () => {
+    const f = await archived();
+    const realAdd = f.deps.addTags;
+    f.deps.addTags = async (id, tags) => {
+      await realAdd(id, tags);
+      if (id === 'p2') f.nodes.delete('p2');
+    };
+    const out = await runRestore(restoreInput(f), f.deps);
+    expect(out.success).toBe(true);
+    expect(out.unresolvedMembers).toBe(1);
+    expect(out.addedTags.map(a => a.personId)).toEqual(['p1']);
   });
 
   it('fails the room step when the move reads back unchanged, and keeps the folder', async () => {
