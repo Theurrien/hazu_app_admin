@@ -153,6 +153,46 @@ describe('readStudent', () => {
     expect((await readStudent(deps, P)).failedParts).toEqual(['mpe']);
   });
   it('leaves failedParts empty on a clean read', async () => expect((await readStudent(fake(fullTree()).deps, P)).failedParts).toEqual([]));
+  it('uses the bare timeline pointer when a composite timeline tag comes first', async () => {
+    const { deps, calls } = fake(fullTree());
+    const s = await readStudent(deps, { ...P, tags: ['hz-config-skills-timeline-bad-enable-x1', ...P.tags] });
+    expect(s.timelineOk).toBe(true);
+    expect(s.facts).toHaveLength(1);
+    expect(calls).not.toContain('bad-enable-x1');
+  });
+  it('falls back to the hz-config-skills child when only composite timeline tags exist', async () => {
+    const t = fullTree();
+    t['prof-001'][4] = row('tl2', { tags: ['hz-config-skills'] });
+    t.tl2 = t.tl1;
+    const { deps, calls } = fake(t);
+    const s = await readStudent(deps, { personId: 'prof-001', tags: ['hz-config-skills-timeline-bad-enable-x1'] });
+    expect(s).toMatchObject({ timelineOk: true, failedParts: [] });
+    expect(s.facts).toHaveLength(1);
+    expect(calls).toContain('tl2');
+  });
+  it('skips a nested subtree that answers 4xx, keeping the kind and its other copies', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { deps } = fake(fullTree(), { import: http(401) });
+    const s = await readStudent(deps, P);
+    expect(s.failedParts).toEqual([]);
+    expect(s.mpe.copies.map(c => c.id)).toEqual(['m1']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+  it('still fails the kind on a 4xx at depth 0', async () => {
+    const { deps } = fake(fullTree(), { 'study-co': http(401) });
+    expect((await readStudent(deps, P)).failedParts).toEqual(['mpe']);
+  });
+  it('logs the depth cap once per apprentice, however many folders hit it', async () => {
+    const t = fullTree();
+    t['study-co'] = [row('d1'), row('e1')];
+    t.d1 = [row('d2')]; t.d2 = [row('d3')]; t.d3 = [row('d4')]; t.d4 = [row('x')];
+    t.e1 = [row('e2')]; t.e2 = [row('e3')]; t.e3 = [row('e4')]; t.e4 = [row('y')];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await readStudent(fake(t).deps, P);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
   it('does not read the ACL for a non-e-mail identity', async () => {
     const { deps } = fake(fullTree());
     const acl = vi.spyOn(deps, 'acl');

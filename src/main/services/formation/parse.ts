@@ -78,6 +78,18 @@ export function facetFrom(tags: string[], prefix: string): string | null {
   return t ? t.substring(prefix.length) : null;
 }
 
+// Source: enterprise_dashboard.html — pickIdTag
+// The first tag with `prefix` whose value is a bare id: non-empty, no '-'. A composite such as
+// `hz-config-skills-timeline-{id}-enable-{id}` is skipped; only composites → null.
+export function pickIdTag(tags: string[], prefix: string): string | null {
+  const t = (tags || []).find(x => {
+    if (!x.startsWith(prefix)) return false;
+    const value = x.slice(prefix.length);
+    return value.length > 0 && value.indexOf('-') === -1;
+  });
+  return t ? t.slice(prefix.length) : null;
+}
+
 // Source: enterprise_dashboard.html — extractHazuLinks
 // Every distinct hazu.swiss/{id} in a description (href or bare text), order-stable.
 export function extractHazuLinks(html: string): string[] {
@@ -180,6 +192,8 @@ export function splitStudyChildren(rows: Row[], kind: MandateKind): { copies: Co
   for (const r of rows) {
     if (r.type !== 'hazu') continue;
     if (normalizeTitle(r.title) === OVERVIEW_TITLE) continue;
+    // A room filed in a study place (e.g. a whole CIE course) holds course content, never copies.
+    if (r.tags.some(t => t.startsWith('hz-config-room-'))) continue;
     if (r.tags.includes(marker)) {
       copies.push({
         kind,

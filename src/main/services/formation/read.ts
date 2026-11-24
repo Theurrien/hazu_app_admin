@@ -5,7 +5,7 @@
 import type { Row, AssessmentFact, Copy, ReportFact, PlanFacts, Slot, StudentRaw, Reference } from '../../../shared/formation-types';
 import { isRetryableError, backoffMs } from '../role-write';
 import {
-  childrenOf, findChild, normalizeTitle, stripHtml, facetFrom, timelineFacts, professionCodeOf,
+  childrenOf, findChild, normalizeTitle, stripHtml, facetFrom, pickIdTag, timelineFacts, professionCodeOf,
   isArchiveFolder, catalogueSlot, splitStudyChildren, companyReports, cieReports, planFacts,
 } from './parse';
 
@@ -72,9 +72,11 @@ export async function listWithRetry(deps: ReadDeps, id: string, counters?: ReadC
 
 // Source: enterprise_dashboard.html — collectCatalogueSlots
 // One traversal collects both kinds; archive folders are skipped; a failing listing propagates.
-async function collectCatalogueSlots(deps: ReadDeps, id: string, profession: string, depth: number, counters?: ReadCounters): Promise<Slot[]> {
+async function collectCatalogueSlots(
+  deps: ReadDeps, id: string, profession: string, depth: number, counters: ReadCounters | undefined, notes: DescentNotes,
+): Promise<Slot[]> {
   if (depth > MAX_DEPTH) {
-    console.warn('[catalogue] depth cap (4 levels) under', id, '- deeper not collected');
+    notes.depthCaps += 1;
     return [];
   }
   const kids = await listWithRetry(deps, id, counters); // a failure stops the run: no rates without a full catalogue
@@ -86,7 +88,7 @@ async function collectCatalogueSlots(deps: ReadDeps, id: string, profession: str
     if (slot) here.push(slot);
     else descend.push(k.id);
   }
-  const nested = await Promise.all(descend.map(c => collectCatalogueSlots(deps, c, profession, depth + 1, counters)));
+  const nested = await Promise.all(descend.map(c => collectCatalogueSlots(deps, c, profession, depth + 1, counters, notes)));
   return here.concat(...nested);
 }
 
@@ -109,7 +111,9 @@ export async function readReference(deps: ReadDeps, configParentIds: string[], c
     .map(f => ({ folder: f, code: professionCodeOf(f) }))
     .filter((x): x is { folder: Row; code: string } => !!x.code);
 
-  const slotsByFolder = await runPool(folders, CATALOGUE_CONCURRENCY, x => collectCatalogueSlots(deps, x.folder.id, x.code, 0, counters));
+  const notes: DescentNotes = { depthCaps: 0 };
+  const slotsByFolder = await runPool(folders, CATALOGUE_CONCURRENCY, x => collectCatalogueSlots(deps, x.folder.id, x.code, 0, counters, notes));
+  if (notes.depthCaps) console.warn(`[catalogue] depth cap (4 levels) hit in ${notes.depthCaps} folder(s) - deeper not collected`);
 
   const catalogueIcons: Record<string, string> = {};
   for (const { folder, code } of folders) if (folder.icon) catalogueIcons[folder.icon] = code;
@@ -154,15 +158,35 @@ export function resolveSelfUid(userIdTag: string | null, acl: AclEntry[]): strin
   return hit?.authorId ?? null;
 }
 
+/** What one apprentice's mandate descents ran into; logged once per apprentice. */
+interface DescentNotes { depthCaps: number }
+
+const is4xx = (err: unknown): boolean => {
+  const s = (err as { response?: { status?: number } } | null)?.response?.status;
+  return s !== undefined && s >= 400 && s < 500;
+};
+
 // Source: enterprise_dashboard.html — collectMandates
-// Bounded descent (4 levels); a tagged hazu is a copy, an untagged one is descended. Throws on a failed listing.
-async function collectCopies(deps: ReadDeps, id: string, kind: 'mpe' | 'mpc', depth: number, counters: ReadCounters): Promise<Copy[]> {
+// Bounded descent (4 levels); a tagged hazu is a copy, an untagged one is descended.
+// The study place itself (depth 0) failing throws, as does a 5xx/network failure after retries.
+// A nested folder answering 4xx is not ours to read (e.g. shared course content): skipped, one warning.
+async function collectCopies(
+  deps: ReadDeps, id: string, kind: 'mpe' | 'mpc', depth: number, counters: ReadCounters, notes: DescentNotes,
+): Promise<Copy[]> {
   if (depth > MAX_DEPTH) {
-    console.warn('[formation] mandate descent hit depth cap (4 levels) under', id, '- deeper mandates not collected');
+    notes.depthCaps += 1;
     return [];
   }
-  const { copies, descend } = splitStudyChildren(await listWithRetry(deps, id, counters), kind);
-  const nested = await Promise.all(descend.map(c => collectCopies(deps, c, kind, depth + 1, counters)));
+  let rows: Row[];
+  try {
+    rows = await listWithRetry(deps, id, counters);
+  } catch (err) {
+    if (depth === 0 || !is4xx(err)) throw err;
+    console.warn(`[formation] ${kind} folder ${id} unreadable (${message(err)}) - subtree skipped`);
+    return [];
+  }
+  const { copies, descend } = splitStudyChildren(rows, kind);
+  const nested = await Promise.all(descend.map(c => collectCopies(deps, c, kind, depth + 1, counters, notes)));
   return copies.concat(...nested);
 }
 
@@ -198,7 +222,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
 
     // Timeline: the pointer tag first, else the child tagged hz-config-skills.
     try {
-      const timelineId = facetFrom(p.tags, TIMELINE_PREFIX) ?? kids.find(k => k.tags.includes('hz-config-skills'))?.id ?? null;
+      const timelineId = pickIdTag(p.tags, TIMELINE_PREFIX) ?? kids.find(k => k.tags.includes('hz-config-skills'))?.id ?? null;
       out.facts = timelineId ? timelineFacts(await listWithRetry(deps, timelineId, counters)) : [];
     } catch (e) {
       out.timelineOk = false;
@@ -206,11 +230,12 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
       fail(e, 'timeline');
     }
 
+    const notes: DescentNotes = { depthCaps: 0 };
     const mandates = async (tag: string, title: string, kind: 'mpe' | 'mpc') => {
       const place = findChild(kids, tag, title);
       if (!place) return;
       try {
-        const copies = await collectCopies(deps, place.id, kind, 0, counters);
+        const copies = await collectCopies(deps, place.id, kind, 0, counters, notes);
         out[kind] = { found: true, copies };
       } catch (e) {
         out[kind] = { found: true, copies: [] };
@@ -219,6 +244,9 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     };
     await mandates('hz-config-study-company', 'mandats entreprise', 'mpe');
     await mandates('hz-config-study-cie', 'mandats cie', 'mpc');
+    if (notes.depthCaps) {
+      console.warn(`[formation] ${p.personId}: mandate descent hit the depth cap (4 levels) in ${notes.depthCaps} folder(s) - deeper mandates not collected`);
+    }
 
     // Entreprise - Suivi: company reports and the plan records.
     const suiviCo = findChild(kids, 'hz-config-suivi-company', 'entreprise - suivi');

@@ -16,6 +16,7 @@ import {
   cieReports,
   planFacts,
   findChild,
+  pickIdTag,
 } from './parse';
 
 describe('normalizeRow', () => {
@@ -84,6 +85,21 @@ describe('splitStudyChildren', () => {
     expect(r.copies[0]).toMatchObject({ semester: 2, mandate: '03', level: 'cfc' });
     expect(r.descend).toEqual(['f1']);
   });
+  it('never descends into a room (a CIE course filed in the study place)', () => {
+    const room = row({ id: 'course', tags: ['hz-config-room-cie', 'hz-config-class-cls-001'] });
+    const r = splitStudyChildren([room, row({ id: 'f1' })], 'mpc');
+    expect(r.descend).toEqual(['f1']);
+    expect(r.copies).toEqual([]);
+  });
+});
+
+describe('pickIdTag', () => {
+  const P = 'hz-config-skills-timeline-';
+  it('skips a composite tag and takes the bare id after it', () =>
+    expect(pickIdTag([`${P}tl9-enable-x1`, `${P}tl1`], P)).toBe('tl1'));
+  it('returns null when only composites (or an empty value) carry the prefix', () =>
+    expect(pickIdTag([`${P}tl9-enable-x1`, P], P)).toBeNull());
+  it('returns null without the prefix', () => expect(pickIdTag(['other'], P)).toBeNull());
 });
 
 describe('isArchiveFolder', () => {
