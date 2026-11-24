@@ -62,3 +62,19 @@ maintainer's test teacher account (which keeps access to the class).
   and all companies and cantons are `private`) and is left unchanged by the archive.
 - No hide tag is needed. The class was moved back and matched its saved state exactly; the test
   folders were deleted.
+
+## Acceptance from the app (2026-11-24)
+
+Built app on a scratch copy of the userData, test class « Cui Test 2 » (no role groups), driven by
+the maintainer.
+- **Archive** (`success=true`): Archive Hazu created (`private`, `hz-config-archive`, under the
+  admin Hazu) → per-room folder « Cui Test 2 » (`unlisted`, the five record tags, HTML-free title)
+  → the class and « Groupes de partage » (`private`, empty). The class's ACL, tags and children
+  were unchanged; its local `rooms` row was removed; the one profile holding its class tag lost it.
+- **Restore** (`success=true`): the class is back under École professionnelle with the original
+  link, tags, ACL and children; both folders were removed (the Archive Hazu stays, empty).
+- **Expected loss:** the profile's `hz-config-class-{id}-student` tag was not re-added — the class
+  has no student group, so the tag mirrored no membership (orphan tag); restore re-adds tags only
+  from group members (design §7).
+- Not exercised live: groups moving (the class has none — covered by unit tests) and an
+  interrupted run (covered by unit tests).
