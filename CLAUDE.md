@@ -211,7 +211,8 @@ const result = await window.electronAPI.runSync();
 Raw-ish facts from the last formation sync; every figure is computed from them at query time, so a
 rule change needs no re-sync. See [Missions (formation overview)](#missions-formation-overview).
 - `formation_student` - One row per apprentice the sync tried to read: read status / error, `stale`,
-  identity tag and resolved `self_uid`, `plan_start_ms`, `failed_parts`, `skipped_subtrees`
+  identity tag and resolved `self_uid`, `plan_start_ms`, `failed_parts`, `skipped_subtrees`, and the
+  found bits `timeline_found` / `mpe_found` / `mpc_found` / `suivi_company_found` / `suivi_cie_found`
 - `formation_copy`, `formation_assessment`, `formation_report`, `formation_plan_retired` - Per
   apprentice: MPE/MPC copies, timeline facts (one per item × linked copy), company and CIE reports,
   retired plan slots
@@ -375,7 +376,7 @@ With `@tailwindcss/postcss` plugin (not direct tailwindcss).
 The Missions tab ([FormationPage.tsx](src/renderer/pages/FormationPage.tsx)) is a **read-only,
 school-wide overview** of every apprentice's practical mandates — **MPE** (company) and **MPC**
 (CIE) — and semester reports. It writes nothing to Hazu. Complete mode only (not one of the CIE-mode
-pages). Spec: [docs/specs/2026-11-24-missions-redesign-design.md](docs/specs/2026-11-24-missions-redesign-design.md);
+pages): the tab appears only after unlocking the header padlock. Spec: [docs/specs/2026-11-24-missions-redesign-design.md](docs/specs/2026-11-24-missions-redesign-design.md);
 data inventory beside it.
 
 ### How it is used
@@ -405,13 +406,15 @@ rates; it never recomputes a rate from a bar.
   level, start date, semesters, per-slot status, « en avance » copies, retired slots, report line.
 - [formation/aggregate.ts](src/main/services/formation/aggregate.ts) — `aggregateOverview`,
   `aggregateFormation`, the flags, and what a failed part removes from which rate.
-- [formation/rows.ts](src/main/services/formation/rows.ts) — `StudentRaw` ↔ table rows, and
-  `keepFailedParts`.
+- [formation/rows.ts](src/main/services/formation/rows.ts) — `StudentRaw` ↔ table rows,
+  `keepFailedParts`, and `planStudentWrite` (the per-apprentice write decision).
 - [formation-sync.service.ts](src/main/services/formation-sync.service.ts) — **the only IO layer**:
   starts the run, writes it, answers the queries. Tests for every pure core live beside it as
   `*.test.ts`; renderer display decisions in `components/formation/*-logic.ts`.
 - IPC: `FORMATION_SYNC_START`, `FORMATION_SYNC_STATUS`, `FORMATION_OVERVIEW`, `FORMATION_DETAIL`,
-  `FORMATION_STUDENT`. Types in [shared/formation-types.ts](src/shared/formation-types.ts).
+  `FORMATION_STUDENT`. Types in [shared/formation-types.ts](src/shared/formation-types.ts), including
+  `StudentModel` / `FormationStudent` (the renderer and preload import them from there, never from
+  `main/services`).
 
 ### Read flow (`runFormationSync`)
 1. **Reference, once per run** — the catalogue under `MPE_CATALOGUE_ROOT` (`eIWK3uyTqf910NF6Cg0a`):
@@ -423,8 +426,15 @@ rates; it never recomputes a rate from a bar.
    `hz-config-skills` child) → Mandats Entreprise → Mandats CIE → Entreprise - Suivi (company
    reports + plan) → CIE - Suivi (`rap_cie` copies) → the profile ACL, only when the identity tag
    holds an e-mail.
-   - Retry 3 attempts with `backoffMs`; transient = 5xx, 408, 429, network/timeout (60 s per read).
-     An empty listing is re-read once.
+   - Retry 3 attempts with `backoffMs`; transient = 5xx, 408, 429, network/timeout (60 s per read:
+     the `timeout: 60_000` of the checked list/ACL calls in
+     [hazu-api/api.ts](src/main/services/hazu-api/api.ts)). An empty listing is re-read once; a
+     **profile** listing still empty after that re-read fails the read (`ok: false`, « profil vide
+     après relecture ») — an empty list is never proof of absence, so the previous rows are kept.
+   - **Not found ≠ found-empty.** Each container records whether it was located —
+     `timelineFound`, `mpe.found`, `mpc.found`, `suiviCompanyFound`, `suiviCieFound` — and the
+     aggregate's `knownOf` reads that bit beside the failed part. A Suivi not found is unknown
+     (as the widget's `loadSuiviHazu` → null marks it unavailable), never « all reports missing ».
    - Mandate descent, 4 levels: a tagged hazu is a copy, an untagged hazu is descended, the planning
      overview is skipped by title, a child tagged `hz-config-room-*` (a CIE course filed in a study
      place) is never descended, and a nested folder answering **401/403/404** is skipped and counted
@@ -441,9 +451,12 @@ resolves. A run that rejects writes nothing (status `error`, previous data intac
 - **read failed, previous rows exist** → the rows are kept and marked `stale` with the error
   (« données anciennes »); never read OK → only the `formation_student` row records the failure;
 - **read OK but some parts failed** → `keepFailedParts`: each failed part keeps its previous rows
-  instead of being replaced by nothing (a transient timeline failure must not erase stored facts);
+  instead of being replaced by nothing (a transient timeline failure must not erase stored facts).
+  Those rows are kept for the next run, **not displayed**: the part is still flagged and shows
+  « inconnu », and it enters no rate;
 - otherwise → its rows are replaced.
 
+The decision per apprentice is `planStudentWrite` (pure, in rows.ts); `writeRun` only applies it.
 A status left at `syncing` by a crash is reset at startup. Every query rebuilds each stored
 apprentice's model with today's date, so semesters advance without a re-sync.
 
@@ -461,15 +474,18 @@ aggregation — so courses assessed « en bloc » show as not evaluated in the M
   copy or profile creation → 1 August of that school year). Before the start the current
   semester is 0 and nothing is expected. AFP 4 semesters, CFC 6.
 - **Reports** — per semester: published / draft / *missing* once the semester ended / *future*
-  before (the widget says « à faire » for both); the last semester is optional. Untagged reports
+  before (the widget says « à faire » for both); the last semester is optional. Report counts
+  (rates, `reportsDue`, by semester) take **ended semesters only**: a report published early in a
+  running semester counts once it ends. Untagged reports
   are counted, never placed. CIE reports: `rap_cie`, sent = `hz-config-report-sent`.
 - **Identity rule** — « self » means the timeline author equals the apprentice's account id.
   `hz-config-userid-{value}` holds a UID on some profiles and an e-mail on others: a UID is used as
   is, an e-mail is resolved through the profile's own ACL (`description` → `authorId`).
   **Unresolved → identity unknown**: the apprentice is left out of evaluation rates and flagged,
   never treated as « not self », which would turn self-assessments into « évalué par un tiers ».
-- **Unknown is not zero** — a failed or missing part takes the apprentice out of that part's rates
-  and adds a flag; an apprentice of another level than AFP/CFC is « autre niveau »; one whose
+- **Unknown is not zero** — a failed or not-found part takes the apprentice out of that part's rates
+  and adds a flag (« … illisible » / « … introuvable »; a timeline not found keeps its statuses, as
+  in the widget, but leaves evaluation rates); an apprentice of another level than AFP/CFC is « autre niveau »; one whose
   formation does not resolve is « à classer ». Nobody silently disappears from the counts.
 
 **Cross-checked 2026-11-24** (`output/formation-crosscheck.md`): the widget's own functions,
