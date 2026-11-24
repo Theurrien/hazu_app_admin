@@ -11,7 +11,15 @@ export const TYPE_ORDER: ArchiveRoomType[] = ['class', 'cie', 'enterprise', 'sta
 
 /** Room titles may carry HTML; strip it for display. */
 export function plainTitle(title: string): string {
-  return title.replace(/<[^>]*>/g, '').trim();
+  return title
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .trim();
 }
 
 function fold(s: string): string {

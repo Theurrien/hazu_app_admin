@@ -27,6 +27,19 @@ function ArchivePage() {
   const [error, setError] = useState<string | null>(null);
   const [archivePlan, setArchivePlan] = useState<ArchivePlan | null>(null);
   const [restorePlan, setRestorePlan] = useState<RestorePlan | null>(null);
+  const [planningId, setPlanningId] = useState<string | null>(null);
+  const planningRef = useRef<string | null>(null);
+
+  // Ids with an archive/restore task still waiting or running: their buttons stay disabled.
+  const pending = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of tasks) {
+      if (t.status !== 'queued' && t.status !== 'processing') continue;
+      if (t.type === 'archiveRoom') ids.add(t.roomId);
+      else if (t.type === 'restoreRoom') ids.add(t.folderId);
+    }
+    return ids;
+  }, [tasks]);
 
   const loadActive = useCallback(async () => {
     try {
@@ -86,19 +99,35 @@ function ArchivePage() {
   const shownArchived = useMemo(() => filterRooms(archived, types, query), [archived, types, query]);
 
   const askArchive = async (roomId: string) => {
+    planningRef.current = roomId;
+    setPlanningId(roomId);
+    setError(null);
     try {
-      setError(null);
-      setArchivePlan(await window.electronAPI.planArchive(roomId));
+      const plan = await window.electronAPI.planArchive(roomId);
+      if (planningRef.current === roomId) setArchivePlan(plan);
     } catch (e) {
-      setError(errMsg(e));
+      if (planningRef.current === roomId) setError(errMsg(e));
+    } finally {
+      if (planningRef.current === roomId) {
+        planningRef.current = null;
+        setPlanningId(null);
+      }
     }
   };
   const askRestore = async (folderId: string) => {
+    planningRef.current = folderId;
+    setPlanningId(folderId);
+    setError(null);
     try {
-      setError(null);
-      setRestorePlan(await window.electronAPI.planRestore(folderId));
+      const plan = await window.electronAPI.planRestore(folderId);
+      if (planningRef.current === folderId) setRestorePlan(plan);
     } catch (e) {
-      setError(errMsg(e));
+      if (planningRef.current === folderId) setError(errMsg(e));
+    } finally {
+      if (planningRef.current === folderId) {
+        planningRef.current = null;
+        setPlanningId(null);
+      }
     }
   };
 
@@ -141,12 +170,12 @@ function ArchivePage() {
               {r.blockedReason && <span className="text-xs text-amber-700 max-w-xs truncate" title={r.blockedReason}>{r.blockedReason}</span>}
               <button
                 onClick={() => askArchive(r.id)}
-                disabled={r.blockedReason !== null}
+                disabled={r.blockedReason !== null || pending.has(r.id) || planningId === r.id}
                 className={`px-3 py-1 rounded text-sm ${
-                  r.blockedReason !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-800 text-white hover:bg-gray-900'
+                  r.blockedReason !== null || pending.has(r.id) || planningId === r.id ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-800 text-white hover:bg-gray-900'
                 }`}
               >
-                Archiver
+                {pending.has(r.id) ? 'En file…' : planningId === r.id ? '…' : 'Archiver'}
               </button>
             </li>
           ))}
@@ -173,9 +202,14 @@ function ArchivePage() {
                 <span className="text-gray-500 w-24 text-right">{formatArchivedAt(r.archivedAt)}</span>
                 <button
                   onClick={() => askRestore(r.folderId)}
-                  className="px-3 py-1 rounded text-sm bg-blue-600 text-white hover:bg-blue-700"
+                  disabled={pending.has(r.folderId) || planningId === r.folderId}
+                  className={`px-3 py-1 rounded text-sm ${
+                    pending.has(r.folderId) || planningId === r.folderId
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
                 >
-                  Restaurer
+                  {pending.has(r.folderId) ? 'En file…' : planningId === r.folderId ? '…' : 'Restaurer'}
                 </button>
               </li>
             ))}
@@ -190,7 +224,7 @@ function ArchivePage() {
         plan={archivePlan}
         onClose={() => setArchivePlan(null)}
         onConfirm={() => {
-          if (archivePlan) addArchiveRoomTask({ roomId: archivePlan.roomId, roomTitle: plainTitle(archivePlan.title) });
+          if (archivePlan && !pending.has(archivePlan.roomId)) addArchiveRoomTask({ roomId: archivePlan.roomId, roomTitle: plainTitle(archivePlan.title) });
           setArchivePlan(null);
         }}
       />
@@ -198,7 +232,7 @@ function ArchivePage() {
         plan={restorePlan}
         onClose={() => setRestorePlan(null)}
         onConfirm={() => {
-          if (restorePlan) addRestoreRoomTask({ folderId: restorePlan.folderId, roomTitle: plainTitle(restorePlan.title) });
+          if (restorePlan && !pending.has(restorePlan.folderId)) addRestoreRoomTask({ folderId: restorePlan.folderId, roomTitle: plainTitle(restorePlan.title) });
           setRestorePlan(null);
         }}
       />

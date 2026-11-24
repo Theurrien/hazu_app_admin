@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterRooms, TYPE_LABEL, formatArchivedAt } from './archive-logic';
+import { filterRooms, TYPE_LABEL, formatArchivedAt, plainTitle } from './archive-logic';
 
 const rows = [
   { roomType: 'class' as const, title: 'École CUI 1' },
@@ -36,5 +36,23 @@ describe('TYPE_LABEL', () => {
 describe('formatArchivedAt', () => {
   it('formats dd.mm.yyyy', () => {
     expect(formatArchivedAt(new Date(2026, 10, 4, 12).getTime())).toBe('04.11.2026');
+  });
+});
+
+describe('plainTitle', () => {
+  it('strips tags and decodes entities', () => {
+    expect(plainTitle('<p>A &amp; B&nbsp;&lt;c&gt; &quot;d&quot; l&#39;e</p>')).toBe('A & B <c> "d" l\'e');
+  });
+  it('decodes &amp; last', () => {
+    expect(plainTitle('&amp;lt;')).toBe('&lt;');
+  });
+});
+
+describe('filterRooms with HTML titles', () => {
+  it('searches the plain text, not the markup', () => {
+    const r = [{ roomType: 'class' as const, title: '<b>École</b> A &amp; B' }];
+    expect(filterRooms(r, new Set(), 'ecole a & b')).toHaveLength(1);
+    expect(filterRooms(r, new Set(), 'strong')).toHaveLength(0);
+    expect(filterRooms(r, new Set(), '<b>')).toHaveLength(0);
   });
 });
