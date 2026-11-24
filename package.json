@@ -1,6 +1,6 @@
 {
   "name": "hazu-admin",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Hazu Platform Admin Tool",
   "main": "dist/main/index.js",
   "author": "Urs Chalupny",
