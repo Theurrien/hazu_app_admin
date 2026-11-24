@@ -6,7 +6,7 @@
 import type {
   Copy, LevelCode, MandateKind, ReportFact, ReportState, Slot, SlotResult, SlotStatus, StudentModel, StudentRaw, Reference,
 } from '../../../shared/formation-types';
-import { slotKey } from './parse';
+import { normalizeHex, slotKey } from './parse';
 
 export type { SlotStatus, SlotResult, StudentModel, FormationStudent, ReportState } from '../../../shared/formation-types';
 
@@ -212,7 +212,7 @@ export function buildStudentModel(
   todayMs: number,
 ): StudentModel {
   const formation = person.icon ? ref.professionsByIcon[person.icon] ?? null : null;
-  const levelTitle = person.color ? ref.levelsByColor[person.color.toLowerCase()] ?? null : null;
+  const levelTitle = person.color ? ref.levelsByColor[normalizeHex(person.color)] ?? null : null;
   const level: LevelCode | 'other' = levelCode(levelTitle) ?? 'other';
   const allCopies = [...raw.mpe.copies, ...raw.mpc.copies];
   const profession = resolveProfession(person.icon, allCopies, ref);

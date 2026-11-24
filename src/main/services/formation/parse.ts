@@ -62,6 +62,11 @@ export function stripHtml(s: string): string {
     .trim();
 }
 
+/** A colour as a lookup key: trimmed and lower-cased (the levels config and profiles differ in both). */
+export function normalizeHex(c: string): string {
+  return String(c).trim().toLowerCase();
+}
+
 // Source: enterprise_dashboard.html — normalizeTitle
 export function normalizeTitle(s: string): string {
   return stripHtml(s || '')

@@ -287,7 +287,7 @@ describe('readReference', () => {
       row('lev', { tags: ['hz-config-levels'] }),
     ],
     prof: [row('p1', { title: '<p>Cuisine</p>', icon: 'ic-cui', order: 2 }), row('p2', { title: 'Hotellerie', icon: 'ic-dhi', order: 1 })],
-    lev: [row('l1', { title: 'CFC', color: '#ABCDEF' })],
+    lev: [row('l1', { title: 'CFC', color: ' #ABCDEF ' })], // keys are trimmed and lower-cased
   });
   it('collects slots, skips archives and reads config from the first parent that has it', async () => {
     const { deps } = fake(tree());

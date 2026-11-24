@@ -6,7 +6,7 @@ import type { Row, AssessmentFact, Copy, ReportFact, PlanFacts, Slot, StudentRaw
 import { isRetryableError, backoffMs } from '../role-write';
 import {
   childrenOf, findStudyPlace, findSuiviCompany, normalizeTitle, stripHtml, facetFrom, pickIdTag, timelineFacts, professionCodeOf,
-  isArchiveFolder, catalogueSlot, splitStudyChildren, companyReports, cieReports, planFacts,
+  isArchiveFolder, catalogueSlot, splitStudyChildren, companyReports, cieReports, planFacts, normalizeHex,
 } from './parse';
 
 export type { StudentRaw, Reference } from '../../../shared/formation-types';
@@ -127,7 +127,7 @@ export async function readReference(deps: ReadDeps, configParentIds: string[], c
   });
   const levelsByColor: Record<string, string> = {};
   for (const it of await readConfigChildren(deps, configParentIds, 'hz-config-levels', counters)) {
-    if (it.color) levelsByColor[it.color.toLowerCase()] = stripHtml(it.title);
+    if (it.color) levelsByColor[normalizeHex(it.color)] = stripHtml(it.title);
   }
 
   return { slots: ([] as Slot[]).concat(...slotsByFolder), professionsByIcon, levelsByColor, catalogueIcons };

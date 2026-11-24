@@ -93,7 +93,7 @@ export interface StudentRaw {
   skippedSubtrees: number; // nested mandate folders skipped on 401/403/404 (their copies are not counted)
 }
 
-/** School-wide reference data: the catalogue and the config Hazus. Colour keys are lower-cased. */
+/** School-wide reference data: the catalogue and the config Hazus. Colour keys are trimmed and lower-cased (normalizeHex). */
 export interface Reference {
   slots: Slot[];
   professionsByIcon: Record<string, { title: string; order: number }>;

@@ -177,6 +177,10 @@ describe('buildStudentModel — formation, level, start', () => {
     expect(m.formationOrder).toBe(2);
   });
 
+  it('maps a colour with surrounding spaces (trimmed as well as lower-cased)', () => {
+    expect(buildStudentModel(raw(), { icon: 'icon-cui', color: ' #9AD9EA\n' }, REF, TODAY).level).toBe('afp');
+  });
+
   it('an unmapped colour is other with no mandates; an unmapped icon has no title', () => {
     const m = buildStudentModel(raw({ mpe: { found: true, copies: [copy('copy-101', 1, '01')] } }),
       { icon: 'icon-unknown', color: '#123456' }, REF, TODAY);

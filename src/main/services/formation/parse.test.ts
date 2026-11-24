@@ -4,6 +4,7 @@ import {
   normalizeRow,
   childrenOf,
   normalizeTitle,
+  normalizeHex,
   facetFrom,
   extractHazuLinks,
   parsePoints,
@@ -168,4 +169,8 @@ describe('findSuiviCompany', () => {
     expect(findSuiviCompany([row({ id: 'x', title: 'Entreprise - Suivi' }), row({ id: 'y', title: 'Entreprise - Suivi', icon: 'fa-info' })])?.id).toBe('y'));
   it('never takes an item, nor a title match without the fa-info icon', () =>
     expect(findSuiviCompany([row({ id: 'i', type: 'item', tags: [TAG] }), row({ id: 'x', title: 'Entreprise - Suivi' })])).toBeNull());
+});
+
+describe('normalizeHex', () => {
+  it('trims and lower-cases a colour', () => { expect(normalizeHex('  #9AD9EA\t')).toBe('#9ad9ea'); });
 });
