@@ -105,8 +105,11 @@ export type ReportState = 'published' | 'draft' | 'missing' | 'optional' | 'futu
 export interface Bar { tiers: number; auto: number; encours: number; manquant: number; }
 export interface Rates { importRate: number | null; evalRate: number | null; }
 export interface LevelAgg extends Rates { level: LevelCode | 'other'; students: number; bar: Bar | null; }
-/** One formation card. `key` is the profession icon. */
-export interface FormationAgg { key: string; title: string; icon: string; order: number; students: number; levels: LevelAgg[]; }
+/**
+ * One formation card. `key` is the profession icon. `hasCatalogue` is false when no apprentice of the
+ * formation resolves to an MPE catalogue profession (the card then shows counts, no bars or rates).
+ */
+export interface FormationAgg { key: string; title: string; icon: string; order: number; students: number; hasCatalogue: boolean; levels: LevelAgg[]; }
 export interface SchoolOverview extends Rates {
   students: number;
   reportsPublishedRate: number | null;

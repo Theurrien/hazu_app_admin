@@ -90,6 +90,17 @@ describe('aggregateOverview', () => {
       .toEqual(['Cuisine', 'Hôtellerie-Intendance', 'Restauration']);
   });
 
+  it('hasCatalogue: true when any apprentice of the formation resolves to a catalogue profession', () => {
+    const c1 = model({ profession: null });
+    const c2 = model({ profession: 'cui' });
+    const r1 = model({ formationTitle: 'Restauration', formationOrder: 3, profession: null });
+    const r2 = model({ formationTitle: 'Restauration', formationOrder: 3, profession: null, level: 'afp' });
+    const ms = [c1, c2, r1, r2];
+    const ctx = [ctxOf(c1), ctxOf(c2), ctxOf(r1, { icon: RES }), ctxOf(r2, { icon: RES })];
+    const byTitle = Object.fromEntries(aggregateOverview(ms, ctx, [], null).formations.map(f => [f.title, f.hasCatalogue]));
+    expect(byTitle).toEqual({ Cuisine: true, Restauration: false });
+  });
+
   it('identity unknown: counts in the import rate, not in the evaluation rate', () => {
     const a = model({ mpe: HALF });
     const b = model({ identityKnown: false, mpe: [res('tiers', 1, '01'), res('tiers', 1, '02')] });

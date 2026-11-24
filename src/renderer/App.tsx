@@ -8,6 +8,7 @@ import MatrixPage from './pages/MatrixPage';
 import BulkImportPage from './pages/BulkImportPage';
 import SettingsPage from './pages/SettingsPage';
 import DiscrepanciesPage from './pages/DiscrepanciesPage';
+import FormationPage from './pages/FormationPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { AppModeProvider, useAppMode } from './contexts/AppModeContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
@@ -89,8 +90,7 @@ function AppShell() {
       case 'import':
         return <BulkImportPage />;
       case 'missions':
-        // Placeholder until the formation overview page lands (Task 7).
-        return <div className="p-6 text-gray-500">Missions — vue des formations à venir.</div>;
+        return <FormationPage />;
       case 'discrepancies':
         return <DiscrepanciesPage />;
       case 'settings':

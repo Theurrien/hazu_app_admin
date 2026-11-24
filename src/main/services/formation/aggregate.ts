@@ -156,7 +156,9 @@ export function aggregateOverview(
       const t = tallyOf(at);
       levels.push({ level, students: at.length, bar: t.bar, ...tallyRates(t) });
     }
-    return { key, title: ms[0].formationTitle!, icon: key, order: ms[0].formationOrder, students: ms.length, levels };
+    // A formation with no MPE catalogue (no apprentice resolves to a catalogue profession) has no bars.
+    const hasCatalogue = ms.some(m => m.profession !== null);
+    return { key, title: ms[0].formationTitle!, icon: key, order: ms[0].formationOrder, students: ms.length, hasCatalogue, levels };
   }).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
 
   const classified = [...byKey.values()].flat();
