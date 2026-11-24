@@ -322,4 +322,50 @@ describe('runArchive', () => {
     const out = await runArchive(input(), f.deps);
     expect(out.success).toBe(true);
   });
+
+  it('a create that commits but answers 503 leaves exactly one Archive Hazu and one folder', async () => {
+    const f = createFakeHazu(school());
+    const real = f.deps.create;
+    const failedOnce = new Set<string>();
+    f.deps.create = async (parentId, title, tags, p) => {
+      const id = await real(parentId, title, tags, p);
+      if (!failedOnce.has(tags[0])) {
+        failedOnce.add(tags[0]);
+        throw { status: 503, networkOrTimeout: false, message: 'indispo' } as ApiFailure;
+      }
+      return id;
+    };
+    const out = await runArchive(input(), f.deps);
+    expect(out.success).toBe(true);
+    const all = [...f.nodes.values()];
+    expect(all.filter(n => n.tags.includes(ARCHIVE_ROOT_TAG))).toHaveLength(1);
+    expect(all.filter(n => n.tags.includes(ROOM_FOLDER_TAG))).toHaveLength(1);
+    expect(all.filter(n => n.tags.includes(GROUPS_FOLDER_TAG))).toHaveLength(1);
+    expect(f.count('create')).toBe(3);
+  });
+
+  it('uses the folder the room already sits in, even when another folder carries the class tag', async () => {
+    const f = createFakeHazu(school());
+    await runArchive(input(), f.deps);
+    const folder = [...f.nodes.values()].find(n => n.tags.includes(ROOM_FOLDER_TAG))!;
+    // a stray second folder with the same class tag, listed first
+    f.nodes.set('stray', { id: 'stray', parentId: folder.parentId, title: 's', tags: [ROOM_FOLDER_TAG, 'hz-config-archive-class-cls1'] });
+    const out = await runArchive(input(), f.deps);
+    expect(out.success).toBe(true);
+    expect(out.folderId).toBe(folder.id);
+  });
+
+  it('strips HTML from the per-room folder title', async () => {
+    const f = createFakeHazu(school());
+    await runArchive(input({ room: { id: 'room1', classId: 'cls1', title: '<p>Cui&nbsp;Test <b>2</b> &amp; co</p>', roomType: 'class' } }), f.deps);
+    const folder = [...f.nodes.values()].find(n => n.tags.includes(ROOM_FOLDER_TAG))!;
+    expect(folder.title).toBe('Cui Test 2 & co');
+  });
+
+  it('falls back to the class id when the stripped title is empty', async () => {
+    const f = createFakeHazu(school());
+    await runArchive(input({ room: { id: 'room1', classId: 'cls1', title: '<p> </p>', roomType: 'class' } }), f.deps);
+    const folder = [...f.nodes.values()].find(n => n.tags.includes(ROOM_FOLDER_TAG))!;
+    expect(folder.title).toBe('cls1');
+  });
 });

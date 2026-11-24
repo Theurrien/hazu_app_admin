@@ -175,6 +175,48 @@ async function moveVerified(
   return 'moved';
 }
 
+
+/** Strip tags, decode common entities, collapse whitespace. */
+export function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Create a child once. A failure status says nothing about whether the write committed, so after a
+ * retryable failure the parent is re-listed and a child carrying the identifying tag is adopted
+ * before anything is resent.
+ */
+async function createOnce(
+  deps: ArchiveDeps,
+  parentId: string,
+  title: string,
+  tags: string[],
+  privacy: 'private' | 'unlisted',
+  identifyingTag: string,
+): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await deps.create(parentId, title, tags, privacy);
+    } catch (e) {
+      const f = e as Partial<ApiFailure>;
+      if (!isRetryableError(f?.status, f?.networkOrTimeout === true) || attempt + 1 >= MAX_ATTEMPTS) throw e;
+      await deps.sleep(backoffMs(attempt));
+      const children = await withRetry(deps, () => deps.list(parentId));
+      const landed = children.find(c => c.tags.includes(identifyingTag));
+      if (landed) return landed.id;
+    }
+  }
+}
+
 export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promise<ArchiveOutcome> {
   const { room, roles } = input;
   const steps: StepResult[] = [];
@@ -221,8 +263,8 @@ export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promis
       archiveId = existing.id;
       steps.push({ step: 'archive-root', status: 'skipped' });
     } else {
-      archiveId = await withRetry(deps, () =>
-        deps.create(input.adminId, ARCHIVE_ROOT_TITLE, [ARCHIVE_ROOT_TAG], ARCHIVE_ROOT_PRIVACY),
+      archiveId = await createOnce(
+        deps, input.adminId, ARCHIVE_ROOT_TITLE, [ARCHIVE_ROOT_TAG], ARCHIVE_ROOT_PRIVACY, ARCHIVE_ROOT_TAG,
       );
       steps.push({ step: 'archive-root', status: 'done' });
     }
@@ -232,16 +274,21 @@ export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promis
 
   let groupsFolderId: string;
   try {
-    const archived = await withRetry(deps, () => deps.list(archiveId));
-    const folder = archived.find(c => c.tags.includes(`${CLASS_PREFIX}${room.classId}`));
-    if (folder) {
-      folderId = folder.id;
+    const classTag = `${CLASS_PREFIX}${room.classId}`;
+    if (roomAlreadyArchived && folderId) {
+      // The room sits in this folder: it is THE folder for the remaining steps.
       steps.push({ step: 'room-folder', status: 'skipped' });
     } else {
-      folderId = await withRetry(deps, () =>
-        deps.create(
+      const archived = await withRetry(deps, () => deps.list(archiveId));
+      const folder = archived.find(c => c.tags.includes(classTag));
+      if (folder) {
+        folderId = folder.id;
+        steps.push({ step: 'room-folder', status: 'skipped' });
+      } else {
+        folderId = await createOnce(
+          deps,
           archiveId,
-          room.title,
+          stripHtml(room.title) || room.classId,
           buildRecordTags({
             classId: room.classId,
             fromParentId: input.expectedParentId,
@@ -249,14 +296,15 @@ export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promis
             archivedAt: input.now,
           }),
           ROOM_FOLDER_PRIVACY,
-        ),
-      );
-      steps.push({ step: 'room-folder', status: 'done' });
+          classTag,
+        );
+        steps.push({ step: 'room-folder', status: 'done' });
+      }
     }
   } catch (e) {
     return fail('room-folder', failureMessage(e), []);
   }
-  const roomFolderId = folderId;
+  const roomFolderId = folderId!;
 
   try {
     const inside = await withRetry(deps, () => deps.list(roomFolderId));
@@ -265,8 +313,8 @@ export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promis
       groupsFolderId = gf.id;
       steps.push({ step: 'groups-folder', status: 'skipped' });
     } else {
-      groupsFolderId = await withRetry(deps, () =>
-        deps.create(roomFolderId, GROUPS_FOLDER_TITLE, [GROUPS_FOLDER_TAG], GROUPS_FOLDER_PRIVACY),
+      groupsFolderId = await createOnce(
+        deps, roomFolderId, GROUPS_FOLDER_TITLE, [GROUPS_FOLDER_TAG], GROUPS_FOLDER_PRIVACY, GROUPS_FOLDER_TAG,
       );
       steps.push({ step: 'groups-folder', status: 'done' });
     }
