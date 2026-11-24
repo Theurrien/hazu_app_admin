@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { RoomType } from '../../shared/types';
 import { FileUploader } from '../components/bulk-import/FileUploader';
 import { DataPreviewTable } from '../components/bulk-import/DataPreviewTable';
@@ -55,7 +55,7 @@ const WORKFLOW_LABELS: Record<Workflow, string> = {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function BulkImportPage() {
-  const { addCreateRoomTask, addCreatePersonTask, addRoleUpdateTask } = useTaskQueue();
+  const { tasks, addCreateRoomTask, addCreatePersonTask, addRoleUpdateTask } = useTaskQueue();
   const { mode } = useAppMode();
   const restricted = isRestricted(mode);
 
@@ -161,6 +161,40 @@ function BulkImportPage() {
     };
     loadData();
   }, []);
+
+  // Reload local data once the Task Queue has finished a batch, so rooms and persons created
+  // here can be matched in the Assignment tab, and freshly assigned rows are flagged as
+  // existing — without leaving the page or running a full sync. The main process has already
+  // written each successful task to SQLite; this only re-reads it. Only what a batch could
+  // have changed is reloaded, because reloading persons or rooms clears manual matches.
+  const handledTaskIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    // Tasks that settled before this page mounted are already reflected in the initial load.
+    if (handledTaskIds.current === null) {
+      handledTaskIds.current = new Set(tasks.filter((t) => t.status === 'success').map((t) => t.id));
+    }
+    const handled = handledTaskIds.current;
+    // A retried task runs again under the same id; forget it so its new success counts.
+    tasks.forEach((t) => {
+      if (t.status === 'queued' || t.status === 'processing') handled.delete(t.id);
+    });
+    if (tasks.some((t) => t.status === 'queued' || t.status === 'processing')) return;
+
+    const fresh = tasks.filter((t) => t.status === 'success' && !handled.has(t.id));
+    if (fresh.length === 0) return;
+    fresh.forEach((t) => handled.add(t.id));
+
+    const types = new Set(fresh.map((t) => t.type));
+    if (types.has('createRoom')) {
+      window.electronAPI.getRooms().then(setRooms);
+    }
+    if (types.has('createPerson')) {
+      window.electronAPI.getPersons().then(setPersons);
+    }
+    if (types.has('roleUpdate') || types.has('createPerson')) {
+      window.electronAPI.getAllAssignments().then(setExistingAssignments);
+    }
+  }, [tasks]);
 
   // Fetch templates when room type changes (Room workflow)
   useEffect(() => {

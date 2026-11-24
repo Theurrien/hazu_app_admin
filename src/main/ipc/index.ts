@@ -13,6 +13,7 @@ import { planOrphanRemoval, revokeOrphanAccess } from '../services/orphan-remova
 import { planTagPrune, pruneDeadTags } from '../services/tag-prune.service';
 import { PruneItem } from '../services/tag-prune';
 import { validateApiConfig } from '../services/config-probe.service';
+import { completeAndStoreNewRoom } from '../services/room-completion.service';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -816,9 +817,15 @@ export function registerIpcHandlers(): void {
           ]
         );
 
+        // Give the new row its class id and role groups now, instead of at the next sync, so
+        // assignments to this room work and are verified against group truth right away.
+        // Never throws; a gap is logged and the next sync fills it.
+        const completion = await completeAndStoreNewRoom(profileSnapshot.key, profileSnapshot.tags || []);
+
         // Build room object to return
         const room = {
           id: profileSnapshot.key,
+          class_id: completion.classId,
           title: profileSnapshot.title || title,
           description: profileSnapshot.description || null,
           color: profileSnapshot.color || null,

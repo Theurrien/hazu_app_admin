@@ -103,7 +103,9 @@ hazu-admin/
 │   │       ├── orphan-removal.service.ts
 │   │       ├── tag-prune.ts            # S7 — delete dead breadcrumb tags (404-only)
 │   │       ├── tag-prune.service.ts
-│   │       └── room-tree.ts            # S8 — category → room walk (flat)
+│   │       ├── room-tree.ts            # S8 — category → room walk (flat)
+│   │       ├── room-completion.ts      # class id + role groups for a new room
+│   │       └── room-completion.service.ts
 │   │
 │   ├── renderer/               # React Frontend (Vite)
 │   │   ├── App.tsx            # Main app with routing
@@ -460,6 +462,27 @@ Assignment batch.
 ### Prerequisites
 - Run the main sync first (Dashboard > Sync). Persons, rooms, roles, and `admin_id` all come from
   local SQLite — Assignment/Verify only match against already-synced data.
+
+### Working with results without a re-sync
+Every write updates local SQLite itself, so a batch's results are usable straight away:
+
+- **The page reloads after each batch.** When the Task Queue drains, `BulkImportPage` re-reads
+  what the finished tasks could have changed: rooms after `createRoom`, persons after
+  `createPerson`, existing assignments after `roleUpdate`/`createPerson`. Rooms and persons
+  created in one tab can be matched in the Assignment tab right away. Only those lists are
+  reloaded, because reloading persons or rooms clears the manual matches.
+- **A new room is completed at creation.** After the create-group webhook returns,
+  `completeAndStoreNewRoom` ([room-completion.service.ts](src/main/services/room-completion.service.ts),
+  pure core [room-completion.ts](src/main/services/room-completion.ts)) sets the room's
+  `class_id` (from the webhook snapshot's tags, or one read of the room) and writes its role
+  groups to `distribution_groups`. It lists the sharing container (its id is stashed as
+  `sharing_container_id` by the sync) up to 3 times, 1 s apart, until one group per synced role
+  is found. Without those groups, S4 could not verify an assignment to the new room and fell
+  back to trusting the status code. It never fails the creation: a gap is logged as
+  `[room-completion] room=… classId=… groups=n/5 note=…` and the next sync fills it.
+  `parseShareTag` lives in room-completion.ts and is shared with the sync.
+- **Not yet covered:** a person created between syncs keeps a minimal `persons` row (no tags,
+  icon, or colour) until the next sync.
 
 ## Reliable Role Writes (S4)
 
@@ -834,9 +857,9 @@ typo in a course title and undo rooms created by mistake. They are gated per col
   (including one created moments ago and not yet synced). Courses filed into a year folder are
   the archive, and their parent is that folder, which has no row of its own.
 
-The test does **not** use `class_id`: a room created through Room Creation is inserted locally
-without one until the next sync, so a `class_id` test would hide delete on exactly the rooms it
-exists for. Complete mode is unchanged — both actions on every column.
+The test does **not** use `class_id`: a new room normally gets its class id at creation
+(room-completion), but not when Hazu's lookup fails, and a `class_id` test would then hide delete
+on exactly the rooms it exists for. Complete mode is unchanged — both actions on every column.
 
 The **Dashboard stays visible** in CIE mode. Matrix and Bulk Import render entirely from local
 SQLite, and the Dashboard's Sync button is the app's only trigger — hiding it would have meant
