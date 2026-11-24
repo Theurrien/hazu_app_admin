@@ -68,3 +68,28 @@ export interface PlanFacts {
   startMs: number | null;
   retiredSlots: string[]; // slot key "cfc-3-12"
 }
+
+/** Everything read for one apprentice. Failures after the profile listing are data, not throws. */
+export interface StudentRaw {
+  personId: string;
+  ok: boolean; // false only when the profile listing itself failed
+  error: string | null; // first failure message (profile listing, or a later part that failed)
+  profileCreated: number | null;
+  userIdTag: string | null;
+  selfUid: string | null;
+  timelineOk: boolean;
+  facts: AssessmentFact[];
+  mpe: { found: boolean; copies: Copy[] };
+  mpc: { found: boolean; copies: Copy[] };
+  reports: ReportFact[];
+  plan: PlanFacts;
+  emptyListings: number; // listings still empty after one re-read, during this apprentice's read
+}
+
+/** School-wide reference data: the catalogue and the config Hazus. Colour keys are lower-cased. */
+export interface Reference {
+  slots: Slot[];
+  professionsByIcon: Record<string, { title: string; order: number }>;
+  levelsByColor: Record<string, string>;
+  catalogueIcons: Record<string, string>; // profession folder icon -> profession code
+}
