@@ -5,7 +5,7 @@
 // every write is verified by a read-back. A stopped run is finished by running it again.
 
 import { isRetryableError, backoffMs } from './role-write';
-import type { ArchiveOutcome, ArchiveRoomType, StepResult } from '../../shared/archive-types';
+import type { ArchivedRoom, ArchiveOutcome, ArchiveRoomType, RestoreOutcome, StepResult } from '../../shared/archive-types';
 
 export interface HazuNode {
   id: string;
@@ -30,6 +30,8 @@ export interface ArchiveDeps {
   move(id: string, targetId: string): Promise<void>;
   addTags(id: string, tags: string[]): Promise<void>;
   removeTags(id: string, tags: string[]): Promise<void>;
+  /** Used only by restore, on a folder a live listing just showed empty. */
+  remove(id: string): Promise<void>;
   sleep(ms: number): Promise<void>;
 }
 
@@ -402,4 +404,219 @@ export async function runArchive(input: ArchiveInput, deps: ArchiveDeps): Promis
   steps.push({ step: 'tags', status: removedAny ? 'done' : 'skipped' });
 
   return { success: true, steps, remaining: [], folderId, removedTags };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Restore
+
+export interface RestoreInput {
+  folderId: string;
+  adminId: string;
+  sharingContainerId: string;
+  roles: string[];
+  /** The service resolves a group's ACL to profiles; members without a profile are only counted. */
+  membersOf(groupId: string): Promise<{ personIds: string[]; unresolved: number }>;
+}
+
+/** The list row of one archived room; null when the folder's record is incomplete. */
+export function archivedEntry(folder: HazuNode, children: HazuNode[]): ArchivedRoom | null {
+  const rec = parseRecordTags(folder.tags);
+  if (!rec) return null;
+  const room = children.find(c => c.tags.includes(`hz-config-class-${rec.classId}`));
+  return {
+    folderId: folder.id,
+    roomId: room ? room.id : null,
+    title: folder.title,
+    classId: rec.classId,
+    roomType: rec.roomType,
+    fromParentId: rec.fromParentId,
+    archivedAt: rec.archivedAt,
+  };
+}
+
+/** Remove an id a live listing just showed empty; the read-back decides. */
+async function removeEmpty(deps: ArchiveDeps, id: string): Promise<void> {
+  try {
+    await withRetry(deps, () => deps.remove(id));
+  } catch (e) {
+    // a failed call may still have landed: the read decides
+    if (await readUntil(deps, id, n => !n)) return;
+    throw e;
+  }
+  if (!(await readUntil(deps, id, n => !n))) {
+    throw { networkOrTimeout: false, message: `suppression non confirmée pour ${id}` } as ApiFailure;
+  }
+}
+
+export async function runRestore(input: RestoreInput, deps: ArchiveDeps): Promise<RestoreOutcome> {
+  const { folderId, roles } = input;
+  const steps: StepResult[] = [];
+  const addedTags: Array<{ personId: string; tags: string[] }> = [];
+  let unresolvedMembers = 0;
+  let roomId: string | undefined;
+  let failed = false;
+  const remaining: string[] = [];
+  let firstError: string | undefined;
+
+  const outcome = (): RestoreOutcome => ({
+    success: !failed, steps, remaining, error: firstError, addedTags, unresolvedMembers, roomId,
+  });
+  const stop = (step: string, detail: string, rest: string[] = []): RestoreOutcome => {
+    steps.push({ step, status: 'failed', detail });
+    failed = true;
+    firstError = detail;
+    remaining.push(...rest);
+    return outcome();
+  };
+  const note = (step: string, detail: string, rest: string[]): void => {
+    steps.push({ step, status: 'failed', detail });
+    failed = true;
+    firstError ??= detail;
+    remaining.push(...rest);
+  };
+
+  // 1. The folder: a per-room folder that sits in the Archive Hazu, with a complete record.
+  let classId: string;
+  let fromParentId: string;
+  try {
+    const folder = await withRetry(deps, () => deps.read(folderId));
+    const adminChildren = await withRetry(deps, () => deps.list(input.adminId));
+    const archive = adminChildren.find(c => c.tags.includes(ARCHIVE_ROOT_TAG));
+    if (!folder || !folder.tags.includes(ROOM_FOLDER_TAG) || !archive || folder.parentId !== archive.id) {
+      return stop('folder-read', "dossier d'archive introuvable", [folderId]);
+    }
+    const rec = parseRecordTags(folder.tags);
+    if (!rec) return stop('folder-read', "dossier d'archive incomplet", [folderId]);
+    classId = rec.classId;
+    fromParentId = rec.fromParentId;
+    steps.push({ step: 'folder-read', status: 'done' });
+  } catch (e) {
+    return stop('folder-read', failureMessage(e), [folderId]);
+  }
+
+  // 2. The origin must still exist: no guessing a category.
+  try {
+    const origin = await withRetry(deps, () => deps.read(fromParentId));
+    if (!origin) return stop('origin', "catégorie d'origine introuvable", [fromParentId]);
+    steps.push({ step: 'origin', status: 'done' });
+  } catch (e) {
+    return stop('origin', failureMessage(e), [fromParentId]);
+  }
+
+  const classTag = `hz-config-class-${classId}`;
+  let inside: HazuNode[];
+  try {
+    inside = await withRetry(deps, () => deps.list(folderId));
+  } catch (e) {
+    return stop('folder-read', failureMessage(e), [folderId]);
+  }
+  const groupsFolder = inside.find(c => c.tags.includes(GROUPS_FOLDER_TAG));
+
+  // 3. The room back under its origin (or already there).
+  try {
+    const roomNode = inside.find(c => c.tags.includes(classTag));
+    if (roomNode) {
+      roomId = roomNode.id;
+      const r = await moveVerified(deps, roomNode, fromParentId);
+      steps.push({ step: 'room', status: r === 'moved' ? 'done' : 'skipped' });
+    } else {
+      const atOrigin = await withRetry(deps, () => deps.list(fromParentId));
+      const there = atOrigin.find(c => c.tags.includes(classTag));
+      if (!there) return stop('room', 'salle introuvable', [folderId]);
+      roomId = there.id;
+      steps.push({ step: 'room', status: 'skipped' });
+    }
+  } catch (e) {
+    return stop('room', failureMessage(e), roomId ? [roomId] : [folderId]);
+  }
+
+  // 4. The role groups back to the sharing container; groups already there are kept for the tags.
+  const groups: Array<{ id: string; role: string }> = [];
+  try {
+    const archivedGroups = groupsFolder ? await withRetry(deps, () => deps.list(groupsFolder.id)) : [];
+    const container = await withRetry(deps, () => deps.list(input.sharingContainerId));
+    const toMove = groupsOfClass(archivedGroups, classId, roles);
+    const live = groupsOfClass(container, classId, roles);
+    const nodes = new Map(archivedGroups.map(g => [g.id, g]));
+    let moved = 0;
+    const left: string[] = [];
+    let lastError = '';
+    for (const g of toMove) {
+      try {
+        const r = await moveVerified(deps, nodes.get(g.id)!, input.sharingContainerId);
+        if (r === 'moved') moved++;
+        groups.push(g);
+      } catch (e) {
+        left.push(g.id);
+        lastError = failureMessage(e);
+      }
+    }
+    for (const g of live) if (!groups.some(x => x.id === g.id)) groups.push(g);
+    if (left.length) note('groups', lastError, left);
+    else steps.push({ step: 'groups', status: moved > 0 ? 'done' : 'skipped', detail: `${moved}/${toMove.length}` });
+  } catch (e) {
+    note('groups', failureMessage(e), []);
+  }
+
+  // 5. Add the tag back for every current member; the profile read decides.
+  const untagged: string[] = [];
+  let tagError = '';
+  let addedAny = false;
+  for (const g of groups) {
+    const tag = `${classTag}-${g.role}`;
+    let members: { personIds: string[]; unresolved: number };
+    try {
+      members = await withRetry(deps, () => input.membersOf(g.id));
+    } catch (e) {
+      untagged.push(g.id);
+      tagError = failureMessage(e);
+      continue;
+    }
+    unresolvedMembers += members.unresolved;
+    for (const personId of members.personIds) {
+      try {
+        const live = await withRetry(deps, () => deps.read(personId));
+        if (!live || live.tags.includes(tag)) continue;
+        let callError = '';
+        try {
+          await withRetry(deps, () => deps.addTags(personId, [tag]));
+        } catch (e) {
+          callError = failureMessage(e); // a failed call may still have landed: the read decides
+        }
+        if (await readUntil(deps, personId, n => !n || n.tags.includes(tag))) {
+          addedAny = true;
+          const entry = addedTags.find(a => a.personId === personId);
+          if (entry) entry.tags.push(tag);
+          else addedTags.push({ personId, tags: [tag] });
+        } else {
+          untagged.push(personId);
+          tagError = callError || 'étiquette absente après relecture';
+        }
+      } catch (e) {
+        untagged.push(personId);
+        tagError = failureMessage(e);
+      }
+    }
+  }
+  if (untagged.length) note('tags', tagError, [...new Set(untagged)]);
+  else steps.push({ step: 'tags', status: addedAny ? 'done' : 'skipped' });
+
+  // 6. Remove the folders, but only what a live listing shows empty.
+  const cleanup = async (step: string, id: string): Promise<void> => {
+    try {
+      const children = await withRetry(deps, () => deps.list(id));
+      if (children.length > 0) {
+        note(step, `dossier non vide, laissé en place : ${children.map(c => c.id).join(', ')}`, [id]);
+        return;
+      }
+      await removeEmpty(deps, id);
+      steps.push({ step, status: 'done' });
+    } catch (e) {
+      note(step, failureMessage(e), [id]);
+    }
+  };
+  if (groupsFolder) await cleanup('groups-folder-remove', groupsFolder.id);
+  await cleanup('folder-remove', folderId);
+
+  return outcome();
 }

@@ -19,3 +19,27 @@ export interface ArchiveOutcome {
   /** Tags actually confirmed removed, per person (for local reconcile). */
   removedTags: Array<{ personId: string; tags: string[] }>;
 }
+
+/** One row of the Archive tab, read live from a per-room folder and its children. */
+export interface ArchivedRoom {
+  folderId: string;
+  /** null when the room is not (or no longer) inside the folder. */
+  roomId: string | null;
+  title: string;
+  classId: string;
+  roomType: ArchiveRoomType;
+  fromParentId: string;
+  archivedAt: number;
+}
+
+export interface RestoreOutcome {
+  success: boolean;
+  steps: StepResult[];
+  remaining: string[];
+  error?: string;
+  /** Tags actually added this run, per person (for local reconcile). */
+  addedTags: Array<{ personId: string; tags: string[] }>;
+  /** Group members that could not be resolved to a profile; listed, not guessed. */
+  unresolvedMembers: number;
+  roomId?: string;
+}
