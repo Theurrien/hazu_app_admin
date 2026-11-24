@@ -50,3 +50,15 @@ kept only as the recipe should access removal ever be wanted.
    grants, re-add tags for current group members (S3 heal logic).
 3. Any stored path link to an archived class breaks while it is archived; id links do not.
 4. Super-user and other admin entries stay on the room; the archive Hazu sits in the admin Hazu.
+
+## Hiding the archive (check 0.1, 2026-11-24)
+
+Test class moved into `Archive (test) → per-room folder`, inside the admin Hazu, viewed from the
+maintainer's test teacher account (which keeps access to the class).
+- With **Archive `privacy: private`** and **per-room folder `privacy: unlisted`** (set by the
+  maintainer): the class is reachable only from the account's own Hazu favourites, from no other
+  list, and the account cannot climb to other archived rooms.
+- The class's own privacy was already `unlisted` (24 of 32 classes, 5 of 15 CIE courses; the rest
+  and all companies and cantons are `private`) and is left unchanged by the archive.
+- No hide tag is needed. The class was moved back and matched its saved state exactly; the test
+  folders were deleted.

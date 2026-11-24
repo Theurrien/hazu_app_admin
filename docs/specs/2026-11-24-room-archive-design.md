@@ -58,21 +58,23 @@ anything**, so it can be restored exactly.
 ```
 admin Hazu (hz-config-admin)
 ├── sharing container (hz-config-sharing)       ← live role groups only
-└── Archive                                      tag hz-config-archive, unlisted
-    └── {room title}                             one folder per archived room
+└── Archive                                      tag hz-config-archive, privacy private
+    └── {room title}                             one folder per archived room, privacy unlisted
         │   tags: hz-config-archive-room
         │         hz-config-archive-class-{classId}
         │         hz-config-archive-from-{originalParentId}
         │         hz-config-archive-type-{class|cie|enterprise|state}
         │         hz-config-archive-at-{ms}
         ├── {the room}                           same id, children, tags, ACL
-        └── Groupes de partage                   tag hz-config-archive-groups
+        └── Groupes de partage                   tag hz-config-archive-groups, privacy private
             └── the room's role groups           same ids, ACLs (membership) unchanged
 ```
 
 - The **Archive Hazu** is found among the admin Hazu's children by `hz-config-archive`, and created
-  on the first archive if missing. It must be **unlisted** — not shown in anyone's lists. Which
-  Hazu setting achieves that is check 0.1 (§8).
+  on the first archive if missing. It is **private** and the per-room folder **unlisted** (check 0.1, §8,
+  done 2026-11-24): a member can no longer reach the room from any list, only from their own
+  favourites, and cannot climb from the room to other archived rooms. The room's own privacy is
+  left as it was.
 - The per-room folder is created **inside the Archive**, so it takes the admin-only access, never
   the room's. Nothing of the room's sharing reaches the groups.
 - The record lives in the folder's tags, so the archive is self-describing: no local table is
