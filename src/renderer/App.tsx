@@ -7,8 +7,8 @@ import PersonsPage from './pages/PersonsPage';
 import MatrixPage from './pages/MatrixPage';
 import BulkImportPage from './pages/BulkImportPage';
 import SettingsPage from './pages/SettingsPage';
-import MissionAnalysisPage from './pages/MissionAnalysisPage';
 import DiscrepanciesPage from './pages/DiscrepanciesPage';
+import FormationPage from './pages/FormationPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { AppModeProvider, useAppMode } from './contexts/AppModeContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
@@ -90,7 +90,7 @@ function AppShell() {
       case 'import':
         return <BulkImportPage />;
       case 'missions':
-        return <MissionAnalysisPage />;
+        return <FormationPage />;
       case 'discrepancies':
         return <DiscrepanciesPage />;
       case 'settings':

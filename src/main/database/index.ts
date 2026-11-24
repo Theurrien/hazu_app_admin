@@ -5,6 +5,114 @@ import fs from 'fs';
 
 let db: Database.Database | null = null;
 
+// Formation overview tables — kept identical to the block in schema.sql (the built app has no
+// schema.sql beside it and runs the inline schema; the migration runs this on every start).
+const FORMATION_SCHEMA = `
+-- ============================================================================
+-- MISSIONS — FORMATION OVERVIEW (raw-ish facts per apprentice; rules run at query time)
+-- ============================================================================
+
+-- One row per apprentice the formation sync has tried to read.
+-- read_ok = the stored rows come from a successful read; stale = the latest read failed,
+-- so the rows are from an earlier one (error = that latest failure).
+CREATE TABLE IF NOT EXISTS formation_student (
+    person_id TEXT PRIMARY KEY,
+    read_ok INTEGER NOT NULL,
+    error TEXT,
+    stale INTEGER NOT NULL DEFAULT 0,
+    profile_created INTEGER,
+    user_id_tag TEXT,
+    self_uid TEXT,
+    timeline_ok INTEGER NOT NULL,
+    timeline_found INTEGER NOT NULL DEFAULT 1,
+    mpe_found INTEGER NOT NULL,
+    mpc_found INTEGER NOT NULL,
+    suivi_company_found INTEGER NOT NULL DEFAULT 1,
+    suivi_cie_found INTEGER NOT NULL DEFAULT 1,
+    plan_start_ms INTEGER,
+    empty_listings INTEGER NOT NULL DEFAULT 0,
+    skipped_subtrees INTEGER NOT NULL DEFAULT 0,
+    failed_parts TEXT NOT NULL DEFAULT '[]',
+    synced_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS formation_copy (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    copy_id TEXT NOT NULL,
+    semester INTEGER,
+    mandate TEXT,
+    level TEXT,
+    profession TEXT,
+    title TEXT NOT NULL,
+    date_created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_copy_person ON formation_copy(person_id);
+
+CREATE TABLE IF NOT EXISTS formation_assessment (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    copy_id TEXT NOT NULL,
+    author_id TEXT,
+    author_name TEXT NOT NULL,
+    points REAL NOT NULL,
+    feedback TEXT,
+    date_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_assessment_person ON formation_assessment(person_id);
+
+CREATE TABLE IF NOT EXISTS formation_report (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    report_id TEXT NOT NULL,
+    semester INTEGER,
+    published INTEGER NOT NULL,
+    published_at INTEGER,
+    course_id TEXT,
+    date_created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_report_person ON formation_report(person_id);
+
+CREATE TABLE IF NOT EXISTS formation_plan_retired (
+    person_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    slot_key TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_formation_plan_retired_person ON formation_plan_retired(person_id);
+
+-- School-wide reference data, replaced as a whole by each successful run.
+CREATE TABLE IF NOT EXISTS formation_catalogue (
+    ord INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    profession TEXT NOT NULL,
+    level TEXT NOT NULL,
+    semester INTEGER NOT NULL,
+    mandate TEXT NOT NULL,
+    title TEXT NOT NULL,
+    slot_id TEXT NOT NULL
+);
+
+-- professionsByIcon / levelsByColor / catalogueIcons, as JSON.
+CREATE TABLE IF NOT EXISTS formation_reference (
+    key TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS formation_sync_status (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    status TEXT NOT NULL DEFAULT 'idle',
+    processed INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    last_synced_at INTEGER,
+    last_error TEXT
+);
+-- Seeded: the old Missions tab broke because its status row was never created.
+INSERT OR IGNORE INTO formation_sync_status (id, status) VALUES (1, 'idle');
+`;
+
 // Get database path in user data directory
 function getDatabasePath(): string {
   const userDataPath = app.getPath('userData');
@@ -179,32 +287,6 @@ function runMigrations(): void {
     console.error('Migration error (persons icon/color):', error);
   }
 
-  // Migration: Add mission_tracking table
-  try {
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mission_tracking'").all();
-    if (tables.length === 0) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS mission_tracking (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          person_id TEXT NOT NULL,
-          mission_name TEXT NOT NULL,
-          is_official INTEGER NOT NULL DEFAULT 0,
-          lieu_de_formation TEXT NOT NULL,
-          item_count INTEGER DEFAULT 1,
-          total_points INTEGER DEFAULT 0,
-          synced_at INTEGER,
-          UNIQUE(person_id, mission_name, lieu_de_formation)
-        );
-        CREATE INDEX IF NOT EXISTS idx_mission_tracking_person ON mission_tracking(person_id);
-        CREATE INDEX IF NOT EXISTS idx_mission_tracking_lieu ON mission_tracking(lieu_de_formation);
-        CREATE INDEX IF NOT EXISTS idx_mission_tracking_official ON mission_tracking(is_official);
-      `);
-      console.log('Migration: Added mission_tracking table');
-    }
-  } catch (error) {
-    console.error('Migration error (mission_tracking):', error);
-  }
-
   // Migration: Seed admin_password setting
   try {
     const adminPw = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
@@ -216,24 +298,32 @@ function runMigrations(): void {
     console.error('Migration error (admin_password):', error);
   }
 
-  // Migration: Add mission_sync_status table
+  // Migration: Missions formation overview — the old mission tables go, the formation tables
+  // come (CREATE IF NOT EXISTS, status row seeded). Then a startup reset: a status left at
+  // 'syncing' means the app was closed mid-run; that run is gone, its data untouched.
   try {
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mission_sync_status'").all();
-    if (tables.length === 0) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS mission_sync_status (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          last_synced_at INTEGER,
-          students_processed INTEGER DEFAULT 0,
-          total_students INTEGER DEFAULT 0,
-          status TEXT DEFAULT 'idle'
-        );
-        INSERT INTO mission_sync_status (id, status) VALUES (1, 'idle');
-      `);
-      console.log('Migration: Added mission_sync_status table');
+    db.exec(`
+      DROP TABLE IF EXISTS mission_tracking;
+      DROP TABLE IF EXISTS mission_sync_status;
+    `);
+    db.exec(FORMATION_SCHEMA);
+    // A formation_student created before these columns existed (dev builds of this branch).
+    // The found bits default to 1, the meaning those rows were written with; the next run sets them.
+    const cols = db.prepare('PRAGMA table_info(formation_student)').all() as Array<{ name: string }>;
+    const added: Array<[string, string]> = [
+      ['skipped_subtrees', 'INTEGER NOT NULL DEFAULT 0'],
+      ['timeline_found', 'INTEGER NOT NULL DEFAULT 1'],
+      ['suivi_company_found', 'INTEGER NOT NULL DEFAULT 1'],
+      ['suivi_cie_found', 'INTEGER NOT NULL DEFAULT 1'],
+    ];
+    for (const [name, decl] of added) {
+      if (!cols.some(c => c.name === name)) db.exec(`ALTER TABLE formation_student ADD COLUMN ${name} ${decl}`);
     }
+    db.prepare(
+      "UPDATE formation_sync_status SET status = 'idle', processed = 0, total = 0, failed = 0 WHERE id = 1 AND status = 'syncing'",
+    ).run();
   } catch (error) {
-    console.error('Migration error (mission_sync_status):', error);
+    console.error('Migration error (formation tables):', error);
   }
 }
 
@@ -351,28 +441,8 @@ function runInlineSchema(): void {
         FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL
     );
 
-    -- Mission tracking (deduplicated per student per lieu)
-    CREATE TABLE IF NOT EXISTS mission_tracking (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id TEXT NOT NULL,
-        mission_name TEXT NOT NULL,
-        is_official INTEGER NOT NULL DEFAULT 0,
-        lieu_de_formation TEXT NOT NULL,
-        item_count INTEGER DEFAULT 1,
-        total_points INTEGER DEFAULT 0,
-        synced_at INTEGER,
-        UNIQUE(person_id, mission_name, lieu_de_formation)
-    );
-
-    -- Mission sync status
-    CREATE TABLE IF NOT EXISTS mission_sync_status (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        last_synced_at INTEGER,
-        students_processed INTEGER DEFAULT 0,
-        total_students INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'idle'
-    );
   `);
+  db.exec(FORMATION_SCHEMA);
 }
 
 // Get database instance

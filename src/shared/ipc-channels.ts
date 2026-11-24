@@ -84,12 +84,12 @@ export const IPC_CHANNELS = {
   FILE_PARSE: 'file:parse',
   FILE_SELECT_DIALOG: 'file:selectDialog',
 
-  // Mission Analysis
-  MISSION_SYNC_START: 'mission:sync:start',
-  MISSION_SYNC_STATUS: 'mission:sync:status',
-  MISSION_GET_DASHBOARD_DATA: 'mission:dashboard:data',
-  MISSION_GET_PROFESSIONS: 'mission:professions:get',
-  MISSION_GET_STUDENTS: 'mission:students:get',
+  // Missions — formation overview
+  FORMATION_SYNC_START: 'formation:sync:start',
+  FORMATION_SYNC_STATUS: 'formation:sync:status',
+  FORMATION_OVERVIEW: 'formation:overview',
+  FORMATION_DETAIL: 'formation:detail',
+  FORMATION_STUDENT: 'formation:student',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
