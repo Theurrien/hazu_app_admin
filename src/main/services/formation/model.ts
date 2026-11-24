@@ -40,8 +40,11 @@ export interface StudentModel {
   failedParts: StudentRaw['failedParts'];
 }
 
-/** One apprentice as the FORMATION_STUDENT channel returns it. */
-export type FormationStudent = StudentModel & { name: string; companies: string[] };
+/**
+ * One apprentice as the FORMATION_STUDENT channel returns it. `skippedSubtrees` = nested mandate
+ * folders the read skipped on 401/403/404 (their copies are not counted).
+ */
+export type FormationStudent = StudentModel & { name: string; companies: string[]; skippedSubtrees: number };
 
 /** Sort key for an apprentice whose formation does not resolve: after every configured one. */
 const UNKNOWN_FORMATION_ORDER = Number.MAX_SAFE_INTEGER;

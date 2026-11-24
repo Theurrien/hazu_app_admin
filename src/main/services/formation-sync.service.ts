@@ -283,5 +283,6 @@ export function getFormationStudent(personId: string): FormationStudent | null {
   const m = l.models.find(x => x.personId === personId);
   if (!m) return null;
   const c = l.ctx.find(x => x.personId === personId)!;
-  return { ...m, name: c.name, companies: c.companies.map(co => co.title) };
+  const row = get<{ skipped_subtrees: number }>('SELECT skipped_subtrees FROM formation_student WHERE person_id = ?', [personId]);
+  return { ...m, name: c.name, companies: c.companies.map(co => co.title), skippedSubtrees: row?.skipped_subtrees ?? 0 };
 }

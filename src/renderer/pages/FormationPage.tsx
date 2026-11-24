@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
+import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import type { LevelCode, SchoolOverview } from '../../shared/formation-types';
 import { SyncHeader } from '../components/formation/SyncHeader';
 import { FormationCard } from '../components/formation/FormationCard';
+import { FormationDetailView } from '../components/formation/FormationDetailView';
 import { BarLegend, formatRate } from '../components/formation/StackedBar';
 
 type Selected = { key: string; level: LevelCode | 'both' } | null;
@@ -41,17 +42,15 @@ function FormationPage() {
 
       {/* The header stays mounted above both views, so a run's progress and its reload carry on in the drill-down. */}
       {selected ? (
-        <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setSelected(null)}
-            className="text-sm flex items-center gap-2"
-            style={{ color: 'var(--hazu-primary)' }}
-          >
-            <FontAwesomeIcon icon={faArrowLeft} /> Toutes les formations
-          </button>
-          <h2 className="text-xl font-semibold" style={{ color: 'var(--hazu-text)' }}>{detail ? detail.title : selected.key}</h2>
-        </div>
+        <FormationDetailView
+          formationKey={selected.key}
+          title={detail ? detail.title : selected.key}
+          hasCatalogue={detail ? detail.hasCatalogue : true}
+          level={selected.level}
+          onLevelChange={level => setSelected({ key: selected.key, level })}
+          onBack={() => setSelected(null)}
+          dataVersion={overview?.syncedAt ?? null}
+        />
       ) : overview && !empty && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
