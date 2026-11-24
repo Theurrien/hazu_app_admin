@@ -21,6 +21,17 @@ function getAuthHeaders(): Record<string, string> {
 
 // READ OPERATIONS
 
+// Checked read: 60 s timeout, rethrows the axios error, logs nothing (the error object carries
+// request headers incl. the API key, and a 404 is an expected answer for callers that probe).
+export const sendApiRequestReadChecked = async (id: string): Promise<any> => {
+  const response = await axios.get(`https://${getApiEndpoint()}/read`, {
+    headers: getAuthHeaders(),
+    params: { id },
+    timeout: 60_000,
+  });
+  return response.data;
+};
+
 export const sendApiRequestRead = async (id: string): Promise<any> => {
   try {
     const response = await axios.get(`https://${getApiEndpoint()}/read`, {
@@ -276,6 +287,7 @@ export const sendApiRequestAddTagsChecked = async (itemId: string, tags: string[
         "x-api-key": getApiKey(),
         "Content-Type": "application/json",
       },
+      timeout: 60_000,
     }
   );
 };
@@ -330,6 +342,7 @@ export const sendApiRequestRemoveTagsChecked = async (
         "Content-Type": "application/json",
       },
       data: { tags },
+      timeout: 60_000,
     });
     return { ok: true, networkOrTimeout: false };
   } catch (error: unknown) {

@@ -4,7 +4,7 @@
 import axios from 'axios';
 import { getDb } from '../database';
 import {
-  sendApiRequestRead,
+  sendApiRequestReadChecked,
   sendApiRequestListChecked,
   sendApiRequestCreateChecked,
   sendApiRequestMoveChecked,
@@ -61,6 +61,9 @@ function safeTags(raw: string | null | undefined): string[] {
 
 // Wrap an axios error into the shape the core's retry logic reads.
 function toFailure(e: unknown): ApiFailure {
+  if (e && typeof e === 'object' && !axios.isAxiosError(e) && 'message' in e && 'networkOrTimeout' in e) {
+    return e as ApiFailure;
+  }
   if (axios.isAxiosError(e)) {
     return {
       status: e.response?.status,
@@ -69,6 +72,11 @@ function toFailure(e: unknown): ApiFailure {
     };
   }
   return { networkOrTimeout: false, message: e instanceof Error ? e.message : String(e) };
+}
+
+/** Anything leaving the service as a rejection is an Error with a readable message. */
+function toError(e: unknown): Error {
+  return e instanceof Error ? e : new Error(toFailure(e).message);
 }
 
 async function wrap<T>(fn: () => Promise<T>): Promise<T> {
@@ -92,7 +100,7 @@ function buildDeps(): ArchiveDeps {
     // null ONLY on a 404; anything else throws.
     read: async (id) => {
       try {
-        return toNode(await sendApiRequestRead(id));
+        return toNode(await sendApiRequestReadChecked(id));
       } catch (e) {
         if (axios.isAxiosError(e) && e.response?.status === 404) return null;
         throw toFailure(e);
@@ -152,6 +160,7 @@ export function listArchivableRooms(): ArchivableRoom[] {
     .prepare('SELECT room_id, COUNT(DISTINCT person_id) AS n FROM person_room_assignments GROUP BY room_id')
     .all() as Array<{ room_id: string; n: number }>;
   const byRoom = new Map(counts.map((c) => [c.room_id, c.n]));
+  const rootId = setting('root_hazu_id');
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
@@ -159,7 +168,10 @@ export function listArchivableRooms(): ArchivableRoom[] {
     classId: r.class_id || null,
     parentId: r.parent_id ?? '',
     memberCount: byRoom.get(r.id) ?? 0,
-    blockedReason: r.class_id ? null : 'identifiant de classe manquant',
+    blockedReason:
+      rootId && r.parent_id === rootId
+        ? 'dossier de catégorie'
+        : r.class_id ? null : 'identifiant de classe manquant',
   }));
 }
 
@@ -209,16 +221,20 @@ async function findArchiveRoot(deps: ArchiveDeps): Promise<HazuNode | null> {
 }
 
 export async function listArchivedRooms(): Promise<ArchivedRoom[]> {
-  const deps = buildDeps();
-  const root = await findArchiveRoot(deps);
-  if (!root) return [];
-  const folders = (await deps.list(root.id)).filter((c) => c.tags.includes(ROOM_FOLDER_TAG));
-  const out: ArchivedRoom[] = [];
-  for (const folder of folders) {
-    const entry = archivedEntry(folder, await deps.list(folder.id));
-    if (entry) out.push(entry);
+  try {
+    const deps = buildDeps();
+    const root = await findArchiveRoot(deps);
+    if (!root) return [];
+    const folders = (await deps.list(root.id)).filter((c) => c.tags.includes(ROOM_FOLDER_TAG));
+    const out: ArchivedRoom[] = [];
+    for (const folder of folders) {
+      const entry = archivedEntry(folder, await deps.list(folder.id));
+      if (entry) out.push(entry);
+    }
+    return out.sort((a, b) => b.archivedAt - a.archivedAt);
+  } catch (e) {
+    throw toError(e);
   }
-  return out.sort((a, b) => b.archivedAt - a.archivedAt);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -257,7 +273,7 @@ export async function archiveRoom(roomId: string): Promise<ArchiveOutcome> {
   if (!room.class_id) return fail('identifiant de classe manquant');
   const adminId = setting('admin_id');
   const sharingContainerId = setting('sharing_container_id');
-  if (!adminId || !sharingContainerId) return fail('synchronisation requise');
+  if (!adminId || !sharingContainerId || !setting('user_id')) return fail('synchronisation requise');
 
   const deps = buildDeps();
   const roleNames = roles();
@@ -297,22 +313,27 @@ export async function archiveRoom(roomId: string): Promise<ArchiveOutcome> {
 // Restore
 
 export async function planRestore(folderId: string): Promise<RestorePlan> {
-  const deps = buildDeps();
-  const folder = await deps.read(folderId);
-  if (!folder || !folder.tags.includes(ROOM_FOLDER_TAG)) throw new Error("dossier d'archive introuvable");
-  const rec = parseRecordTags(folder.tags);
-  if (!rec) throw new Error("dossier d'archive incomplet");
-  const origin = await deps.read(rec.fromParentId);
-  const inside = await deps.list(folderId);
-  const groupsFolder = inside.find((c) => c.tags.includes(GROUPS_FOLDER_TAG));
-  const archivedGroups = groupsFolder ? await deps.list(groupsFolder.id) : [];
-  return {
-    folderId,
-    title: folder.title,
-    fromParentTitle: origin ? origin.title : null,
-    fromParentExists: !!origin,
-    groupCount: groupsOfClass(archivedGroups, rec.classId, roles()).length,
-  };
+  try {
+    const deps = buildDeps();
+    const folder = await deps.read(folderId);
+    if (!folder || !folder.tags.includes(ROOM_FOLDER_TAG)) throw new Error("dossier d'archive introuvable");
+    const rec = parseRecordTags(folder.tags);
+    if (!rec) throw new Error("dossier d'archive incomplet");
+    const origin = await deps.read(rec.fromParentId);
+    const categoryIds = await liveCategoryIds(deps);
+    const inside = await deps.list(folderId);
+    const groupsFolder = inside.find((c) => c.tags.includes(GROUPS_FOLDER_TAG));
+    const archivedGroups = groupsFolder ? await deps.list(groupsFolder.id) : [];
+    return {
+      folderId,
+      title: folder.title,
+      fromParentTitle: origin ? origin.title : null,
+      fromParentExists: !!origin && categoryIds.includes(rec.fromParentId),
+      groupCount: groupsOfClass(archivedGroups, rec.classId, roles()).length,
+    };
+  } catch (e) {
+    throw toError(e);
+  }
 }
 
 async function buildMembersOf(): Promise<(groupId: string) => Promise<{ personIds: string[]; unresolved: number }>> {
@@ -369,7 +390,7 @@ export async function restoreRoom(folderId: string): Promise<RestoreOutcome> {
   });
   const adminId = setting('admin_id');
   const sharingContainerId = setting('sharing_container_id');
-  if (!adminId || !sharingContainerId) return fail('synchronisation requise');
+  if (!adminId || !sharingContainerId || !setting('user_id')) return fail('synchronisation requise');
 
   const deps = buildDeps();
   let outcome: RestoreOutcome;
