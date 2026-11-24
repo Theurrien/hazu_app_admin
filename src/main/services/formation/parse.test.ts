@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { Row } from '../../../shared/formation-types';
 import {
   normalizeRow,
   childrenOf,
@@ -8,6 +9,13 @@ import {
   parsePoints,
   parseFeedback,
   timelineFacts,
+  isArchiveFolder,
+  catalogueSlot,
+  splitStudyChildren,
+  companyReports,
+  cieReports,
+  planFacts,
+  findChild,
 } from './parse';
 
 describe('normalizeRow', () => {
@@ -47,4 +55,80 @@ describe('timeline parsing', () => {
     expect(timelineFacts(rows).map(f => f.copyId)).toEqual(['c1', 'c2']);
     expect(timelineFacts(rows)[0]).toMatchObject({ points: 2, authorId: 'u1', dateMs: 10 });
   });
+});
+
+const row = (p: Partial<Row>): Row => ({ id: 'r', parentId: null, type: 'hazu', title: '', description: '', tags: [], icon: null, color: null, dateCreated: 0, authorId: null, authorName: null, order: null, ...p });
+const MPE = ['hz-config-mpe', 'hz-config-mpe-semester-2', 'hz-config-mpe-mandate-03', 'hz-config-mpe-level-cfc'];
+
+describe('normalizeRow author and timeline carry-overs', () => {
+  it('prefers an explicit authorId over user.key', () => expect(normalizeRow({ key: 'k', authorId: 'a1', user: { key: 'u1' } })?.authorId).toBe('a1'));
+  it('falls back to user.id', () => expect(normalizeRow({ key: 'k', user: { id: 'u2' } })?.authorId).toBe('u2'));
+  it('timelineFacts uses Inconnu without a displayName and carries feedback', () => {
+    const f = timelineFacts([row({ id: 't', type: 'item', description: '1 Points hazu.swiss/c1 Feedback : ok', authorId: 'u' })]);
+    expect(f[0]).toMatchObject({ authorName: 'Inconnu', feedback: 'ok' });
+  });
+});
+
+describe('catalogueSlot', () => {
+  it('builds a slot from the facets', () => expect(catalogueSlot(row({ id: 'm1', title: 'MPE 1', tags: MPE }), 'mpe', 'cuisine')).toMatchObject({ id: 'm1', semester: 2, mandate: '03', level: 'cfc', profession: 'cuisine', kind: 'mpe' }));
+  it('rejects an item', () => expect(catalogueSlot(row({ type: 'item', tags: MPE }), 'mpe', 'p')).toBeNull());
+  it('rejects the sibling kind', () => expect(catalogueSlot(row({ tags: [...MPE, 'hz-config-mpc'] }), 'mpe', 'p')).toBeNull());
+  it('rejects a row without a level', () => expect(catalogueSlot(row({ tags: MPE.filter(t => !t.includes('level')) }), 'mpe', 'p')).toBeNull());
+});
+
+describe('splitStudyChildren', () => {
+  it('splits copies from folders and skips items and the overview', () => {
+    const copy = row({ id: 'c1', tags: MPE });
+    const r = splitStudyChildren([copy, row({ id: 'f1' }), row({ id: 'i1', type: 'item', tags: ['hz-config-mpe'] }), row({ id: 'o', title: 'Mandats pratiques - Aperçu et planification' })], 'mpe');
+    expect(r.copies.map(c => c.id)).toEqual(['c1']);
+    expect(r.copies[0]).toMatchObject({ semester: 2, mandate: '03', level: 'cfc' });
+    expect(r.descend).toEqual(['f1']);
+  });
+});
+
+describe('isArchiveFolder', () => {
+  it('matches only Archive', () => {
+    expect(isArchiveFolder(row({ title: ' Archive ' }))).toBe(true);
+    expect(isArchiveFolder(row({ title: 'Archives 2024' }))).toBe(false);
+  });
+});
+
+describe('reports', () => {
+  it('parses a published company report', () => {
+    const r = companyReports([
+      row({ id: 'a', tags: ['hz-config-report-company', 'hz-config-report-semester-3', 'hz-config-report-published', 'hz-config-report-published-at-1700000000000'] }),
+      row({ id: 'b', tags: ['hz-config-report-company', 'hz-config-report-staging'] }),
+      row({ id: 'c', tags: ['hz-config-report-company'] }),
+    ]);
+    expect(r.map(x => x.id)).toEqual(['a', 'c']);
+    expect(r[0]).toMatchObject({ kind: 'company', semester: 3, published: true, publishedAt: 1700000000000 });
+    expect(r[1]).toMatchObject({ semester: null, published: false });
+  });
+  it('parses a sent CIE report', () => {
+    expect(cieReports([row({ id: 'x', tags: ['rap_cie', 'hz-config-cie-report-crs1', 'hz-config-report-sent'] })])[0]).toMatchObject({ kind: 'cie', courseId: 'crs1', published: true });
+  });
+});
+
+describe('planFacts', () => {
+  const rec = (tags: string[], dateCreated: number) => row({ type: 'item', tags, dateCreated });
+  it('takes the newest start', () => {
+    expect(planFacts([rec(['hz-plan-settings', 'hz-plan-start-100'], 1), rec(['hz-plan-settings', 'hz-plan-start-200'], 2)]).startMs).toBe(200);
+  });
+  it('retires a skipped slot unless a newer clear follows', () => {
+    const base = ['hz-plan-entry', 'hz-plan-kind-mandate'];
+    const f = planFacts([
+      rec([...base, 'hz-plan-slot-cfc-3-12', 'hz-plan-skip'], 5),
+      rec([...base, 'hz-plan-slot-cfc-3-12', 'hz-plan-clear'], 6),
+      rec([...base, 'hz-plan-slot-cfc-1-01', 'hz-plan-skip'], 1),
+    ]);
+    expect(f.retiredSlots).toEqual(['cfc-1-01']);
+  });
+  it('returns nulls for no records', () => expect(planFacts([])).toEqual({ startMs: null, retiredSlots: [] }));
+});
+
+describe('findChild', () => {
+  const rows = [row({ id: 't', tags: ['tag-x'], title: 'Autre' }), row({ id: 'm', title: 'Mandats Entreprise' })];
+  it('prefers the tag', () => expect(findChild(rows, 'tag-x', 'mandats entreprise')?.id).toBe('t'));
+  it('falls back to the normalised title', () => expect(findChild(rows, 'nope', 'mandats entreprise')?.id).toBe('m'));
+  it('returns null otherwise', () => expect(findChild(rows, null, 'zzz')).toBeNull());
 });
