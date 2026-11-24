@@ -195,9 +195,10 @@ async function collectCopies(
 }
 
 const USERID_PREFIX = 'hz-config-userid-';
+export const EMPTY_PROFILE = 'profil vide après relecture';
 const TIMELINE_PREFIX = 'hz-config-skills-timeline-';
 
-/** Read one apprentice. Never throws: failures become data (ok:false only if the profile listing fails). */
+/** Read one apprentice. Never throws: failures become data (ok:false only if the profile listing fails or stays empty). */
 export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { reads?: number }): Promise<StudentRaw> {
   const counters: ReadCounters & { emptyRetries: number } = { emptyRetries: 0, reads: 0 };
   const userIdTag = facetFrom(p.tags, USERID_PREFIX);
@@ -221,6 +222,15 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
       out.ok = false;
       out.timelineOk = false;
       fail(e);
+      return out;
+    }
+    // Spec §3: an empty child list is never proof of absence. A profile still empty after the
+    // re-read is a failed read, so the service keeps the previous rows (stale) instead of
+    // replacing them with nothing.
+    if (kids.length === 0) {
+      out.ok = false;
+      out.timelineOk = false;
+      fail(new Error(EMPTY_PROFILE));
       return out;
     }
 

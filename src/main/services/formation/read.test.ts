@@ -121,6 +121,20 @@ describe('readStudent', () => {
     expect(s.ok).toBe(false);
     expect(s.error).toContain('404');
   });
+  it('a profile still empty after the re-read is a failed read, never an empty one', async () => {
+    const { deps, calls } = fake({});
+    const s = await readStudent(deps, P);
+    expect(s).toMatchObject({ ok: false, error: 'profil vide après relecture', timelineOk: false, emptyListings: 1 });
+    expect(calls).toEqual(['prof-001', 'prof-001']); // re-read once, then nothing below it
+  });
+  it('a profile empty once but filled on the re-read is read normally', async () => {
+    const { deps } = fake(fullTree());
+    const list = deps.list.bind(deps);
+    let n = 0;
+    deps.list = async id => (id === 'prof-001' && n++ === 0 ? [row(id)] : list(id));
+    const s = await readStudent(deps, P);
+    expect(s).toMatchObject({ ok: true, error: null, emptyListings: 0 });
+  });
   it('degrades only the timeline when its listing throws', async () => {
     const { deps } = fake(fullTree(), { tl1: http(401) });
     const s = await readStudent(deps, P);

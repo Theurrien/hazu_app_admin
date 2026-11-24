@@ -72,7 +72,7 @@ export interface PlanFacts {
 /** Everything read for one apprentice. Failures after the profile listing are data, not throws. */
 export interface StudentRaw {
   personId: string;
-  ok: boolean; // false only when the profile listing itself failed
+  ok: boolean; // false only when the profile listing itself failed, or stayed empty after the re-read
   error: string | null; // first failure message (profile listing, or a later part that failed)
   profileCreated: number | null;
   userIdTag: string | null;
