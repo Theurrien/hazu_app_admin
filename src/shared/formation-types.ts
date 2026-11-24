@@ -83,6 +83,7 @@ export interface StudentRaw {
   mpc: { found: boolean; copies: Copy[] };
   reports: ReportFact[];
   plan: PlanFacts;
+  failedParts: Array<'timeline' | 'mpe' | 'mpc' | 'suivi-company' | 'suivi-cie' | 'acl'>; // parts whose read failed after retries; `found` only means the folder was located
   emptyListings: number; // listings still empty after one re-read, during this apprentice's read
 }
 

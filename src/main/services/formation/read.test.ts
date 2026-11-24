@@ -139,6 +139,26 @@ describe('readStudent', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
+  it.each([
+    ['timeline', 'tl1'], ['mpe', 'study-co'], ['mpc', 'study-cie'], ['suivi-company', 'suivi-co'], ['suivi-cie', 'suivi-cie'],
+  ])('flags a failed %s part', async (part, id) => {
+    const { deps } = fake(fullTree(), { [id]: http(503) });
+    const s = await readStudent(deps, P);
+    expect(s.ok).toBe(true);
+    expect(s.failedParts).toEqual([part]);
+    expect(s.error).toContain('503');
+  });
+  it('flags a failing nested mandate folder as the whole kind', async () => {
+    const { deps } = fake(fullTree(), { import: http(503) });
+    expect((await readStudent(deps, P)).failedParts).toEqual(['mpe']);
+  });
+  it('leaves failedParts empty on a clean read', async () => expect((await readStudent(fake(fullTree()).deps, P)).failedParts).toEqual([]));
+  it('does not read the ACL for a non-e-mail identity', async () => {
+    const { deps } = fake(fullTree());
+    const acl = vi.spyOn(deps, 'acl');
+    await readStudent(deps, P);
+    expect(acl).not.toHaveBeenCalled();
+  });
   it('counts reads', async () => {
     const { deps } = fake(fullTree());
     const c = { reads: 0 };
@@ -176,6 +196,14 @@ describe('readReference', () => {
     expect(ref.catalogueIcons).toEqual({ 'ic-cui': 'cui', 'ic-dhi': 'dhi' });
     expect(ref.professionsByIcon['ic-cui']).toEqual({ title: 'Cuisine', order: 2 });
     expect(ref.levelsByColor).toEqual({ '#abcdef': 'CFC' });
+  });
+  it('rejects when a profession subfolder listing keeps failing', async () => {
+    const { deps } = fake(tree(), { sub: http(503) });
+    await expect(readReference(deps, ['cfgB'])).rejects.toThrow();
+  });
+  it('rejects on an unreadable config parent instead of falling through', async () => {
+    const { deps } = fake(tree(), { cfgA: http(503) });
+    await expect(readReference(deps, ['cfgA', 'cfgB'])).rejects.toThrow();
   });
   it('throws when the catalogue root listing fails', async () => {
     const { deps } = fake(tree(), { [MPE_CATALOGUE_ROOT]: http(404) });

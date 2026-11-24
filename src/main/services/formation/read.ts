@@ -71,19 +71,13 @@ export async function listWithRetry(deps: ReadDeps, id: string, counters?: ReadC
 }
 
 // Source: enterprise_dashboard.html — collectCatalogueSlots
-// One traversal collects both kinds; archive folders are skipped; a failing subfolder is skipped, not fatal.
+// One traversal collects both kinds; archive folders are skipped; a failing listing propagates.
 async function collectCatalogueSlots(deps: ReadDeps, id: string, profession: string, depth: number, counters?: ReadCounters): Promise<Slot[]> {
   if (depth > MAX_DEPTH) {
     console.warn('[catalogue] depth cap (4 levels) under', id, '- deeper not collected');
     return [];
   }
-  let kids: Row[];
-  try {
-    kids = await listWithRetry(deps, id, counters);
-  } catch (e) {
-    console.warn('[catalogue] listing failed under', id, message(e));
-    return [];
-  }
+  const kids = await listWithRetry(deps, id, counters); // a failure stops the run: no rates without a full catalogue
   const here: Slot[] = [];
   const descend: string[] = [];
   for (const k of kids) {
@@ -97,16 +91,10 @@ async function collectCatalogueSlots(deps: ReadDeps, id: string, profession: str
 }
 
 // Source: enterprise_dashboard.html — findConfigHazus / loadProfessionMap / loadLevelMap
-// Each config Hazu is taken from the first parent that has a child carrying its tag.
+// Each config Hazu is taken from the first parent that has a child carrying its tag; an unreadable parent rejects.
 async function readConfigChildren(deps: ReadDeps, parents: string[], tag: string, counters?: ReadCounters): Promise<Row[]> {
   for (const parent of parents) {
-    let kids: Row[];
-    try {
-      kids = await listWithRetry(deps, parent, counters);
-    } catch (e) {
-      console.warn('[reference] config parent unreadable', parent, message(e));
-      continue;
-    }
+    const kids = await listWithRetry(deps, parent, counters); // unreadable parent rejects: no fall-through
     const cfg = kids.find(k => k.tags.includes(tag));
     if (cfg) return listWithRetry(deps, cfg.id, counters);
   }
@@ -150,7 +138,7 @@ export async function runPool<T, R>(items: T[], concurrency: number, fn: (t: T) 
       onDone?.(++done);
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, Math.floor(concurrency) || 1), items.length) }, worker));
   return out;
 }
 
@@ -180,7 +168,6 @@ async function collectCopies(deps: ReadDeps, id: string, kind: 'mpe' | 'mpc', de
 
 const USERID_PREFIX = 'hz-config-userid-';
 const TIMELINE_PREFIX = 'hz-config-skills-timeline-';
-const NO_PLAN: PlanFacts = { startMs: null, retiredSlots: [] };
 
 /** Read one apprentice. Never throws: failures become data (ok:false only if the profile listing fails). */
 export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { reads?: number }): Promise<StudentRaw> {
@@ -189,9 +176,12 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
   const out: StudentRaw = {
     personId: p.personId, ok: true, error: null, profileCreated: null, userIdTag, selfUid: null,
     timelineOk: true, facts: [], mpe: { found: false, copies: [] }, mpc: { found: false, copies: [] },
-    reports: [], plan: NO_PLAN, emptyListings: 0,
+    reports: [], plan: { startMs: null, retiredSlots: [] } as PlanFacts, emptyListings: 0, failedParts: [],
   };
-  const fail = (e: unknown) => { if (!out.error) out.error = message(e); };
+  const fail = (e: unknown, part?: StudentRaw['failedParts'][number]) => {
+    if (!out.error) out.error = message(e);
+    if (part) out.failedParts.push(part);
+  };
 
   try {
     let kids: Row[];
@@ -213,7 +203,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
     } catch (e) {
       out.timelineOk = false;
       out.facts = [];
-      fail(e);
+      fail(e, 'timeline');
     }
 
     const mandates = async (tag: string, title: string, kind: 'mpe' | 'mpc') => {
@@ -223,7 +213,8 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
         const copies = await collectCopies(deps, place.id, kind, 0, counters);
         out[kind] = { found: true, copies };
       } catch (e) {
-        fail(e);
+        out[kind] = { found: true, copies: [] };
+        fail(e, kind);
       }
     };
     await mandates('hz-config-study-company', 'mandats entreprise', 'mpe');
@@ -237,7 +228,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
         out.reports = out.reports.concat(companyReports(rows));
         out.plan = planFacts(rows);
       } catch (e) {
-        fail(e);
+        fail(e, 'suivi-company');
       }
     }
     // CIE - Suivi: rap_cie report copies.
@@ -246,7 +237,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
       try {
         out.reports = out.reports.concat(cieReports(await listWithRetry(deps, suiviCie.id, counters)));
       } catch (e) {
-        fail(e);
+        fail(e, 'suivi-cie');
       }
     }
 
@@ -256,7 +247,7 @@ export async function readStudent(deps: ReadDeps, p: ProfileInput, reads?: { rea
         const acl = await withRetry(deps, counters, () => deps.acl(p.personId));
         out.selfUid = resolveSelfUid(userIdTag, acl.data ?? []);
       } catch (e) {
-        fail(e);
+        fail(e, 'acl');
       }
     } else {
       out.selfUid = resolveSelfUid(userIdTag, []);
