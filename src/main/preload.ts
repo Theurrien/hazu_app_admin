@@ -3,6 +3,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   FormationDetail, FormationDetailFilters, FormationStudent, FormationSyncStatus, LevelCode, SchoolOverview,
 } from '../shared/formation-types';
+import type {
+  ArchivableRoom, ArchivedRoom, ArchivePlan, ArchiveOutcome, RestorePlan, RestoreOutcome,
+} from '../shared/archive-types';
 
 // Inline IPC channels to avoid module resolution issues in preload sandbox
 const IPC_CHANNELS = {
@@ -56,6 +59,12 @@ const IPC_CHANNELS = {
   ORPHAN_ACCESS_REVOKE: 'orphanAccess:revoke',
   TAG_PRUNE_PLAN: 'tagPrune:plan',
   TAG_PRUNE_EXECUTE: 'tagPrune:execute',
+  ARCHIVE_LIST_ROOMS: 'archive:listRooms',
+  ARCHIVE_LIST_ARCHIVED: 'archive:listArchived',
+  ARCHIVE_PLAN: 'archive:plan',
+  ARCHIVE_EXECUTE: 'archive:execute',
+  ARCHIVE_RESTORE_PLAN: 'archive:restorePlan',
+  ARCHIVE_RESTORE_EXECUTE: 'archive:restoreExecute',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -172,6 +181,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.TAG_PRUNE_PLAN),
   pruneDeadTags: (personId: string, items: Array<{ classId: string; tags: string[] }>) =>
     ipcRenderer.invoke(IPC_CHANNELS.TAG_PRUNE_EXECUTE, personId, items),
+
+  // Room archive
+  listArchivableRooms: () => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_LIST_ROOMS),
+  listArchivedRooms: () => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_LIST_ARCHIVED),
+  planArchive: (roomId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PLAN, roomId),
+  archiveRoom: (roomId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_EXECUTE, roomId),
+  planRestore: (folderId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_RESTORE_PLAN, folderId),
+  restoreRoom: (folderId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_RESTORE_EXECUTE, folderId),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -353,6 +370,12 @@ declare global {
           tagCount: number;
         }>;
       }>;
+      listArchivableRooms: () => Promise<ArchivableRoom[]>;
+      listArchivedRooms: () => Promise<ArchivedRoom[]>;
+      planArchive: (roomId: string) => Promise<ArchivePlan>;
+      archiveRoom: (roomId: string) => Promise<ArchiveOutcome>;
+      planRestore: (folderId: string) => Promise<RestorePlan>;
+      restoreRoom: (folderId: string) => Promise<RestoreOutcome>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;

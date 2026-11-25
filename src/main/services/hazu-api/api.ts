@@ -21,6 +21,17 @@ function getAuthHeaders(): Record<string, string> {
 
 // READ OPERATIONS
 
+// Checked read: 60 s timeout, rethrows the axios error, logs nothing (the error object carries
+// request headers incl. the API key, and a 404 is an expected answer for callers that probe).
+export const sendApiRequestReadChecked = async (id: string): Promise<any> => {
+  const response = await axios.get(`https://${getApiEndpoint()}/read`, {
+    headers: getAuthHeaders(),
+    params: { id },
+    timeout: 60_000,
+  });
+  return response.data;
+};
+
 export const sendApiRequestRead = async (id: string): Promise<any> => {
   try {
     const response = await axios.get(`https://${getApiEndpoint()}/read`, {
@@ -86,6 +97,44 @@ export const sendApiRequestListChecked = async (parentId: string): Promise<unkno
 };
 
 // WRITE OPERATIONS
+
+// Checked create / remove / move for the room archive: the originals swallow errors and return
+// null, which would hide the status code the retry logic needs. These rethrow the axios error.
+export const sendApiRequestCreateChecked = async (options: {
+  parentId: string; type: string; title: string; authorId: string; displayName: string;
+  privacy: string; tags: string[];
+}): Promise<any> => {
+  const response = await axios.post(`https://${getApiEndpoint()}/create`, options, {
+    headers: getAuthHeaders(),
+    timeout: 60_000,
+  });
+  return response.data;
+};
+
+export const sendApiRequestRemoveChecked = async (id: string): Promise<void> => {
+  await axios.delete(`https://${getApiEndpoint()}/remove`, {
+    headers: getAuthHeaders(),
+    params: { id },
+    timeout: 60_000,
+  });
+};
+
+// PUT /moveElement keeps the id; children follow. Success = 200 {"isSuccess":true}; the caller's
+// live read after it decides.
+export const sendApiRequestMoveChecked = async (
+  id: string,
+  targetHazuId: string,
+  loginId: string,
+): Promise<void> => {
+  const response = await axios.put(
+    `https://${getApiEndpoint()}/moveElement`,
+    { id, targetHazuId, loginId },
+    { headers: getAuthHeaders(), timeout: 60_000 },
+  );
+  if (response.data?.isSuccess !== true) {
+    throw new Error(`moveElement refused: ${JSON.stringify(response.data)}`);
+  }
+};
 
 export const sendApiRequestCreate = async (options: CreateOptions): Promise<any> => {
   try {
@@ -238,6 +287,7 @@ export const sendApiRequestAddTagsChecked = async (itemId: string, tags: string[
         "x-api-key": getApiKey(),
         "Content-Type": "application/json",
       },
+      timeout: 60_000,
     }
   );
 };
@@ -292,6 +342,7 @@ export const sendApiRequestRemoveTagsChecked = async (
         "Content-Type": "application/json",
       },
       data: { tags },
+      timeout: 60_000,
     });
     return { ok: true, networkOrTimeout: false };
   } catch (error: unknown) {

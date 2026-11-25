@@ -13,6 +13,7 @@ const pageTitles: Record<PageId, string> = {
   matrix: 'Assignment Matrix',
   import: 'Bulk Import',
   missions: 'Missions',
+  archive: 'Archive',
   discrepancies: 'Discrepancies',
   settings: 'Settings',
 };

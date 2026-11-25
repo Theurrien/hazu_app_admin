@@ -68,6 +68,12 @@ export const IPC_CHANNELS = {
   // Dead-tag pruning (S7)
   TAG_PRUNE_PLAN: 'tagPrune:plan',
   TAG_PRUNE_EXECUTE: 'tagPrune:execute',
+  ARCHIVE_LIST_ROOMS: 'archive:listRooms',
+  ARCHIVE_LIST_ARCHIVED: 'archive:listArchived',
+  ARCHIVE_PLAN: 'archive:plan',
+  ARCHIVE_EXECUTE: 'archive:execute',
+  ARCHIVE_RESTORE_PLAN: 'archive:restorePlan',
+  ARCHIVE_RESTORE_EXECUTE: 'archive:restoreExecute',
 
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',

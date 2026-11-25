@@ -57,8 +57,13 @@ describe('visiblePages', () => {
     }
   });
 
-  it('shows all eight pages in complete mode', () => {
-    expect(visiblePages('complete')).toHaveLength(8);
+  it('hides the archive page in cie mode and shows it in complete mode', () => {
+    expect(visiblePages('cie')).not.toContain('archive');
+    expect(visiblePages('complete')).toContain('archive');
+  });
+
+  it('shows all nine pages in complete mode', () => {
+    expect(visiblePages('complete')).toHaveLength(9);
   });
 
   it('makes complete a superset of cie', () => {
@@ -71,7 +76,7 @@ describe('visiblePages', () => {
   it('preserves the admin nav order', () => {
     expect(visiblePages('complete')).toEqual([
       'dashboard', 'rooms', 'persons', 'matrix',
-      'import', 'missions', 'discrepancies', 'settings',
+      'import', 'missions', 'archive', 'discrepancies', 'settings',
     ]);
   });
 });
@@ -168,13 +173,15 @@ describe('allowedTaskTypes', () => {
 
   it('excludes the task types cie mode cannot produce', () => {
     const types = allowedTaskTypes('cie');
-    for (const excluded of ['createPerson', 'healTag', 'revokeOrphanAccess', 'pruneDeadTags'] as const) {
+    for (const excluded of ['createPerson', 'healTag', 'revokeOrphanAccess', 'pruneDeadTags', 'archiveRoom', 'restoreRoom'] as const) {
       expect(types).not.toContain(excluded);
     }
   });
 
-  it('is all six in complete mode', () => {
-    expect(allowedTaskTypes('complete')).toHaveLength(6);
+  it('is all eight in complete mode', () => {
+    expect(allowedTaskTypes('complete')).toHaveLength(8);
+    expect(allowedTaskTypes('complete')).toContain('archiveRoom');
+    expect(allowedTaskTypes('complete')).toContain('restoreRoom');
   });
 
   it('makes complete a superset of cie', () => {
