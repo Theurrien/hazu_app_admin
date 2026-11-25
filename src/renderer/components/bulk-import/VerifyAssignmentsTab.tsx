@@ -137,11 +137,20 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
     [colOf]
   );
 
+  // A mapping, person-type or matching-mode change invalidates every result in flight: bumping the
+  // generation discards a verify result, an archive plan or a reload that lands afterwards. Their
+  // busy flags are reset here, because a discarded run no longer resets them itself — otherwise
+  // « Vérifier » or « Archiver la sélection » would stay disabled.
   const clearResults = useCallback(() => {
+    runRef.current += 1;
     setSnapshot(null);
     setDecisions([]);
     setTicked(new Set());
     setVerifyError(null);
+    setPlans([]);
+    setPlanning(false);
+    planningRef.current = false;
+    setIsVerifying(false);
   }, []);
 
   // Handle column mapping change
@@ -203,9 +212,9 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
     if (!canVerify || !fileData || !selectedPersonType) return;
     if (diffNeedsRoomType) return;
 
+    clearResults(); // bumps the generation: capture it afterwards
     const run = runRef.current;
     setIsVerifying(true);
-    clearResults();
 
     try {
       const sheet = sheetPersons(fileData.rows, columns);
