@@ -130,6 +130,17 @@ export function matchRows(rows: SheetPerson[], persons: HazuPerson[]): RowMatch[
             reason: 'conflict',
           };
         }
+        // The e-mail is trusted only when the name agrees, is near, or is absent: a row for B
+        // carrying A's e-mail (a copy-down error) must not silently match A and list B as leaver.
+        if (key !== '' && key !== a.key && !isNear(rowWords, a.words)) {
+          const near = info.filter((p) => p.id !== a.id && isNear(rowWords, p.words));
+          return {
+            kind: 'check',
+            rowIndex,
+            candidateIds: [a.id, ...near.map((p) => p.id)],
+            reason: 'conflict',
+          };
+        }
         return { kind: 'matched', rowIndex, personId: a.id, by: 'email' };
       }
       if (hits.length > 1) {

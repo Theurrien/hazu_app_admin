@@ -53,12 +53,45 @@ describe('matchRows', () => {
     ]);
   });
 
-  it('keeps an e-mail hit when the name merely disagrees', () => {
+  it('sends an e-mail hit whose name disagrees to à vérifier (copy-down error), with A alone', () => {
     const persons = [p('a', 'Anna Keller', 'anna@example.invalid')];
     const rows: SheetPerson[] = [
       { rowIndex: 0, email: 'anna@example.invalid', fullName: 'Someone Else' },
     ];
-    expect(matchRows(rows, persons)[0]).toMatchObject({ kind: 'matched', by: 'email' });
+    expect(matchRows(rows, persons)).toEqual([
+      { kind: 'check', rowIndex: 0, candidateIds: ['a'], reason: 'conflict' },
+    ]);
+  });
+
+  it('a disagreeing name lists A first, then near-name persons, without duplicates', () => {
+    const persons = [
+      p('a', 'Anna Keller', 'anna@example.invalid'),
+      p('c', 'Lukas Brunner', 'lukas@example.invalid'),
+    ];
+    const rows: SheetPerson[] = [
+      { rowIndex: 0, email: 'anna@example.invalid', fullName: 'Lukas Brunnerr' },
+    ];
+    expect(matchRows(rows, persons)).toEqual([
+      { kind: 'check', rowIndex: 0, candidateIds: ['a', 'c'], reason: 'conflict' },
+    ]);
+  });
+
+  it('keeps an e-mail hit when the name is near A', () => {
+    const persons = [p('a', 'Anna Maria Keller', 'anna@example.invalid')];
+    const rows: SheetPerson[] = [
+      { rowIndex: 0, email: 'anna@example.invalid', fullName: 'Anna Keller' },
+    ];
+    expect(matchRows(rows, persons)).toEqual([
+      { kind: 'matched', rowIndex: 0, personId: 'a', by: 'email' },
+    ]);
+  });
+
+  it('keeps an e-mail hit when the row has no name', () => {
+    const persons = [p('a', 'Anna Keller', 'anna@example.invalid')];
+    const rows: SheetPerson[] = [{ rowIndex: 0, email: 'anna@example.invalid', fullName: '  ' }];
+    expect(matchRows(rows, persons)).toEqual([
+      { kind: 'matched', rowIndex: 0, personId: 'a', by: 'email' },
+    ]);
   });
 
   it('flags two persons with the same name as ambiguous', () => {

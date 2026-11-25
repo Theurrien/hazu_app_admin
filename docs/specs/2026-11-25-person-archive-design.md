@@ -190,9 +190,10 @@ Per row, first rule that applies:
 
 | Case | Result |
 |---|---|
-| E-mail equals a person's e-mail, name agrees or is absent | **matched** |
-| No e-mail hit; name key equals exactly one person's | **matched** |
 | E-mail hits one person, name key hits another | **to check** (both shown) |
+| E-mail hits one person, name neither equal nor near that person's | **to check** (that person, then near-name persons) |
+| E-mail equals a person's e-mail, name equal, near or absent | **matched** |
+| No e-mail hit; name key equals exactly one person's | **matched** |
 | Name key equals several persons' | **to check** |
 | Near name: one side's words all contained in the other (middle names, double names), or exactly one word differs by a small edit distance | **to check**, with the candidate |
 | Nothing | **unknown** (in the file, not in Hazu — the existing « Unknown Persons » list) |

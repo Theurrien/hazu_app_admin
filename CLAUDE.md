@@ -864,9 +864,12 @@ it); the Assignment tab's person matching stays exact-e-mail. Names are compared
 title (`display_name` — `first_name`/`last_name` are that title split at the first space and are not
 reliable), lower-cased, accents stripped, hyphens/apostrophes/punctuation as spaces, as a **sorted
 set of words**, so order does not matter. A row has one of three outcomes:
-- **matched** — its e-mail hits one person and the name agrees or is absent, or there is no e-mail
-  hit and the name equals exactly one person's;
-- **à vérifier** — the e-mail hits one person and the name another (conflict); the name equals
+- **matched** — its e-mail hits one person and the name agrees (equal or near) or is absent, or
+  there is no e-mail hit and the name equals exactly one person's;
+- **à vérifier** — the e-mail hits one person and the name another, or a name that is neither equal
+  nor near that person's (conflict: a copy-down error must not silently match the e-mail's owner and
+  list the named student as a leaver; that person first, then equal- and near-name persons as
+  candidates); the name equals
   several persons' (ambiguous); or a **near** name: one side's words all contained in the other (a
   middle or double name, the smaller side at least two words), or one differing word pair of 5+
   letters at edit distance ≤ 2. The matcher never guesses: when in doubt it says « à vérifier »;
