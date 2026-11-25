@@ -173,13 +173,15 @@ describe('allowedTaskTypes', () => {
 
   it('excludes the task types cie mode cannot produce', () => {
     const types = allowedTaskTypes('cie');
-    for (const excluded of ['createPerson', 'healTag', 'revokeOrphanAccess', 'pruneDeadTags', 'archiveRoom', 'restoreRoom'] as const) {
+    for (const excluded of ['createPerson', 'healTag', 'revokeOrphanAccess', 'pruneDeadTags', 'archiveRoom', 'restoreRoom', 'archivePerson', 'restorePerson'] as const) {
       expect(types).not.toContain(excluded);
     }
   });
 
-  it('is all eight in complete mode', () => {
-    expect(allowedTaskTypes('complete')).toHaveLength(8);
+  it('is all ten in complete mode', () => {
+    expect(allowedTaskTypes('complete')).toHaveLength(10);
+    expect(allowedTaskTypes('complete')).toContain('archivePerson');
+    expect(allowedTaskTypes('complete')).toContain('restorePerson');
     expect(allowedTaskTypes('complete')).toContain('archiveRoom');
     expect(allowedTaskTypes('complete')).toContain('restoreRoom');
   });
