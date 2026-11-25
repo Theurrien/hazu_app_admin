@@ -1,5 +1,27 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { PersonType, RoomType } from '../../../shared/types';
+import type { PersonArchivePlan } from '../../../shared/archive-types';
+import {
+  matchRows,
+  resolvedPersonByRow,
+  findLeavers,
+  type CheckDecision,
+  type ClassFilter,
+  type HazuPerson,
+  type SheetPerson,
+} from '../../../shared/person-match';
+import { useAppMode } from '../../contexts/AppModeContext';
+import { useTaskQueue } from '../../contexts/TaskQueueContext';
+import { PersonArchiveConfirmModal } from '../archive/PersonArchiveConfirmModal';
+import { CheckSection, LeaverSection, sheetLabel, type ClassSelection } from './PersonCheckResults';
+import {
+  buildClassIdsOf,
+  canRunAssignmentDiff,
+  canRunPersonCheck,
+  leaverCounts,
+  sheetPersons,
+  type VerifyColumns,
+} from './verify-logic';
 import type { ColumnMapping } from './ColumnMappingDropdown';
 import { DataPreviewTable } from './DataPreviewTable';
 import { VerificationResults, DiscrepancyItem } from './VerificationResults';
@@ -38,7 +60,25 @@ interface VerificationResult {
   unknownPersons: string[];
 }
 
+/** What the last « Verify » read from the database, plus the sheet it was run against. */
+interface Snapshot {
+  personType: PersonType;
+  sheet: SheetPerson[];
+  persons: any[];
+  rooms: any[];
+  classRooms: any[];
+  assignments: Array<{ person_id: string; room_id: string; role: string }>;
+  roomNameByRow: Map<number, string>;
+  roomMapping: Map<string, string | null>;
+  withDiff: boolean;
+}
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
 export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
+  const { mode } = useAppMode();
+  const { tasks, addArchivePersonTask } = useTaskQueue();
+
   // Selection state
   const [selectedPersonType, setSelectedPersonType] = useState<PersonType | null>(null);
   const [selectedRoomType, setSelectedRoomType] = useState<RoomType | null>(null);
@@ -49,16 +89,40 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
 
   // Verification state
   const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [decisions, setDecisions] = useState<CheckDecision[]>([]);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
-  // Get mapped column headers
-  const emailColumn = useMemo(() => {
-    return Object.entries(columnMappings).find(([, mapping]) => mapping === 'verifyEmail')?.[0] || null;
-  }, [columnMappings]);
+  // Leavers state
+  const [classSel, setClassSel] = useState<ClassSelection>({ all: false, classIds: [], includeNoClass: false });
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [plans, setPlans] = useState<PersonArchivePlan[]>([]);
+  const [planning, setPlanning] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const enqueuedRef = useRef(false);
+  const planningRef = useRef(false);
 
-  const roomNameColumn = useMemo(() => {
-    return Object.entries(columnMappings).find(([, mapping]) => mapping === 'verifyRoomName')?.[0] || null;
-  }, [columnMappings]);
+  const colOf = useCallback(
+    (m: ColumnMapping) => Object.entries(columnMappings).find(([, v]) => v === m)?.[0] || null,
+    [columnMappings]
+  );
+  const columns: VerifyColumns = useMemo(
+    () => ({
+      email: colOf('verifyEmail'),
+      firstName: colOf('verifyFirstName'),
+      lastName: colOf('verifyLastName'),
+      fullName: colOf('verifyFullName'),
+      room: colOf('verifyRoomName'),
+    }),
+    [colOf]
+  );
+
+  const clearResults = useCallback(() => {
+    setSnapshot(null);
+    setDecisions([]);
+    setTicked(new Set());
+    setVerifyError(null);
+  }, []);
 
   // Handle column mapping change
   const handleColumnMappingChange = useCallback((header: string, mapping: ColumnMapping | null) => {
@@ -78,183 +142,257 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
       return newMappings;
     });
     // Clear results when mapping changes
-    setVerificationResult(null);
-  }, []);
+    clearResults();
+  }, [clearResults]);
 
-  // Check if ready to verify
-  const canVerify = fileData && selectedPersonType && selectedRoomType && emailColumn && roomNameColumn;
+  // Ready to verify: a person type and a way to identify people; room + room type only for the diff
+  const canVerify = !!(fileData && selectedPersonType && canRunPersonCheck(columns));
+  const diffWanted = canRunAssignmentDiff(columns);
+  const diffNeedsRoomType = diffWanted && !selectedRoomType;
 
-  // Run verification
-  const handleVerify = useCallback(async () => {
-    if (!canVerify || !fileData || !emailColumn || !roomNameColumn) return;
-
-    setIsVerifying(true);
-    setVerificationResult(null);
-
-    try {
-      // Fetch data from database
-      const [persons, rooms, assignments] = await Promise.all([
-        window.electronAPI.getPersons(selectedPersonType!),
-        window.electronAPI.getRooms(selectedRoomType!),
+  const fetchSnapshot = useCallback(
+    async (sheet: SheetPerson[], personType: PersonType, roomType: RoomType | null, withRooms: boolean): Promise<Snapshot> => {
+      const [persons, rooms, classRooms, assignments] = await Promise.all([
+        window.electronAPI.getPersons(personType),
+        withRooms && roomType ? window.electronAPI.getRooms(roomType) : Promise.resolve([]),
+        personType === 'student' ? window.electronAPI.getRooms('class') : Promise.resolve([]),
         window.electronAPI.getAllAssignments(),
       ]);
 
-      // Build lookup maps
-      const personsByEmail = new Map<string, { id: string; name: string }>();
-      for (const person of persons) {
-        if (person.email) {
-          personsByEmail.set(person.email.toLowerCase(), {
-            id: person.id,
-            name: person.display_name,
-          });
-        }
-      }
-
-      const roomsById = new Map<string, string>();
-      const roomNamesList: string[] = [];
-      for (const room of rooms) {
-        roomsById.set(room.id, room.title);
-        roomNamesList.push(room.title);
-      }
-
-      // Extract Excel data
-      const excelRoomNames = new Set<string>();
-      const unknownPersons: string[] = [];
-
-      for (const row of fileData.rows) {
-        const email = row[emailColumn]?.trim().toLowerCase();
-        const roomName = row[roomNameColumn]?.trim();
-
-        if (!email || !roomName) continue;
-
-        excelRoomNames.add(roomName);
-
-        if (!personsByEmail.has(email)) {
-          if (!unknownPersons.includes(email)) {
-            unknownPersons.push(email);
+      const roomNameByRow = new Map<number, string>();
+      const roomMapping = new Map<string, string | null>();
+      if (withRooms && columns.room && fileData) {
+        const excelRoomNames = new Set<string>();
+        for (const r of sheet) {
+          const roomName = fileData.rows[r.rowIndex]?.[columns.room]?.trim();
+          if (roomName) {
+            roomNameByRow.set(r.rowIndex, roomName);
+            excelRoomNames.add(roomName);
           }
         }
+        const mapping = buildRoomMapping(Array.from(excelRoomNames), rooms.map((r: any) => r.title), matchingMode);
+        mapping.forEach((v, k) => roomMapping.set(k, v || null));
       }
+      return { personType, sheet, persons, rooms, classRooms, assignments, roomNameByRow, roomMapping, withDiff: withRooms };
+    },
+    [columns.room, fileData, matchingMode]
+  );
 
-      // Build fuzzy room mapping
-      const roomMapping = buildRoomMapping(
-        Array.from(excelRoomNames),
-        roomNamesList,
-        matchingMode
-      );
+  // Run verification
+  const handleVerify = useCallback(async () => {
+    if (!canVerify || !fileData || !selectedPersonType) return;
+    if (diffNeedsRoomType) return;
 
-      // Find unmatched rooms
-      const unmatchedRooms: string[] = [];
-      for (const [excelName, hazuName] of roomMapping.entries()) {
-        if (!hazuName) {
-          unmatchedRooms.push(excelName);
-        }
-      }
+    setIsVerifying(true);
+    clearResults();
 
-      // Build room name to ID mapping
-      const roomIdByName = new Map<string, string>();
-      for (const room of rooms) {
-        roomIdByName.set(room.title, room.id);
-      }
-
-      // Build Hazu assignment set for selected person type and room type
-      // Only include assignments where the person is of selected type and room is of selected type
-      const personIds = new Set(persons.map(p => p.id));
-      const roomIds = new Set(rooms.map(r => r.id));
-
-      const hazuPairs = new Set<string>();
-      const hazuPairDetails = new Map<string, { email: string; roomName: string; personName: string }>();
-
-      for (const assignment of assignments) {
-        // Filter to only relevant assignments
-        if (!personIds.has(assignment.person_id) || !roomIds.has(assignment.room_id)) {
-          continue;
-        }
-
-        const person = persons.find(p => p.id === assignment.person_id);
-        const roomName = roomsById.get(assignment.room_id);
-
-        if (!person || !person.email || !roomName) continue;
-
-        const email = person.email.toLowerCase();
-        const key = `${email}|${roomName}`;
-        hazuPairs.add(key);
-        hazuPairDetails.set(key, {
-          email,
-          roomName,
-          personName: person.display_name,
-        });
-      }
-
-      // Compare: Missing in Hazu (in Excel but not in Hazu)
-      const missingInHazu: DiscrepancyItem[] = [];
-      for (const row of fileData.rows) {
-        const email = row[emailColumn]?.trim().toLowerCase();
-        const excelRoomName = row[roomNameColumn]?.trim();
-
-        if (!email || !excelRoomName) continue;
-        if (!personsByEmail.has(email)) continue;
-
-        const hazuRoomName = roomMapping.get(excelRoomName);
-        if (!hazuRoomName) continue;
-
-        const key = `${email}|${hazuRoomName}`;
-        if (!hazuPairs.has(key)) {
-          const person = personsByEmail.get(email);
-          missingInHazu.push({
-            email,
-            roomName: excelRoomName,
-            personName: person?.name,
-          });
-        }
-      }
-
-      // Compare: Extra in Hazu (in Hazu but not in Excel)
-      const extraInHazu: DiscrepancyItem[] = [];
-
-      // Build normalized Excel pairs using mapped room names
-      const normalizedExcelPairs = new Set<string>();
-      for (const row of fileData.rows) {
-        const email = row[emailColumn]?.trim().toLowerCase();
-        const excelRoomName = row[roomNameColumn]?.trim();
-
-        if (!email || !excelRoomName) continue;
-
-        const hazuRoomName = roomMapping.get(excelRoomName);
-        if (hazuRoomName) {
-          normalizedExcelPairs.add(`${email}|${hazuRoomName}`);
-        }
-      }
-
-      for (const [key, details] of hazuPairDetails.entries()) {
-        if (!normalizedExcelPairs.has(key)) {
-          extraInHazu.push(details);
-        }
-      }
-
-      // Deduplicate results
-      const dedupeByKey = (items: DiscrepancyItem[]) => {
-        const seen = new Set<string>();
-        return items.filter(item => {
-          const key = `${item.email}|${item.roomName}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      };
-
-      setVerificationResult({
-        missingInHazu: dedupeByKey(missingInHazu),
-        extraInHazu: dedupeByKey(extraInHazu),
-        unmatchedRooms,
-        unknownPersons,
-      });
+    try {
+      const sheet = sheetPersons(fileData.rows, columns);
+      setSnapshot(await fetchSnapshot(sheet, selectedPersonType, selectedRoomType, diffWanted));
     } catch (error) {
       console.error('Verification error:', error);
+      setVerifyError(errMsg(error));
     } finally {
       setIsVerifying(false);
     }
-  }, [canVerify, fileData, emailColumn, roomNameColumn, selectedPersonType, selectedRoomType, matchingMode]);
+  }, [canVerify, fileData, selectedPersonType, selectedRoomType, diffWanted, diffNeedsRoomType, columns, fetchSnapshot, clearResults]);
+
+  // ---- Derived state: everything re-derives from the snapshot and the decisions, no re-read ----
+  const hazuPersons: HazuPerson[] = useMemo(
+    () => (snapshot?.persons ?? []).map((p: any) => ({ id: p.id, email: p.email ?? null, displayName: p.display_name })),
+    [snapshot]
+  );
+  const personsById = useMemo(() => new Map(hazuPersons.map(p => [p.id, p])), [hazuPersons]);
+  const matches = useMemo(() => (snapshot ? matchRows(snapshot.sheet, hazuPersons) : []), [snapshot, hazuPersons]);
+  const sheetByRow = useMemo(() => new Map((snapshot?.sheet ?? []).map(r => [r.rowIndex, r])), [snapshot]);
+  const checks = useMemo(() => matches.filter((m): m is Extract<typeof m, { kind: 'check' }> => m.kind === 'check'), [matches]);
+  const decidedMap = useMemo(() => new Map(decisions.map(d => [d.rowIndex, d.personId])), [decisions]);
+  const undecided = checks.filter(c => !decidedMap.has(c.rowIndex)).length;
+
+  const verificationResult: VerificationResult | null = useMemo(() => {
+    if (!snapshot) return null;
+    const resolved = resolvedPersonByRow(matches, decisions);
+
+    const unknownPersons: string[] = [];
+    for (const m of matches) {
+      if (m.kind !== 'unknown') continue;
+      const row = sheetByRow.get(m.rowIndex);
+      const label = row ? sheetLabel(row) : '';
+      if (label && !unknownPersons.includes(label)) unknownPersons.push(label);
+    }
+
+    if (!snapshot.withDiff) {
+      return { missingInHazu: [], extraInHazu: [], unmatchedRooms: [], unknownPersons };
+    }
+
+    const unmatchedRooms: string[] = [];
+    snapshot.roomMapping.forEach((hazu, excel) => { if (!hazu) unmatchedRooms.push(excel); });
+
+    const roomsById = new Map<string, string>(snapshot.rooms.map((r: any) => [r.id, r.title]));
+    const personIds = new Set(snapshot.persons.map((p: any) => p.id));
+
+    // Hazu side, keyed by person id
+    const hazuPairs = new Set<string>();
+    const hazuPairDetails = new Map<string, DiscrepancyItem & { personId: string }>();
+    for (const a of snapshot.assignments) {
+      const roomName = roomsById.get(a.room_id);
+      if (!personIds.has(a.person_id) || !roomName) continue;
+      const person = personsById.get(a.person_id);
+      const key = `${a.person_id}|${roomName}`;
+      hazuPairs.add(key);
+      hazuPairDetails.set(key, { personId: a.person_id, email: person?.email ?? '', roomName, personName: person?.displayName });
+    }
+
+    // Sheet side: only rows resolved to a person (unknown or undecided rows stay out)
+    const excelPairs = new Set<string>();
+    const missingInHazu: DiscrepancyItem[] = [];
+    resolved.forEach((personId, rowIndex) => {
+      const excelRoom = snapshot.roomNameByRow.get(rowIndex);
+      if (!excelRoom) return;
+      const hazuRoom = snapshot.roomMapping.get(excelRoom);
+      if (!hazuRoom) return;
+      const key = `${personId}|${hazuRoom}`;
+      excelPairs.add(key);
+      if (!hazuPairs.has(key)) {
+        const p = personsById.get(personId);
+        missingInHazu.push({ email: p?.email ?? '', roomName: excelRoom, personName: p?.displayName });
+      }
+    });
+
+    // A person who may be the one of an undecided row is never reported as « extra ».
+    const doubtful = new Set<string>();
+    for (const c of checks) if (!decidedMap.has(c.rowIndex)) c.candidateIds.forEach(id => doubtful.add(id));
+    const extraInHazu: DiscrepancyItem[] = [];
+    hazuPairDetails.forEach((d, key) => {
+      if (!excelPairs.has(key) && !doubtful.has(d.personId)) {
+        extraInHazu.push({ email: d.email, roomName: d.roomName, personName: d.personName });
+      }
+    });
+
+    const dedupe = (items: DiscrepancyItem[]) => {
+      const seen = new Set<string>();
+      return items.filter(item => {
+        const k = `${item.personName}|${item.email}|${item.roomName}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    };
+    return { missingInHazu: dedupe(missingInHazu), extraInHazu: dedupe(extraInHazu), unmatchedRooms, unknownPersons };
+  }, [snapshot, matches, decisions, sheetByRow, personsById, checks, decidedMap]);
+
+  // ---- Leavers ----
+  const showLeavers = !!snapshot && snapshot.personType === 'student';
+  const classIdsOf = useMemo(
+    () => buildClassIdsOf(snapshot?.assignments ?? [], snapshot?.classRooms ?? []),
+    [snapshot]
+  );
+  const classOptions = useMemo(
+    () =>
+      (snapshot?.classRooms ?? [])
+        .map((r: any) => ({ id: r.id as string, title: r.title as string }))
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [snapshot]
+  );
+  const roomCountOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of snapshot?.assignments ?? []) m.set(a.person_id, (m.get(a.person_id) ?? 0) + 1);
+    return m;
+  }, [snapshot]);
+  const filter: ClassFilter | null = useMemo(() => {
+    if (classSel.all) return { all: true };
+    if (classSel.classIds.length === 0 && !classSel.includeNoClass) return null;
+    return { all: false, classIds: classSel.classIds, includeNoClass: classSel.includeNoClass };
+  }, [classSel]);
+  const leavers = useMemo(
+    () => (showLeavers ? findLeavers(hazuPersons, matches, decisions, classIdsOf, filter) : []),
+    [showLeavers, hazuPersons, matches, decisions, classIdsOf, filter]
+  );
+  const counts = useMemo(
+    () => (showLeavers ? leaverCounts(hazuPersons, matches, decisions, classIdsOf, filter) : { absent: 0, inClasses: 0 }),
+    [showLeavers, hazuPersons, matches, decisions, classIdsOf, filter]
+  );
+
+  const pending = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of tasks) {
+      if ((t.status === 'queued' || t.status === 'processing') && t.type === 'archivePerson') ids.add(t.personId);
+    }
+    return ids;
+  }, [tasks]);
+
+  const decide = useCallback((rowIndex: number, personId: string | null) => {
+    setDecisions(prev => [...prev.filter(d => d.rowIndex !== rowIndex), { rowIndex, personId }]);
+  }, []);
+  const undo = useCallback((rowIndex: number) => {
+    setDecisions(prev => prev.filter(d => d.rowIndex !== rowIndex));
+  }, []);
+
+  const toggleTick = (id: string) =>
+    setTicked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAllTicks = () => {
+    const selectable = leavers.filter(l => !pending.has(l.id));
+    setTicked(prev =>
+      selectable.length > 0 && selectable.every(l => prev.has(l.id)) ? new Set() : new Set(selectable.map(l => l.id))
+    );
+  };
+
+  const askArchive = async () => {
+    if (planningRef.current) return;
+    // Only ticked students that are still on the list and not already queued.
+    const ids = leavers.filter(l => ticked.has(l.id) && !pending.has(l.id)).map(l => l.id);
+    if (ids.length === 0) return;
+    planningRef.current = true;
+    setPlanning(true);
+    setArchiveError(null);
+    try {
+      const planned = await Promise.all(ids.map(id => window.electronAPI.planPersonArchive(id)));
+      enqueuedRef.current = false;
+      setPlans(planned);
+    } catch (e) {
+      setArchiveError(errMsg(e));
+    } finally {
+      planningRef.current = false;
+      setPlanning(false);
+    }
+  };
+
+  const confirmArchive = () => {
+    if (enqueuedRef.current) return; // a double click must not enqueue twice
+    enqueuedRef.current = true;
+    plans.forEach(p => {
+      if (!pending.has(p.personId)) {
+        addArchivePersonTask({ personId: p.personId, displayName: p.displayName, roomCount: p.rooms.length });
+      }
+    });
+    setPlans([]);
+    setTicked(new Set());
+  };
+
+  // When the Task Queue drains after archiving, reload persons and assignments and recompute.
+  const handled = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (handled.current === null) {
+      handled.current = new Set(tasks.filter(t => t.status === 'success').map(t => t.id));
+    }
+    const seen = handled.current;
+    tasks.forEach(t => {
+      if (t.status === 'queued' || t.status === 'processing') seen.delete(t.id);
+    });
+    if (tasks.some(t => t.status === 'queued' || t.status === 'processing')) return;
+    const fresh = tasks.filter(t => t.status === 'success' && t.type === 'archivePerson' && !seen.has(t.id));
+    if (fresh.length === 0) return;
+    fresh.forEach(t => seen.add(t.id));
+    if (!snapshot) return;
+    void fetchSnapshot(snapshot.sheet, snapshot.personType, selectedRoomType, snapshot.withDiff)
+      .then(setSnapshot)
+      .catch(e => setArchiveError(errMsg(e)));
+  }, [tasks, snapshot, fetchSnapshot, selectedRoomType]);
 
   if (!fileData) {
     return (
@@ -288,7 +426,7 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
               value={selectedPersonType || ''}
               onChange={(e) => {
                 setSelectedPersonType(e.target.value as PersonType || null);
-                setVerificationResult(null);
+                clearResults();
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -304,11 +442,11 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
               value={selectedRoomType || ''}
               onChange={(e) => {
                 setSelectedRoomType(e.target.value as RoomType || null);
-                setVerificationResult(null);
+                clearResults();
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Select room type...</option>
+              <option value="">No room type</option>
               {(Object.keys(roomTypeLabels) as RoomType[]).map(type => (
                 <option key={type} value={type}>{roomTypeLabels[type]}</option>
               ))}
@@ -328,7 +466,7 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
               checked={matchingMode === 'strict'}
               onChange={() => {
                 setMatchingMode('strict');
-                setVerificationResult(null);
+                clearResults();
               }}
               className="w-4 h-4 text-blue-600"
             />
@@ -342,7 +480,7 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
               checked={matchingMode === 'normal'}
               onChange={() => {
                 setMatchingMode('normal');
-                setVerificationResult(null);
+                clearResults();
               }}
               className="w-4 h-4 text-blue-600"
             />
@@ -356,7 +494,7 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
               checked={matchingMode === 'loose'}
               onChange={() => {
                 setMatchingMode('loose');
-                setVerificationResult(null);
+                clearResults();
               }}
               className="w-4 h-4 text-blue-600"
             />
@@ -379,29 +517,64 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
         >
           {isVerifying ? 'Verifying...' : 'Verify Assignments'}
         </button>
-        {!canVerify && (
+        {(!canVerify || diffNeedsRoomType) && (
           <p className="text-sm text-gray-500 mt-2">
-            {!emailColumn && 'Map an email column. '}
-            {!roomNameColumn && 'Map a room name column. '}
+            {!canRunPersonCheck(columns) && 'Map an email column, a full name column, or first and last name columns. '}
             {!selectedPersonType && 'Select person type. '}
-            {!selectedRoomType && 'Select room type.'}
+            {diffNeedsRoomType && 'Select a room type to compare the room column.'}
           </p>
         )}
       </div>
 
+      {verifyError && <div className="p-4 rounded-lg bg-red-50 text-red-800 text-sm">{verifyError}</div>}
+
       {/* Results */}
-      {(verificationResult || isVerifying) && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-3">Verification Results</h3>
-          <VerificationResults
-            missingInHazu={verificationResult?.missingInHazu || []}
-            extraInHazu={verificationResult?.extraInHazu || []}
-            unmatchedRooms={verificationResult?.unmatchedRooms || []}
-            unknownPersons={verificationResult?.unknownPersons || []}
-            isLoading={isVerifying}
+      {snapshot && (
+        <div className="space-y-4">
+          <CheckSection
+            checks={checks}
+            sheetByRow={sheetByRow}
+            personsById={personsById}
+            decided={decidedMap}
+            onDecide={decide}
+            onUndo={undo}
           />
+          {(verificationResult || isVerifying) && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Verification Results</h3>
+              <VerificationResults
+                missingInHazu={verificationResult?.missingInHazu || []}
+                extraInHazu={verificationResult?.extraInHazu || []}
+                unmatchedRooms={verificationResult?.unmatchedRooms || []}
+                unknownPersons={verificationResult?.unknownPersons || []}
+                assignmentsChecked={snapshot.withDiff}
+                isLoading={isVerifying}
+              />
+            </div>
+          )}
+          {showLeavers && (
+            <LeaverSection
+              classes={classOptions}
+              selection={classSel}
+              onSelectionChange={setClassSel}
+              leavers={leavers}
+              counts={counts}
+              roomCountOf={roomCountOf}
+              ticked={ticked}
+              onToggle={toggleTick}
+              onToggleAll={toggleAllTicks}
+              pending={pending}
+              undecided={undecided}
+              canArchive={mode === 'complete'}
+              planning={planning}
+              onArchive={askArchive}
+              error={archiveError}
+            />
+          )}
         </div>
       )}
+
+      <PersonArchiveConfirmModal plans={plans} onCancel={() => setPlans([])} onConfirm={confirmArchive} />
     </div>
   );
 }

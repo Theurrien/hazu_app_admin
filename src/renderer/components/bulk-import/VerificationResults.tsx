@@ -11,6 +11,8 @@ interface VerificationResultsProps {
   extraInHazu: DiscrepancyItem[];
   unmatchedRooms: string[];
   unknownPersons: string[];
+  /** False when no room column was compared: the « all match » message would then be misleading. */
+  assignmentsChecked?: boolean;
   isLoading?: boolean;
 }
 
@@ -19,6 +21,7 @@ export function VerificationResults({
   extraInHazu,
   unmatchedRooms,
   unknownPersons,
+  assignmentsChecked = true,
   isLoading = false,
 }: VerificationResultsProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
@@ -48,6 +51,7 @@ export function VerificationResults({
   const totalDiscrepancies = missingInHazu.length + extraInHazu.length;
 
   if (totalDiscrepancies === 0 && unmatchedRooms.length === 0 && unknownPersons.length === 0) {
+    if (!assignmentsChecked) return null;
     return (
       <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
         <div className="text-green-600 font-medium">All assignments match</div>
@@ -190,7 +194,7 @@ export function VerificationResults({
           {expandedSections.has('unknown') && (
             <div className="p-4 max-h-48 overflow-y-auto">
               <p className="text-sm text-gray-500 mb-2">
-                These emails from Excel are not found in Hazu:
+                These people (email or name) from Excel are not found in Hazu:
               </p>
               <ul className="space-y-1">
                 {unknownPersons.map((email, idx) => (

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export type ColumnMapping = 'roomName' | 'firstName' | 'lastName' | 'email' | 'grouping1' | 'grouping2' | 'templateGroup' | 'verifyEmail' | 'verifyRoomName' | 'assignEmail' | 'assignRoom';
+export type ColumnMapping = 'roomName' | 'firstName' | 'lastName' | 'email' | 'grouping1' | 'grouping2' | 'templateGroup' | 'verifyEmail' | 'verifyRoomName' | 'verifyFirstName' | 'verifyLastName' | 'verifyFullName' | 'assignEmail' | 'assignRoom';
 
 export type MappingMode = 'room' | 'person' | 'verify' | 'assignment';
 
@@ -25,6 +25,9 @@ const mappingLabels: Record<ColumnMapping, string> = {
   templateGroup: 'Template Group',
   verifyEmail: 'Person Email',
   verifyRoomName: 'Room Name',
+  verifyFirstName: 'First Name',
+  verifyLastName: 'Last Name',
+  verifyFullName: 'Full Name',
   assignEmail: 'Email',
   assignRoom: 'Room',
 };
@@ -200,6 +203,9 @@ const ColumnMappingDropdown: React.FC<ColumnMappingDropdownProps> = ({
       >
         <div className="py-1">
           {renderOption('verifyEmail')}
+          {renderOption('verifyFirstName')}
+          {renderOption('verifyLastName')}
+          {renderOption('verifyFullName')}
           {renderOption('verifyRoomName')}
 
           <div className="border-t border-gray-200 my-1"></div>
