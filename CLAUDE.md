@@ -1230,8 +1230,8 @@ window controls of its own (only drag regions in `Header.tsx`, `Sidebar.tsx`, an
 `global.css`). A non-default `titleBarStyle` hides the title bar on Windows too, which would
 have shipped a window with no close, minimise, or maximise button, recoverable only via Alt+F4
 or the taskbar — not by the person this build is for. Both options are now conditioned on
-`process.platform === 'darwin'`; Windows gets its standard title bar. **Not verified from
-macOS** — it is the first check in the acceptance run below.
+`process.platform === 'darwin'`; Windows gets its standard title bar
+(checked in the Windows acceptance run below).
 
 ### Auto-update, and why it needs neither a token nor a signature
 
@@ -1247,17 +1247,15 @@ users. Because the updater fetches and launches the installer itself rather than
 arriving through a browser download, SmartScreen does not reappear on any update after the
 first install.
 
-### The updater is untrusted until the Windows acceptance run
+### Verified on Windows
 
-None of the above — the probe's error taxonomy, the reachability rule, the title bar, or
-auto-update — has been exercised on a real Windows install. The updater in particular cannot be
-tested from macOS: the thing under test *is* the Windows install path, and an updater that fails
-silently on a user's machine is worse than no updater, because neither he nor the maintainer
-would find out. **Do not describe auto-update, or this feature generally, as working until the
-8-step acceptance run in [the S10 spec](docs/specs/2026-09-22-s10-windows-delivery-design.md)
-has been run once, end to end, on a Windows machine** — install, the setup gate in CIE mode, the
+The 8-step acceptance run in [the S10 spec](docs/specs/2026-09-22-s10-windows-delivery-design.md)
+passed on a real Windows laptop on 2026-09-22 (v1.0.1): install, the setup gate in CIE mode, the
 401 and 404 messages naming the right field, persistence across relaunch, key deactivation and
-recovery, and one real self-update.
+recovery, and one real self-update. Auto-update was confirmed again on Windows on 2026-11-25
+(1.0.6 → 1.0.8). The updater still cannot be tested from macOS — the thing under test *is* the
+Windows install path — so after any change to the updater, the `build`/`publish` block or the
+installer, run the acceptance run again on Windows before calling it working.
 
 ## Testing the App
 
