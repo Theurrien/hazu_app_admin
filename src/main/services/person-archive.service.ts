@@ -147,7 +147,7 @@ async function archivePersonUnsafe(personId: string): Promise<PersonArchiveOutco
   const deps: PersonArchiveDeps = {
     ...buildDeps(),
     removeRole: async (roomId, role) => {
-      const res = await reliableUpdateUserRole(personId, roomId, role, '_');
+      const res = await reliableUpdateUserRole(personId, roomId, role, '_', { reconcileOnlyWhenVerified: true });
       // Spec: every room removal must be confirmed by S4's group-truth read. A 2xx that could not be
       // verified (success && !verified) is not a confirmed removal: the profile must not move.
       return {
