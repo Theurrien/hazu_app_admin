@@ -55,4 +55,11 @@ maintainer. All six steps passed.
 - **Restore, then sync:** the profile is back in the student folder with no rooms.
 - The test student was archived again afterwards and left in the Archive on purpose.
 - **Not exercised in this run:** the Verify steps (name matching, « à vérifier », leavers by
-  class) — to be run by the maintainer on the Windows build.
+  class) — run separately on Windows, below.
+
+## Verify on the Windows build (2026-11-25)
+
+Version 1.0.9, installed by auto-update, driven by the maintainer in complete mode. The Verify
+steps passed: with a name column mapped, the leaver list stays empty until a class is chosen and
+then shows the student left out of the file; a slightly misspelt name lands in « À vérifier » and
+not on the leaver list; « Archiver la sélection » opens its confirmation.
