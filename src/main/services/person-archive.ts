@@ -102,6 +102,20 @@ export function syncState(
   };
 }
 
+/**
+ * S4 outcome → a confirmed room removal. Every removal must be confirmed by S4's group-truth read:
+ * a 2xx that could not be verified (success && !verified) is not confirmed, so the profile must not move.
+ */
+export function removalConfirmed(res: { success: boolean; verified: boolean; error?: string }): {
+  success: boolean;
+  error?: string;
+} {
+  return {
+    success: res.success && res.verified,
+    error: res.success && !res.verified ? 'retrait non vérifiable (synchronisation requise ?)' : res.error,
+  };
+}
+
 export interface PersonArchiveDeps extends ArchiveDeps {
   /** S4 role write to '_'. success = confirmed gone (or confirmed by truth after a failed status). */
   removeRole(roomId: string, role: string): Promise<{ success: boolean; error?: string }>;

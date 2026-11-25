@@ -18,6 +18,7 @@ import {
   runPersonArchive,
   runPersonRestore,
   syncState,
+  removalConfirmed,
 } from './person-archive';
 
 type Op = 'read' | 'list' | 'create' | 'move' | 'addTags' | 'removeTags' | 'remove';
@@ -447,5 +448,23 @@ describe('syncState', () => {
   });
   it('a sync running now: incomplete even with a good timestamp', () => {
     expect(syncState(String(now - H), true, now)).toEqual({ incomplete: true, stale: false, lastSyncAt: now - H });
+  });
+});
+
+describe('removalConfirmed', () => {
+  it('a verified success is confirmed', () => {
+    expect(removalConfirmed({ success: true, verified: true })).toEqual({ success: true, error: undefined });
+  });
+  it('a 2xx that could not be verified is not a confirmed removal', () => {
+    expect(removalConfirmed({ success: true, verified: false })).toEqual({
+      success: false,
+      error: 'retrait non vérifiable (synchronisation requise ?)',
+    });
+  });
+  it('a failure stays a failure with its own error', () => {
+    expect(removalConfirmed({ success: false, verified: false, error: 'HTTP 500' })).toEqual({
+      success: false,
+      error: 'HTTP 500',
+    });
   });
 });
