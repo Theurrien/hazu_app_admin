@@ -32,6 +32,9 @@ export async function reliableUpdateUserRole(
   roomId: string,
   oldRole: string | null,
   newRole: string | null,
+  // reconcileOnlyWhenVerified: the person archive needs the local row to stay until group truth
+  // confirmed the removal, so a retry still lists the room. Absent = unchanged behaviour.
+  options?: { reconcileOnlyWhenVerified?: boolean },
 ): Promise<RoleWriteResult> {
   const db = getDb();
 
@@ -150,7 +153,7 @@ export async function reliableUpdateUserRole(
   // Reconcile local person_room_assignments from truth: after a 2xx, or after a transport-level
   // failure that group truth nonetheless confirms (measured — 500s and timeouts on this endpoint
   // often land anyway). An unconfirmed failure leaves local state untouched.
-  if (outcome.postOk || outcome.verified) {
+  if (options?.reconcileOnlyWhenVerified ? outcome.verified : outcome.postOk || outcome.verified) {
     try {
       if (isRealRole(outcome.reconciledRole)) {
         db.prepare(

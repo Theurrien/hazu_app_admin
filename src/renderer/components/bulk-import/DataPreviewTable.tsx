@@ -22,6 +22,9 @@ const mappingLabels: Record<ColumnMapping, string> = {
   templateGroup: 'Template Group',
   verifyEmail: 'Person Email',
   verifyRoomName: 'Room Name',
+  verifyFirstName: 'First Name',
+  verifyLastName: 'Last Name',
+  verifyFullName: 'Full Name',
   assignEmail: 'Email',
   assignRoom: 'Room',
 };

@@ -217,6 +217,7 @@ describe('computeGroupAssignments — parallel reads', () => {
     const res = await computeGroupAssignments(groups.slice(0, 1), getAcl, byEmail, new Set(), new Map(), { sleep: noSleep });
     expect(calls).toBe(3);
     expect(res.assignments).toHaveLength(1);
+    expect(res.skippedGroups).toBe(0);
   });
 
   it('does not retry a 4xx, and skips that group', async () => {
@@ -227,6 +228,7 @@ describe('computeGroupAssignments — parallel reads', () => {
     errSpy.mockRestore();
     expect(calls).toBe(1);
     expect(res.assignments).toEqual([]);
+    expect(res.skippedGroups).toBe(1);
   });
 
   it('gives up after maxAttempts transient failures and skips the group', async () => {
@@ -237,5 +239,6 @@ describe('computeGroupAssignments — parallel reads', () => {
     errSpy.mockRestore();
     expect(calls).toBe(3);
     expect(res.assignments).toEqual([]);
+    expect(res.skippedGroups).toBe(1);
   });
 });

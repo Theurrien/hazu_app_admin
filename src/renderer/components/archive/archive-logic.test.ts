@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterRooms, TYPE_LABEL, formatArchivedAt, plainTitle } from './archive-logic';
+import { filterRooms, filterPersons, TYPE_LABEL, formatArchivedAt, plainTitle } from './archive-logic';
 
 const rows = [
   { roomType: 'class' as const, title: 'École CUI 1' },
@@ -54,5 +54,31 @@ describe('filterRooms with HTML titles', () => {
     expect(filterRooms(r, new Set(), 'ecole a & b')).toHaveLength(1);
     expect(filterRooms(r, new Set(), 'strong')).toHaveLength(0);
     expect(filterRooms(r, new Set(), '<b>')).toHaveLength(0);
+  });
+});
+
+describe('filterPersons', () => {
+  const people = [
+    { display_name: 'Élodie Muster', email: 'elodie@example.invalid', person_type: 'student' },
+    { display_name: 'Hans Beispiel', email: 'hans@example.invalid', person_type: 'schoolteacher' },
+    { display_name: 'Zoé Muster', email: null, person_type: 'student' },
+  ];
+  it('empty search and no type returns nothing', () => {
+    expect(filterPersons(people, '', [])).toEqual([]);
+    expect(filterPersons(people, '   ', [])).toEqual([]);
+  });
+  it('search ignores accents and case on the name', () => {
+    expect(filterPersons(people, 'ELODIE', []).map((p) => p.display_name)).toEqual(['Élodie Muster']);
+    expect(filterPersons(people, 'zoe', [])).toHaveLength(1);
+  });
+  it('search also matches the e-mail', () => {
+    expect(filterPersons(people, 'hans@', [])).toHaveLength(1);
+  });
+  it('a type alone lists that type', () => {
+    expect(filterPersons(people, '', ['student'])).toHaveLength(2);
+  });
+  it('combines type and search', () => {
+    expect(filterPersons(people, 'muster', ['schoolteacher'])).toHaveLength(0);
+    expect(filterPersons(people, 'muster', ['student'])).toHaveLength(2);
   });
 });

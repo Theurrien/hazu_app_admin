@@ -80,7 +80,9 @@ export type TaskType =
   | 'revokeOrphanAccess'
   | 'pruneDeadTags'
   | 'archiveRoom'
-  | 'restoreRoom';
+  | 'restoreRoom'
+  | 'archivePerson'
+  | 'restorePerson';
 
 const ALL_TASK_TYPES: readonly TaskType[] = [
   'roleUpdate',
@@ -91,11 +93,13 @@ const ALL_TASK_TYPES: readonly TaskType[] = [
   'pruneDeadTags',
   'archiveRoom',
   'restoreRoom',
+  'archivePerson',
+  'restorePerson',
 ];
 // The two task types CIE mode can itself produce: Matrix cell edits (roleUpdate)
 // and Bulk Import Room Creation (createRoom). Everything else — createPerson and
 // the Discrepancies-only writes healTag/revokeOrphanAccess/pruneDeadTags (the
-// latter two destructive) and the Archive page's archiveRoom/restoreRoom — comes only from pages CIE mode does not show, but a
+// latter two destructive) and the Archive page's archiveRoom/restoreRoom and archivePerson/restorePerson — comes only from pages CIE mode does not show, but a
 // task an admin left errored in the panel before locking must stay hidden, not
 // deleted.
 const CIE_TASK_TYPES: readonly TaskType[] = ['roleUpdate', 'createRoom'];

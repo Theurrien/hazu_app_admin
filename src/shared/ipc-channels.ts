@@ -74,6 +74,10 @@ export const IPC_CHANNELS = {
   ARCHIVE_EXECUTE: 'archive:execute',
   ARCHIVE_RESTORE_PLAN: 'archive:restorePlan',
   ARCHIVE_RESTORE_EXECUTE: 'archive:restoreExecute',
+  ARCHIVE_PERSON_PLAN: 'archive:person:plan',
+  ARCHIVE_PERSON_LIST_ARCHIVED: 'archive:person:listArchived',
+  ARCHIVE_PERSON_EXECUTE: 'archive:person:execute',
+  ARCHIVE_PERSON_RESTORE_EXECUTE: 'archive:person:restoreExecute',
 
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',

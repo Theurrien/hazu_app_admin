@@ -55,6 +55,10 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         }
         return `Restaurer ${task.roomTitle}`;
       }
+      case 'archivePerson':
+        return `Archiver ${task.displayName} (${task.roomCount} salles)`;
+      case 'restorePerson':
+        return `Restaurer ${task.displayName}`;
     }
   };
 

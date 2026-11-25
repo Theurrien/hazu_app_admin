@@ -94,6 +94,8 @@ hazu-admin/
 │   │       ├── formation-sync.service.ts # IO layer: background run, one-transaction write, queries
 │   │       ├── room-archive.ts         # Room Archive — pure core (archive/restore order, record tags)
 │   │       ├── room-archive.service.ts # Room Archive — IO layer, local reconcile
+│   │       ├── person-archive.ts       # Person Archive — pure core (archive/restore order, record tags)
+│   │       ├── person-archive.service.ts # Person Archive — IO layer, plan, live list, local reconcile
 │   │       │
 │   │       │   # Group-truth stages. Each splits into a PURE CORE with all IO
 │   │       │   # injected (vitest-runnable, no native module) + a thin *.service.ts
@@ -124,7 +126,7 @@ hazu-admin/
 │   │   │   ├── PersonsPage.tsx
 │   │   │   ├── MatrixPage.tsx
 │   │   │   ├── FormationPage.tsx      # Missions tab: school overview → formation drill-down
-│   │   │   ├── ArchivePage.tsx        # Archive tab: archive / restore rooms (complete mode)
+│   │   │   ├── ArchivePage.tsx        # Archive tab: « Salles | Personnes », archive / restore (complete mode)
 │   │   │   ├── BulkImportPage.tsx
 │   │   │   ├── DiscrepanciesPage.tsx  # Groups-vs-tags report + heal/revoke/prune
 │   │   │   └── SettingsPage.tsx
@@ -141,8 +143,10 @@ hazu-admin/
 │   │   │   │   ├── MandateTable.tsx
 │   │   │   │   ├── StackedBar.tsx         # bar colours/labels used everywhere in the tab
 │   │   │   │   └── sync-logic.ts, detail-logic.ts  # pure display decisions (+ tests)
-│   │   │   ├── archive/             # Archive tab: confirm modals, archive-logic.ts (+ tests)
+│   │   │   ├── archive/             # Archive tab: confirm modals (room + PersonArchiveConfirmModal), archive-logic.ts (+ tests)
 │   │   │   ├── bulk-import/         # Bulk Import workflow components (uploader, mapping, matching, preview, verify)
+│   │   │   │                        #   Verify: VerifyAssignmentsTab, PersonCheckResults (À vérifier,
+│   │   │   │                        #   unmatched rows, leaver list), verify-logic.ts (+ tests)
 │   │   │   ├── MatrixGrid.tsx       # Virtualized person × room assignment grid
 │   │   │   ├── MatrixFilters.tsx
 │   │   │   ├── CreatePersonModal.tsx
@@ -163,7 +167,8 @@ hazu-admin/
 │   │
 │   └── shared/                 # Shared between main & renderer
 │       ├── app-mode.ts        # S9 — pure mode decisions (pages/workflows/roles)
-│       ├── archive-types.ts   # Room archive outcomes, plans, ArchivableRoom
+│       ├── archive-types.ts   # Room + person archive outcomes, plans, ArchivableRoom, ArchivedPerson
+│       ├── person-match.ts    # Verify: spreadsheet row ↔ Hazu person matcher, leaver list (pure, + tests)
 │       ├── formation-types.ts # Missions formation overview types (Row, StudentRaw, SchoolOverview…)
 │       ├── types.ts           # TypeScript interfaces
 │       └── ipc-channels.ts    # IPC channel constants
@@ -630,6 +635,165 @@ without a re-sync after an archive.
   [Development runs use a scratch userData copy](#development-runs-use-a-scratch-userdata-copy)):
   archive and restore write to the live Hazu.
 
+## Person Archive
+
+The Archive tab's second section, **Personnes** ([ArchivePage.tsx](src/renderer/pages/ArchivePage.tsx),
+« Salles | Personnes »), takes a person who has left (any of the six types) out of every room and
+moves the profile into the Archive Hazu — **without deleting anything**, so the profile can be put
+back. The same action is offered for students in Bulk Import → Verify, from the leaver list (see
+[Bulk Import](#bulk-import)). It is **complete mode only**. Spec:
+[docs/specs/2026-11-25-person-archive-design.md](docs/specs/2026-11-25-person-archive-design.md);
+the live probes behind it: [docs/person-archive-probe-findings.md](docs/person-archive-probe-findings.md).
+
+### Layout in Hazu
+```
+admin Hazu (hz-config-admin)
+└── Archive                            existing (room archive), hz-config-archive, private
+    └── Personnes                      tag hz-config-archive-persons, privacy private, created on first use
+        └── {person's name}            one folder per person, privacy unlisted
+            │   tags: hz-config-archive-person, -profile-{profileId}, -from-{originalParentId}, -at-{ms}
+            └── {the profile}          same id, children, tags, ACL, privacy — untouched
+```
+The record lives in the folder's tags, as for rooms: no local table, and another machine running
+the app sees the same archive. The profile itself is not modified.
+
+### What the live probe measured
+A move keeps the id, the 13 children, tags, privacy and all ACL entries; only `parentId` and `link`
+change, and moving back restores the link exactly. `update-user-roles` to `_` removed the group
+membership, the room-item entry **and** the class tag, all gone on the first read 3 s later — so the
+archive needs no separate removal of the room-item grant (S4's verified write covers it). A role
+add took ~21 s and a removal ~23 s on the test profile (roughly 22 s per room), which is why a batch
+is slow. **Not measured by the probe:** what the account itself sees (can it open its profile, can
+it climb to « Personnes ») — that is part of the maintainer's acceptance run.
+
+### Archive order — and why rooms come before the move
+Every step reads live state first and skips what is done, so a stopped run is finished by starting
+it again. Order: read the profile live (it must sit under a live person category — a child of root
+tagged `hz-config-profile-*` — or already be inside its own folder in « Personnes », which counts as
+done) → **remove every room** → remove leftover class tags → Archive Hazu → « Personnes » → the
+person's folder (record tags written **before anything moves**; a folder found by its record is
+reused only when its recorded origin is the profile's current parent, else « dossier d'archive
+existant avec une autre origine », nothing moved) → **move the profile**.
+
+Rooms first, move last, on purpose: a run that stops after the move would leave an archived profile
+still sitting in live role groups. The reverse — rooms removed, profile not moved — is a harmless
+half-state a re-run finishes.
+
+- **Which rooms.** The person's rows in `person_room_assignments` (group truth of the last sync)
+  **plus** every live local room **and role** named by a `hz-config-class-{id}-{role}` tag on the
+  profile as just read (a membership the last sync missed usually still shows as a tag). The list
+  is keyed by room **and** role: a second role in an assigned room, named only by a tag, gets its
+  own removal — keyed by room alone, its tag would be deleted as a leftover with the membership
+  still live. Reading ~835 group ACLs live per person is too slow, so the list comes from the last
+  sync and the confirmation modal shows its date and **warns when the sync is older than 24 h**.
+- **An incomplete sync blocks.** The sync empties `person_room_assignments` first and refills it
+  last, so during a sync, or after one that failed or was quit, the list is partial. `clearOldData`
+  sets `last_sync_at` to `'0'` before anything is wiped; only a successful end writes the real time.
+  `archivePerson` refuses (« synchronisation incomplète — synchronisez d'abord », nothing written)
+  while a sync runs or when `last_sync_at` is not a positive number, and the plan's `syncIncomplete`
+  makes the modal block with the confirm button disabled. A sync that finished but could not read
+  some role-group ACLs is incomplete too: the membership step writes the count to the
+  `sync_skipped_groups` setting (reset to `'0'` with `last_sync_at`; only failed reads count, groups
+  without a room are never read), and the refusal reads « dernière synchronisation incomplète
+  (n groupe(s) illisible(s)) — synchronisez d'abord ». A `last_sync_at` more than 5 min in the future
+  is invalid. The decision is `syncState` in the pure core. The 24 h staleness only **warns**; it
+  never refuses.
+- **No sync during an archive.** `archivePerson`, `archiveRoom` and `restoreRoom` hold the counter
+  in [archive-lock.ts](src/main/services/archive-lock.ts) (taken synchronously, before the sync
+  check); `runFullSync` refuses to start while it is held (« archivage en cours — réessayez
+  ensuite »). The sync state is checked again right before the local reconcile, which is skipped
+  (one log line) when a sync is running or incomplete; the API outcome stands.
+- **Each room** goes through `reliableUpdateUserRole(personId, roomId, role, '_', { reconcileOnlyWhenVerified: true })`
+  (S4: retry, verify against group truth). All rooms are attempted; if **any** is not confirmed the
+  run stops there — nothing is created or moved, `success:false`, `remaining` names the rooms.
+- **Leftover tags.** Class tags of **live** local rooms still on the profile are removed through
+  `sendApiRequestRemoveTagsChecked` and verified by re-reading the profile. Tags of archived or
+  unknown rooms are left alone.
+
+### A room removal counts only when S4 verified it
+`removalConfirmed` (pure core, tested) treats `success && verified` as the removal; a 2xx that group truth could not confirm
+(blank identity, role group not synced, every ACL read failing) is **not** a confirmed removal, and
+the profile does not move. Removing someone from a room and then archiving them on an unverified 2xx
+would be the exact false success this app avoids.
+
+For the same reason an unverified removal must **leave the local assignment row in place**: the
+room list comes from `person_room_assignments`, so deleting the row on an unverified 2xx would drop
+that room from the next attempt's list. `reliableUpdateUserRole` therefore takes an optional
+`{ reconcileOnlyWhenVerified: true }`: the local reconcile then runs only when `verified`, not after
+a bare 2xx. Existing callers (Matrix, Bulk Import Assignment, person creation) do not pass it and
+are unchanged.
+
+### Restore order
+The folder is read live and must sit in « Personnes » (found under the Archive root) with a complete
+record (the **containment check**: tags alone prove nothing). The profile must be the folder's child
+or already back at its origin. The **origin check**: the recorded origin must still exist and be a
+live person category — otherwise the restore stops, never guessing a category. Then: profile back to
+its origin (verified move) → the folder is removed, only after a live listing shows it empty. If the
+move is not confirmed the folder is kept — its tags are the only record of the origin.
+
+**Rooms are not restored** (decided by the maintainer, 2026-11-25): the person returns to the app
+on the next sync with no rooms and is re-assigned by hand in Matrix. The modal says so.
+
+### Success rule
+**The live read decides, not the status code** (as S4/S6/S7 and the room archive). An archive is
+done when every room removal was confirmed by S4 and a live read shows the profile inside its
+folder under « Personnes »; a restore, when the profile is back under its origin and the folder is
+gone. Anything short of that is `success:false`, naming what is left (`remaining`). Transient
+errors retry with `backoffMs`; the moves are the room archive's verified move (read before any
+resend, read again after a final failure — a move whose status failed but whose live read shows it
+under the target counts as done).
+
+### Local reconcile
+After the run, in its own try/catch (a local failure cannot flip an API success), **on full success
+only**: one transaction deletes the person's `person_room_assignments`, `formation_*` rows
+(`formation_student`, `_copy`, `_assessment`, `_report`, `_plan_retired`), their `membership_issues`
+rows (by `uid` or `email` matching the stored identity) and the `persons` row, so Matrix,
+Discrepancies and Missions update without a sync. The formation cleanup runs for any person type; it
+only has rows for students. Restore changes nothing locally.
+
+### Files
+- [person-archive.ts](src/main/services/person-archive.ts) — **pure core**, all IO injected
+  (`PersonArchiveDeps` = the room archive's `ArchiveDeps` plus `removeRole`): record tags,
+  `archivedPersonEntry`, `syncState`, `removalConfirmed`, `runPersonArchive`, `runPersonRestore`. It reuses `withRetry`, `readUntil`,
+  `moveVerified`, `createOnce` from [room-archive.ts](src/main/services/room-archive.ts) (exported
+  for this, not copied). Tests in `person-archive.test.ts`.
+- [person-archive.service.ts](src/main/services/person-archive.service.ts) — **thin IO layer**:
+  `planPersonArchive` (local only: rooms from the last sync, `last_sync_at`, stale and incomplete flags),
+  `listArchivedPersons` (live), `archivePerson`, `restorePerson`, the reconcile above. Logs carry
+  profile ids only, never a name or an address.
+- [shared/archive-types.ts](src/shared/archive-types.ts) — `PersonArchiveOutcome`,
+  `PersonRestoreOutcome`, `ArchivedPerson`, `PersonArchivePlan`.
+- IPC `ARCHIVE_PERSON_PLAN`, `ARCHIVE_PERSON_LIST_ARCHIVED`, `ARCHIVE_PERSON_EXECUTE`,
+  `ARCHIVE_PERSON_RESTORE_EXECUTE`; each action is one Task Queue task (`archivePerson` /
+  `restorePerson`, in [TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx)), both in
+  `ALL_TASK_TYPES` of [app-mode.ts](src/shared/app-mode.ts) and not in the CIE list.
+- [ArchivePage.tsx](src/renderer/pages/ArchivePage.tsx) (Personnes section: live search — empty
+  search with no type chosen lists nobody — and the archived list read live) and
+  [PersonArchiveConfirmModal.tsx](src/renderer/components/archive/PersonArchiveConfirmModal.tsx)
+  (name, role, the rooms that will be left, the « rooms are not restored » sentence, the stale-sync
+  warning, the blocking incomplete-sync message, a long-run warning above 20 removals; one modal for
+  one person or a batch).
+
+### Known consequences
+- The **Hazu account is not disabled or deleted**: the person can still sign in and open their own
+  profile; they just see no room. Archiving removes room access, it does not close an account.
+- Memberships in the groups of **archived rooms** are left alone (those groups sit in the Archive
+  and are not synced).
+- What a mentor, teacher or advisor **wrote** (assessments, reports) stays where it is and keeps
+  counting in Missions.
+- The room list comes from the **last sync plus the profile's class tags**; a membership neither
+  shows is missed. Sync first; an incomplete sync blocks, and the modal warns when the sync is older
+  than 24 h.
+- **Restoring an archived room** brings its role groups back live, members included — also members
+  whose profiles have since been archived. The next sync shows them as `unknown` rows on
+  Discrepancies (a group member with no local profile).
+- A stored **path** link to an archived profile breaks while it is archived; links by id keep working.
+- Slow by nature: roughly 22 s per room removal measured on the test profile, and one task after
+  another (no parallel role writes — the slow server job is exactly what S4 avoids re-triggering).
+  A stopped batch is finished by running it again.
+- Like Missions and the room archive, **develop and test against a scratch userData copy**, never the
+  real DB: archive and restore write to the live Hazu.
+
 ## Matrix
 
 The Matrix tab ([MatrixPage.tsx](src/renderer/pages/MatrixPage.tsx)) is a spreadsheet-style grid
@@ -681,7 +845,7 @@ The Bulk Import tab ([BulkImportPage.tsx](src/renderer/pages/BulkImportPage.tsx)
 | **Room Creation** | Create rooms from one column of values, each with a template | Creates rooms |
 | **Person** | Create persons (students, teachers…), optionally assigning rooms at creation (grouped) | Creates persons |
 | **Assignment** | Assign **existing** persons to **existing** rooms with a role | Updates roles |
-| **Verify** | Read-only diff of the spreadsheet vs. Hazu's synced state | Nothing |
+| **Verify** | Diff of the spreadsheet vs. Hazu's synced state (match by e-mail or name), leaver list | Nothing itself; « Archiver la sélection » queues `archivePerson` (complete mode only) |
 
 ### Task Queue (all writes go through it)
 Writes are never called directly — each workflow **enqueues** tasks into the Task Queue
@@ -689,8 +853,10 @@ Writes are never called directly — each workflow **enqueues** tasks into the T
 [TaskQueuePanel.tsx](src/renderer/components/TaskQueuePanel.tsx)). Tasks run **one at a time,
 sequentially**, each tracked `queued → processing → success/error` with individual retry. Bulk
 Import queues `createRoom`, `createPerson`, `roleUpdate`; the Discrepancies page queues `healTag`
-(S3) and `revokeOrphanAccess` (S6) — the full `TaskType` union is eight: `roleUpdate`, `createRoom`,
-`createPerson`, `healTag`, `revokeOrphanAccess`, `pruneDeadTags`, `archiveRoom`, `restoreRoom`. The footer buttons only
+(S3) and `revokeOrphanAccess` (S6) — Verify's leaver list queues `archivePerson`, and the Archive tab queues `archiveRoom` / `restoreRoom` /
+`archivePerson` / `restorePerson` — the full `TaskType` union is ten: `roleUpdate`, `createRoom`,
+`createPerson`, `healTag`, `revokeOrphanAccess`, `pruneDeadTags`, `archiveRoom`, `restoreRoom`,
+`archivePerson`, `restorePerson`. The footer buttons only
 queue tasks; nothing hits the API until the queue processes them. Modals (create room/person) call
 the API directly and push a completed `addNotification` into the same panel.
 
@@ -711,12 +877,56 @@ now wrapped in retry + verify-against-group-ACL-truth. On a **confirmed** write 
 `_`), so no full re-sync is needed; a write the server accepted but truth contradicts returns
 `success:false` (the task shows an error, and in Matrix the cell reverts).
 
-### Verify workflow (read-only)
-[VerifyAssignmentsTab.tsx](src/renderer/components/bulk-import/VerifyAssignmentsTab.tsx) diffs the
-spreadsheet (email + room name) against synced assignments and reports *missing in Hazu*, *extra in
-Hazu*, *unmatched rooms*, and *unknown persons*. Room names are matched via strict/normal/loose
-fuzzy modes ([fuzzyMatch.ts](src/renderer/utils/fuzzyMatch.ts)). Good to run before and after an
-Assignment batch.
+### Verify workflow (read-only diff, plus the leaver list)
+[VerifyAssignmentsTab.tsx](src/renderer/components/bulk-import/VerifyAssignmentsTab.tsx) matches the
+spreadsheet against synced persons and assignments. Columns: e-mail, full name **or** first + last
+name, and an **optional** room column. At least one of e-mail or a name is required; with a room
+column the assignment diff runs (*missing in Hazu*, *extra in Hazu*, *unmatched rooms*), without it
+only the person check. Room names are matched via strict/normal/loose fuzzy modes
+([fuzzyMatch.ts](src/renderer/utils/fuzzyMatch.ts)). Good to run before and after an Assignment batch.
+
+**Person matching** is the pure matcher [person-match.ts](src/shared/person-match.ts) (tests beside
+it); the Assignment tab's person matching stays exact-e-mail. Names are compared on the profile
+title (`display_name` — `first_name`/`last_name` are that title split at the first space and are not
+reliable), lower-cased, accents stripped, hyphens/apostrophes/punctuation as spaces, as a **sorted
+set of words**, so order does not matter. A row has one of three outcomes:
+- **matched** — its e-mail hits one person and the name agrees (equal or near) or is absent, or
+  there is no e-mail hit and the name equals exactly one person's;
+- **à vérifier** — the e-mail hits one person and the name another, or a name that is neither equal
+  nor near that person's (conflict: a copy-down error must not silently match the e-mail's owner and
+  list the named student as a leaver; that person first, then equal- and near-name persons as
+  candidates); the name equals
+  several persons' (ambiguous); or a **near** name: one side's words all contained in the other (a
+  middle or double name, the smaller side at least two words), or one differing word pair of 5+
+  letters at edit distance ≤ 2. The matcher never guesses: when in doubt it says « à vérifier »;
+- **unknown** — nothing.
+
+This matching exists because `persons.email` is the `hz-config-userid-*` tag, which holds an e-mail
+on some profiles and an account UID on others, so e-mail alone can fail on a valid student.
+
+**Result sections** ([PersonCheckResults.tsx](src/renderer/components/bulk-import/PersonCheckResults.tsx),
+pure decisions in [verify-logic.ts](src/renderer/components/bulk-import/verify-logic.ts)):
+- « À vérifier » — each row is confirmed (same person), or rejected (none of these), and can be undone;
+- « Lignes sans correspondance » — unknown rows, each of which can be **attached by hand** to a
+  Hazu person (name search, 2 letters minimum, persons already claimed excluded);
+- « Élèves dans Hazu, absents du fichier » — the **leavers**: Hazu students claimed by no matched,
+  confirmed or hand-attached row and not the candidate of a still-undecided « à vérifier » row.
+  Rejecting a candidate releases that student onto the list. **Students only** (other roles are
+  matched if in the file, never listed as leavers), and only when a **name column** is mapped — an
+  e-mail alone could list a valid student whose identity tag holds a UID. A **class filter** above
+  the list (school classes of the last sync, « sans classe », « toutes les classes ») **starts
+  empty**, and the list and the archive button stay empty until something is chosen, so a partial
+  file can never propose the whole school. The header reads « n élèves absents du fichier sur m dans
+  les classes choisies »; matching itself always runs against every Hazu student. Two warnings sit
+  under it: rows of the file with no e-mail and no name are not compared, and rows without a
+  correspondance (« check that a missing student is not one of them »); a third notes rows still à vérifier.
+- **« Archiver la sélection »** — tick leavers, then one confirmation (how many students, the total
+  of room removals, that it is slow, the stale-sync warning) enqueues one `archivePerson` task per
+  student (see [Person Archive](#person-archive)). Shown in **complete mode only** (Verify is not a
+  CIE-mode workflow anyway). When the Task Queue drains, persons and assignments are reloaded and
+  the lists recomputed.
+- **Everything resets when the file changes** — column mappings, results, decisions, ticks, the
+  class filter, pending plans — and a plan or reload that finishes after the file changed is discarded.
 
 ### Prerequisites
 - Run the main sync first (Dashboard > Sync). Persons, rooms, roles, and `admin_id` all come from
@@ -1275,7 +1485,15 @@ installer, run the acceptance run again on Windows before calling it working.
 7c. Archive → archive the test class « Cui Test 2 » → check the Archive folder in Hazu (room and
     « Groupes de partage » inside a per-room folder, record tags) → Restaurer → compare parent, link,
     tags and children with before. Use a scratch userData copy, as in the Missions section.
-8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel)
+7d. Archive → Personnes → archive the test student (scratch userData copy; confirm the modal shows
+    the rooms and the sync date) → check Hazu: the profile sits in a per-person folder under
+    Archive → Personnes (record tags on the folder), the student is in no role group, holds no class
+    tag → Restaurer → profile back under its category, folder gone → Dashboard sync → the student is
+    back, with no rooms.
+8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel).
+   Verify: with a file missing one student, map a name column, choose the class → that student is
+   listed as a leaver; misspell a name in the file → the row lands in « À vérifier », not on the
+   leaver list; no class chosen → the list stays empty.
 9. Go to Discrepancies → try "Heal all missing-tags" on a `missing-tag` row, then "Revoke access" on an `unknown` row (confirm the modal lists every grant, then verify against group truth — reverts to an error if not confirmed)
 9b. On the same page, click "Check & prune missing rooms" (probes every unmatched class id live);
    confirm the modal, which lists the tags/persons/rooms to delete and any skipped ids with their
