@@ -23,6 +23,12 @@ import {
   planRestore,
   restoreRoom,
 } from '../services/room-archive.service';
+import {
+  planPersonArchive,
+  listArchivedPersons,
+  archivePerson,
+  restorePerson,
+} from '../services/person-archive.service';
 import { validateApiConfig } from '../services/config-probe.service';
 import { completeAndStoreNewRoom } from '../services/room-completion.service';
 import { describeError } from '../services/hazu-api/describe-error';
@@ -252,6 +258,33 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.ARCHIVE_RESTORE_EXECUTE, async (_event, folderId: string) => {
     return restoreRoom(folderId);
+  });
+
+  // Person archive: same contract as the room archive handlers above.
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_PERSON_PLAN, async (_event, personId: string) => {
+    try {
+      return planPersonArchive(personId);
+    } catch (error) {
+      console.error('Person archive plan error:', describeError(error));
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_PERSON_LIST_ARCHIVED, async () => {
+    try {
+      return await listArchivedPersons();
+    } catch (error) {
+      console.error('Person archive list error:', describeError(error));
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_PERSON_EXECUTE, async (_event, personId: string) => {
+    return archivePerson(personId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ARCHIVE_PERSON_RESTORE_EXECUTE, async (_event, folderId: string) => {
+    return restorePerson(folderId);
   });
 
   // Execute returns its failure: this runs inside a Task Queue task, which renders the

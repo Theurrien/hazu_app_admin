@@ -5,6 +5,7 @@ import type {
 } from '../shared/formation-types';
 import type {
   ArchivableRoom, ArchivedRoom, ArchivePlan, ArchiveOutcome, RestorePlan, RestoreOutcome,
+  ArchivedPerson, PersonArchivePlan, PersonArchiveOutcome, PersonRestoreOutcome,
 } from '../shared/archive-types';
 
 // Inline IPC channels to avoid module resolution issues in preload sandbox
@@ -65,6 +66,10 @@ const IPC_CHANNELS = {
   ARCHIVE_EXECUTE: 'archive:execute',
   ARCHIVE_RESTORE_PLAN: 'archive:restorePlan',
   ARCHIVE_RESTORE_EXECUTE: 'archive:restoreExecute',
+  ARCHIVE_PERSON_PLAN: 'archive:person:plan',
+  ARCHIVE_PERSON_LIST_ARCHIVED: 'archive:person:listArchived',
+  ARCHIVE_PERSON_EXECUTE: 'archive:person:execute',
+  ARCHIVE_PERSON_RESTORE_EXECUTE: 'archive:person:restoreExecute',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -189,6 +194,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   archiveRoom: (roomId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_EXECUTE, roomId),
   planRestore: (folderId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_RESTORE_PLAN, folderId),
   restoreRoom: (folderId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_RESTORE_EXECUTE, folderId),
+  planPersonArchive: (personId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_PLAN, personId),
+  listArchivedPersons: () => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_LIST_ARCHIVED),
+  archivePerson: (personId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_EXECUTE, personId),
+  restorePerson: (folderId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_RESTORE_EXECUTE, folderId),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -376,6 +385,10 @@ declare global {
       archiveRoom: (roomId: string) => Promise<ArchiveOutcome>;
       planRestore: (folderId: string) => Promise<RestorePlan>;
       restoreRoom: (folderId: string) => Promise<RestoreOutcome>;
+      planPersonArchive: (personId: string) => Promise<PersonArchivePlan>;
+      listArchivedPersons: () => Promise<ArchivedPerson[]>;
+      archivePerson: (personId: string) => Promise<PersonArchiveOutcome>;
+      restorePerson: (folderId: string) => Promise<PersonRestoreOutcome>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;
