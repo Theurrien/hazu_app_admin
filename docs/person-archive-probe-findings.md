@@ -41,6 +41,18 @@ set back to `_`; group ACL, room ACL and profile tags were read before, between 
 write covers it. Step 4 of the archive (leftover class tags) stays as a safety net for tags that
 mirror no membership.
 
-## Check 3 — the next sync after a move back
+## Acceptance from the app (2026-11-25)
 
-Covered by the acceptance run (archive → restore → sync on a scratch copy).
+Built app on a scratch copy of the userData, the test student in one real class, driven by the
+maintainer. All six steps passed.
+
+- **Archive** (`success=true`, the one room removal `verified=true` on the first attempt): the
+  per-person folder with the profile inside sits under « Personnes »; the student left the class's
+  student group.
+- **What the account sees** (checked by the maintainer, signed in as the test student): it still
+  opens its own profile and cannot climb to « Personnes » or to anything else in the Archive.
+- **Without a sync:** the student left Matrix and Missions and is listed under archived persons.
+- **Restore, then sync:** the profile is back in the student folder with no rooms.
+- The test student was archived again afterwards and left in the Archive on purpose.
+- **Not exercised in this run:** the Verify steps (name matching, « à vérifier », leavers by
+  class) — to be run by the maintainer on the Windows build.
