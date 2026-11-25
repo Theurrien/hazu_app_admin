@@ -148,7 +148,12 @@ async function archivePersonUnsafe(personId: string): Promise<PersonArchiveOutco
     ...buildDeps(),
     removeRole: async (roomId, role) => {
       const res = await reliableUpdateUserRole(personId, roomId, role, '_');
-      return { success: res.success, error: res.error };
+      // Spec: every room removal must be confirmed by S4's group-truth read. A 2xx that could not be
+      // verified (success && !verified) is not a confirmed removal: the profile must not move.
+      return {
+        success: res.success && res.verified,
+        error: res.success && !res.verified ? 'retrait non vérifiable (synchronisation requise ?)' : res.error,
+      };
     },
   };
 
