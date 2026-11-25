@@ -1,6 +1,6 @@
 # Person archive and leaver detection — design
 
-Date: 2026-11-25. Status: draft, awaiting approval.
+Date: 2026-11-25. Status: approved 2026-11-25, built.
 
 ## Intent
 
@@ -248,3 +248,21 @@ the same name) and for the archive core (stops when a room is unconfirmed; re-ru
 containment and origin checks on restore; move status vs. live read). Acceptance, on a scratch
 userData copy: archive one test student in two rooms → check Hazu → restore → sync → student is
 back, no rooms.
+
+## Changes during the build
+
+- **Rooms are all attempted before stopping**: every room removal runs; if any is unconfirmed the
+  run stops then, nothing created or moved, and `remaining` names every unconfirmed room.
+- **A removal counts only when verified**: a 2xx that S4's group-truth read could not confirm is not
+  a removal, and the local assignment row stays (`reconcileOnlyWhenVerified`).
+- **An incomplete sync blocks**: the sync sets `last_sync_at` to `'0'` before it wipes anything, and
+  the archive refuses while a sync runs or after one that did not finish; the modal blocks. The
+  24 h staleness only warns. The room list is keyed by room and role, so a second role in an
+  assigned room named only by a tag is removed too.
+- **The leaver list needs a name column**: an e-mail alone cannot match the profiles whose
+  identity tag holds a UID, so without a name the list would be full of false leavers.
+- **Unmatched rows can be attached by hand** to a person, which takes that person off the leaver
+  list.
+- **An e-mail hit with a disagreeing name goes to « à vérifier »**: when the row's name is neither
+  equal nor near the e-mail owner's, the row is a conflict (that person, then near-name persons),
+  so a copy-down error cannot silently put the named student on the leaver list.

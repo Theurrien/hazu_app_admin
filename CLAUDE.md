@@ -671,17 +671,28 @@ Every step reads live state first and skips what is done, so a stopped run is fi
 it again. Order: read the profile live (it must sit under a live person category — a child of root
 tagged `hz-config-profile-*` — or already be inside its own folder in « Personnes », which counts as
 done) → **remove every room** → remove leftover class tags → Archive Hazu → « Personnes » → the
-person's folder (record tags written **before anything moves**) → **move the profile**.
+person's folder (record tags written **before anything moves**; a folder found by its record is
+reused only when its recorded origin is the profile's current parent, else « dossier d'archive
+existant avec une autre origine », nothing moved) → **move the profile**.
 
 Rooms first, move last, on purpose: a run that stops after the move would leave an archived profile
 still sitting in live role groups. The reverse — rooms removed, profile not moved — is a harmless
 half-state a re-run finishes.
 
 - **Which rooms.** The person's rows in `person_room_assignments` (group truth of the last sync)
-  **plus** every live local room named by a `hz-config-class-{id}-{role}` tag on the profile as just
-  read (a membership the last sync missed usually still shows as a tag). Reading ~835 group ACLs
-  live per person is too slow, so the list comes from the last sync and the confirmation modal
-  shows its date and **warns when the sync is older than 24 h** (or never ran).
+  **plus** every live local room **and role** named by a `hz-config-class-{id}-{role}` tag on the
+  profile as just read (a membership the last sync missed usually still shows as a tag). The list
+  is keyed by room **and** role: a second role in an assigned room, named only by a tag, gets its
+  own removal — keyed by room alone, its tag would be deleted as a leftover with the membership
+  still live. Reading ~835 group ACLs live per person is too slow, so the list comes from the last
+  sync and the confirmation modal shows its date and **warns when the sync is older than 24 h**.
+- **An incomplete sync blocks.** The sync empties `person_room_assignments` first and refills it
+  last, so during a sync, or after one that failed or was quit, the list is partial. `clearOldData`
+  sets `last_sync_at` to `'0'` before anything is wiped; only a successful end writes the real time.
+  `archivePerson` refuses (« synchronisation incomplète — synchronisez d'abord », nothing written)
+  while a sync runs or when `last_sync_at` is not a positive number, and the plan's `syncIncomplete`
+  makes the modal block with the confirm button disabled. The decision is `syncState` in the pure
+  core. The 24 h staleness only **warns**; it never refuses.
 - **Each room** goes through `reliableUpdateUserRole(personId, roomId, role, '_', { reconcileOnlyWhenVerified: true })`
   (S4: retry, verify against group truth). All rooms are attempted; if **any** is not confirmed the
   run stops there — nothing is created or moved, `success:false`, `remaining` names the rooms.
@@ -690,7 +701,7 @@ half-state a re-run finishes.
   unknown rooms are left alone.
 
 ### A room removal counts only when S4 verified it
-The IO layer treats `success && verified` as the removal; a 2xx that group truth could not confirm
+`removalConfirmed` (pure core, tested) treats `success && verified` as the removal; a 2xx that group truth could not confirm
 (blank identity, role group not synced, every ACL read failing) is **not** a confirmed removal, and
 the profile does not move. Removing someone from a room and then archiving them on an unverified 2xx
 would be the exact false success this app avoids.
@@ -733,11 +744,11 @@ only has rows for students. Restore changes nothing locally.
 ### Files
 - [person-archive.ts](src/main/services/person-archive.ts) — **pure core**, all IO injected
   (`PersonArchiveDeps` = the room archive's `ArchiveDeps` plus `removeRole`): record tags,
-  `archivedPersonEntry`, `runPersonArchive`, `runPersonRestore`. It reuses `withRetry`, `readUntil`,
+  `archivedPersonEntry`, `syncState`, `removalConfirmed`, `runPersonArchive`, `runPersonRestore`. It reuses `withRetry`, `readUntil`,
   `moveVerified`, `createOnce` from [room-archive.ts](src/main/services/room-archive.ts) (exported
   for this, not copied). Tests in `person-archive.test.ts`.
 - [person-archive.service.ts](src/main/services/person-archive.service.ts) — **thin IO layer**:
-  `planPersonArchive` (local only: rooms from the last sync, `last_sync_at`, stale flag),
+  `planPersonArchive` (local only: rooms from the last sync, `last_sync_at`, stale and incomplete flags),
   `listArchivedPersons` (live), `archivePerson`, `restorePerson`, the reconcile above. Logs carry
   profile ids only, never a name or an address.
 - [shared/archive-types.ts](src/shared/archive-types.ts) — `PersonArchiveOutcome`,
@@ -750,7 +761,8 @@ only has rows for students. Restore changes nothing locally.
   search with no type chosen lists nobody — and the archived list read live) and
   [PersonArchiveConfirmModal.tsx](src/renderer/components/archive/PersonArchiveConfirmModal.tsx)
   (name, role, the rooms that will be left, the « rooms are not restored » sentence, the stale-sync
-  warning, a long-run warning above 20 removals; one modal for one person or a batch).
+  warning, the blocking incomplete-sync message, a long-run warning above 20 removals; one modal for
+  one person or a batch).
 
 ### Known consequences
 - The **Hazu account is not disabled or deleted**: the person can still sign in and open their own
@@ -760,7 +772,11 @@ only has rows for students. Restore changes nothing locally.
 - What a mentor, teacher or advisor **wrote** (assessments, reports) stays where it is and keeps
   counting in Missions.
 - The room list comes from the **last sync plus the profile's class tags**; a membership neither
-  shows is missed. Sync first; the modal warns when the sync is older than 24 h.
+  shows is missed. Sync first; an incomplete sync blocks, and the modal warns when the sync is older
+  than 24 h.
+- **Restoring an archived room** brings its role groups back live, members included — also members
+  whose profiles have since been archived. The next sync shows them as `unknown` rows on
+  Discrepancies (a group member with no local profile).
 - A stored **path** link to an archived profile breaks while it is archived; links by id keep working.
 - Slow by nature: roughly 22 s per room removal measured on the test profile, and one task after
   another (no parallel role writes — the slow server job is exactly what S4 avoids re-triggering).
