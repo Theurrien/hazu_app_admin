@@ -185,13 +185,16 @@ export async function runPersonArchive(
   // 2. Every room: the assignments, plus rooms only the profile's class tags still name.
   const liveClassIds = new Set(input.liveRooms.map(r => r.classId));
   const rooms: Array<{ roomId: string; role: string; title: string }> = [...input.assignments];
-  const listed = new Set(rooms.map(r => r.roomId));
+  // Keyed by room AND role: a second role in an assigned room, named only by a tag, must get its own
+  // removal — otherwise step 4 would delete that tag as a leftover and the membership would stay.
+  const pair = (roomId: string, role: string) => `${roomId}|${role}`;
+  const listed = new Set(rooms.map(r => pair(r.roomId, r.role)));
   for (const tag of profile.tags) {
     const parsed = parseClassTag(tag);
     if (!parsed) continue;
     const live = input.liveRooms.find(r => r.classId === parsed.classId);
-    if (!live || listed.has(live.roomId)) continue;
-    listed.add(live.roomId);
+    if (!live || listed.has(pair(live.roomId, parsed.role))) continue;
+    listed.add(pair(live.roomId, parsed.role));
     rooms.push({ roomId: live.roomId, role: parsed.role, title: live.title });
   }
 

@@ -202,6 +202,20 @@ describe('runPersonArchive', () => {
     expect(roleCalls).toHaveLength(1);
   });
 
+  it('a second role in an assigned room, named only by a tag, gets its own removeRole call', async () => {
+    const fake = createFakeHazu(school(['hz-config-class-cls-a-student', 'hz-config-class-cls-a-courseteacher']));
+    const { deps, roleCalls } = scripted(fake);
+    const out = await runPersonArchive(baseInput({
+      assignments: [{ roomId: 'room-a', role: 'student', title: 'Classe A' }],
+      liveRooms: rooms,
+    }), deps);
+    expect(out.success).toBe(true);
+    expect(roleCalls).toEqual([
+      { roomId: 'room-a', role: 'student' },
+      { roomId: 'room-a', role: 'courseteacher' },
+    ]);
+  });
+
   it('one removeRole unconfirmed: failure, remaining names the room, nothing created or moved', async () => {
     const fake = createFakeHazu(school());
     const { deps, roleCalls } = scripted(fake, id => (id === 'room-b' ? { success: false, error: 'non confirmé' } : { success: true }));
