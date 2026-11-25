@@ -13,11 +13,13 @@ import {
 import { useAppMode } from '../../contexts/AppModeContext';
 import { useTaskQueue } from '../../contexts/TaskQueueContext';
 import { PersonArchiveConfirmModal } from '../archive/PersonArchiveConfirmModal';
-import { CheckSection, LeaverSection, sheetLabel, type ClassSelection } from './PersonCheckResults';
+import { CheckSection, LeaverSection, UnknownSection, sheetLabel, type ClassSelection } from './PersonCheckResults';
 import {
   buildClassIdsOf,
   canRunAssignmentDiff,
   canRunPersonCheck,
+  canShowLeavers,
+  droppedRowCount,
   leaverCounts,
   sheetPersons,
   type VerifyColumns,
@@ -101,6 +103,24 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const enqueuedRef = useRef(false);
   const planningRef = useRef(false);
+  const runRef = useRef(0);
+
+  // A new (or cleared) file invalidates everything derived from the old one.
+  useEffect(() => {
+    runRef.current += 1;
+    setColumnMappings({});
+    setSnapshot(null);
+    setDecisions([]);
+    setTicked(new Set());
+    setVerifyError(null);
+    setClassSel({ all: false, classIds: [], includeNoClass: false });
+    setPlans([]);
+    setPlanning(false);
+    setArchiveError(null);
+    setIsVerifying(false);
+    enqueuedRef.current = false;
+    planningRef.current = false;
+  }, [fileData]);
 
   const colOf = useCallback(
     (m: ColumnMapping) => Object.entries(columnMappings).find(([, v]) => v === m)?.[0] || null,
@@ -183,17 +203,19 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
     if (!canVerify || !fileData || !selectedPersonType) return;
     if (diffNeedsRoomType) return;
 
+    const run = runRef.current;
     setIsVerifying(true);
     clearResults();
 
     try {
       const sheet = sheetPersons(fileData.rows, columns);
-      setSnapshot(await fetchSnapshot(sheet, selectedPersonType, selectedRoomType, diffWanted));
+      const snap = await fetchSnapshot(sheet, selectedPersonType, selectedRoomType, diffWanted);
+      if (run === runRef.current) setSnapshot(snap);
     } catch (error) {
       console.error('Verification error:', error);
-      setVerifyError(errMsg(error));
+      if (run === runRef.current) setVerifyError(errMsg(error));
     } finally {
-      setIsVerifying(false);
+      if (run === runRef.current) setIsVerifying(false);
     }
   }, [canVerify, fileData, selectedPersonType, selectedRoomType, diffWanted, diffNeedsRoomType, columns, fetchSnapshot, clearResults]);
 
@@ -207,6 +229,11 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
   const sheetByRow = useMemo(() => new Map((snapshot?.sheet ?? []).map(r => [r.rowIndex, r])), [snapshot]);
   const checks = useMemo(() => matches.filter((m): m is Extract<typeof m, { kind: 'check' }> => m.kind === 'check'), [matches]);
   const decidedMap = useMemo(() => new Map(decisions.map(d => [d.rowIndex, d.personId])), [decisions]);
+  const unknowns = useMemo(() => matches.filter((m): m is Extract<typeof m, { kind: 'unknown' }> => m.kind === 'unknown'), [matches]);
+  const claimed = useMemo(() => new Set(resolvedPersonByRow(matches, decisions).values()), [matches, decisions]);
+  const unattachedUnknown = unknowns.filter(m => !decidedMap.get(m.rowIndex)).length;
+  const nameMapped = canShowLeavers(columns);
+  const droppedRows = fileData ? droppedRowCount(fileData.rows, columns) : 0;
   const undecided = checks.filter(c => !decidedMap.has(c.rowIndex)).length;
 
   const verificationResult: VerificationResult | null = useMemo(() => {
@@ -283,6 +310,7 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
 
   // ---- Leavers ----
   const showLeavers = !!snapshot && snapshot.personType === 'student';
+  const leaversActive = showLeavers && nameMapped;
   const classIdsOf = useMemo(
     () => buildClassIdsOf(snapshot?.assignments ?? [], snapshot?.classRooms ?? []),
     [snapshot]
@@ -305,12 +333,12 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
     return { all: false, classIds: classSel.classIds, includeNoClass: classSel.includeNoClass };
   }, [classSel]);
   const leavers = useMemo(
-    () => (showLeavers ? findLeavers(hazuPersons, matches, decisions, classIdsOf, filter) : []),
-    [showLeavers, hazuPersons, matches, decisions, classIdsOf, filter]
+    () => (leaversActive ? findLeavers(hazuPersons, matches, decisions, classIdsOf, filter) : []),
+    [leaversActive, hazuPersons, matches, decisions, classIdsOf, filter]
   );
   const counts = useMemo(
-    () => (showLeavers ? leaverCounts(hazuPersons, matches, decisions, classIdsOf, filter) : { absent: 0, inClasses: 0 }),
-    [showLeavers, hazuPersons, matches, decisions, classIdsOf, filter]
+    () => (leaversActive ? leaverCounts(hazuPersons, matches, decisions, classIdsOf, filter) : { absent: 0, inClasses: 0 }),
+    [leaversActive, hazuPersons, matches, decisions, classIdsOf, filter]
   );
 
   const pending = useMemo(() => {
@@ -539,6 +567,16 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
             onDecide={decide}
             onUndo={undo}
           />
+          <UnknownSection
+            unknowns={unknowns}
+            sheetByRow={sheetByRow}
+            persons={hazuPersons}
+            personsById={personsById}
+            claimed={claimed}
+            attached={decidedMap}
+            onAttach={decide}
+            onUndo={undo}
+          />
           {(verificationResult || isVerifying) && (
             <div>
               <h3 className="text-sm font-medium text-gray-700 mb-3">Verification Results</h3>
@@ -546,7 +584,7 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
                 missingInHazu={verificationResult?.missingInHazu || []}
                 extraInHazu={verificationResult?.extraInHazu || []}
                 unmatchedRooms={verificationResult?.unmatchedRooms || []}
-                unknownPersons={verificationResult?.unknownPersons || []}
+                unknownPersons={[]}
                 assignmentsChecked={snapshot.withDiff}
                 isLoading={isVerifying}
               />
@@ -565,6 +603,9 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
               onToggleAll={toggleAllTicks}
               pending={pending}
               undecided={undecided}
+              nameMapped={nameMapped}
+              droppedRows={droppedRows}
+              unattachedUnknown={unattachedUnknown}
               canArchive={mode === 'complete'}
               planning={planning}
               onArchive={askArchive}

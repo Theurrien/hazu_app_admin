@@ -153,7 +153,7 @@ export function matchRows(rows: SheetPerson[], persons: HazuPerson[]): RowMatch[
   });
 }
 
-/** Row → person after decisions: matched rows, plus confirmed check rows. */
+/** Row → person after decisions: matched rows, plus confirmed check rows and unknown rows attached by hand. */
 export function resolvedPersonByRow(
   matches: RowMatch[],
   decisions: CheckDecision[],
@@ -162,7 +162,8 @@ export function resolvedPersonByRow(
   const out = new Map<number, string>();
   for (const m of matches) {
     if (m.kind === 'matched') out.set(m.rowIndex, m.personId);
-    else if (m.kind === 'check') {
+    else {
+      // check rows: the confirmed candidate; unknown rows: a person attached by hand
       const id = decided.get(m.rowIndex);
       if (id) out.set(m.rowIndex, id);
     }

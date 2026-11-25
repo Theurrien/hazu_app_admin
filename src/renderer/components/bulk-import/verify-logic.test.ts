@@ -81,3 +81,40 @@ describe('leaverCounts', () => {
     expect(leaverCounts(students, [], [], classIdsOf, null)).toEqual({ absent: 0, inClasses: 0 });
   });
 });
+
+import { canShowLeavers, droppedRowCount, searchCandidates } from './verify-logic';
+
+describe('canShowLeavers', () => {
+  it('needs a name column, not just an e-mail', () => {
+    expect(canShowLeavers({ ...none, email: 'E' })).toBe(false);
+    expect(canShowLeavers({ ...none, firstName: 'F' })).toBe(false);
+    expect(canShowLeavers({ ...none, fullName: 'N' })).toBe(true);
+    expect(canShowLeavers({ ...none, firstName: 'F', lastName: 'L' })).toBe(true);
+  });
+});
+
+describe('droppedRowCount', () => {
+  it('counts rows with neither e-mail nor name', () => {
+    const cols = { ...none, email: 'E', fullName: 'N' };
+    const rows = [{ E: 'a@example.invalid', N: '' }, { E: ' ', N: ' ' }, { E: '', N: '' }];
+    expect(droppedRowCount(rows, cols)).toBe(2);
+  });
+});
+
+describe('searchCandidates', () => {
+  const persons = [
+    { id: '1', email: null, displayName: 'Zoé Dupont' },
+    { id: '2', email: null, displayName: 'Zoe Durand' },
+    { id: '3', email: null, displayName: 'Bob Muster' },
+  ];
+  it('needs at least 2 characters', () => {
+    expect(searchCandidates(persons, 'z', new Set())).toEqual([]);
+  });
+  it('is accent-insensitive and skips claimed persons', () => {
+    expect(searchCandidates(persons, 'zoe', new Set(['2'])).map((p) => p.id)).toEqual(['1']);
+  });
+  it('returns at most 20', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ id: String(i), email: null, displayName: `Aaa ${i}` }));
+    expect(searchCandidates(many, 'aa', new Set())).toHaveLength(20);
+  });
+});

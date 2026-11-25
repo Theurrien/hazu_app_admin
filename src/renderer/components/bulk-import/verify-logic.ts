@@ -1,5 +1,6 @@
 import {
   findLeavers,
+  normalizeName,
   type CheckDecision,
   type ClassFilter,
   type RowMatch,
@@ -75,4 +76,21 @@ export function leaverCounts(
     // No row matched, none doubtful: every student in the chosen classes counts.
     inClasses: findLeavers(students, [], [], classIdsOf, filter).length,
   };
+}
+
+/** The leaver list is only safe when rows can be matched by name too: an e-mail alone can fail on a valid student. */
+export function canShowLeavers(c: VerifyColumns): boolean {
+  return !!c.fullName || (!!c.firstName && !!c.lastName);
+}
+
+/** Rows with neither e-mail nor name: they are not compared. */
+export function droppedRowCount(rows: Record<string, string>[], c: VerifyColumns): number {
+  return rows.length - sheetPersons(rows, c).length;
+}
+
+/** Hazu persons whose name contains the typed text (accent-insensitive), not already claimed; none under 2 characters; max 20. */
+export function searchCandidates(persons: HazuPerson[], query: string, claimed: Set<string>): HazuPerson[] {
+  const q = normalizeName(query);
+  if (q.length < 2) return [];
+  return persons.filter((p) => !claimed.has(p.id) && normalizeName(p.displayName).includes(q)).slice(0, 20);
 }

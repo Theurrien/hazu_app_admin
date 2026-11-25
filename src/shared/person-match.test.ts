@@ -167,3 +167,24 @@ describe('resolvedPersonByRow', () => {
     ]);
   });
 });
+
+describe('decisions on unknown rows', () => {
+  const matches = [
+    { kind: 'matched' as const, rowIndex: 0, personId: 'a', by: 'email' as const },
+    { kind: 'unknown' as const, rowIndex: 1 },
+  ];
+  const students = [p('a', 'Ana Test'), p('b', 'Bob Muster')];
+  const all = { all: true as const };
+  it('a decision on an unknown row resolves it', () => {
+    const m = resolvedPersonByRow(matches, [{ rowIndex: 1, personId: 'b' }]);
+    expect(m.get(1)).toBe('b');
+  });
+  it('the attached person leaves the leaver list', () => {
+    expect(findLeavers(students, matches, [], new Map(), all).map((s) => s.id)).toEqual(['b']);
+    expect(findLeavers(students, matches, [{ rowIndex: 1, personId: 'b' }], new Map(), all)).toEqual([]);
+  });
+  it('a null decision on an unknown row changes nothing', () => {
+    const m = resolvedPersonByRow(matches, [{ rowIndex: 1, personId: null }]);
+    expect([...m.entries()]).toEqual([[0, 'a']]);
+  });
+});
