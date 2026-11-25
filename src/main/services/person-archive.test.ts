@@ -301,6 +301,22 @@ describe('runPersonArchive', () => {
     expect(fake.nodes.get('p1')!.parentId).toBe('pf');
   });
 
+  it('an existing folder whose record names another origin: fail, nothing moved', async () => {
+    const tags = buildPersonRecordTags({ profileId: 'p1', fromParentId: 'other-cat', archivedAt: 5 });
+    const fake = createFakeHazu(school([], [
+      node('arch', 'admin', 'Archive', [ARCHIVE_ROOT_TAG]),
+      node('pers', 'arch', 'Personnes', [PERSONS_FOLDER_TAG]),
+      node('pf', 'pers', 'Alice Test', tags),
+    ]));
+    const { deps } = scripted(fake);
+    const out = await runPersonArchive(baseInput(), deps);
+    expect(out.success).toBe(false);
+    expect(out.error).toBe("dossier d'archive existant avec une autre origine");
+    expect(fake.count('move')).toBe(0);
+    expect(fake.count('create')).toBe(0);
+    expect(fake.nodes.get('p1')!.parentId).toBe('pcat');
+  });
+
   it('move throws a transient failure but landed: success, move called once', async () => {
     const fake = createFakeHazu(school(), () => undefined, {
       moveLandsThenThrows: { status: 502, networkOrTimeout: false, message: 'bad gateway' },

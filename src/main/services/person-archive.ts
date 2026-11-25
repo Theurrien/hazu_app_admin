@@ -270,6 +270,11 @@ export async function runPersonArchive(
     const inPersons = await withRetry(deps, () => deps.list(personsId));
     const existing = inPersons.find(c => parsePersonRecordTags(c.tags)?.profileId === person.id);
     if (existing) {
+      // A reused folder keeps its record: it must name where the profile really comes from now,
+      // or a restore would send the profile to the wrong category.
+      if (parsePersonRecordTags(existing.tags)!.fromParentId !== fromParentId) {
+        return fail('archive-folders', "dossier d'archive existant avec une autre origine", [person.id]);
+      }
       folderId = existing.id;
     } else {
       folderId = await createOnce(
