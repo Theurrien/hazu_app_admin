@@ -25,6 +25,7 @@ import {
 } from '../services/room-archive.service';
 import { validateApiConfig } from '../services/config-probe.service';
 import { completeAndStoreNewRoom } from '../services/room-completion.service';
+import { describeError } from '../services/hazu-api/describe-error';
 
 export function registerIpcHandlers(): void {
   // ============================================================================
@@ -35,7 +36,7 @@ export function registerIpcHandlers(): void {
     try {
       return query(sql, params);
     } catch (error) {
-      console.error('DB Query error:', error);
+      console.error('DB Query error:', describeError(error));
       throw error;
     }
   });
@@ -44,7 +45,7 @@ export function registerIpcHandlers(): void {
     try {
       return run(sql, params);
     } catch (error) {
-      console.error('DB Run error:', error);
+      console.error('DB Run error:', describeError(error));
       throw error;
     }
   });
@@ -60,7 +61,7 @@ export function registerIpcHandlers(): void {
       }
       return query('SELECT * FROM rooms ORDER BY room_type, title');
     } catch (error) {
-      console.error('Get rooms error:', error);
+      console.error('Get rooms error:', describeError(error));
       throw error;
     }
   });
@@ -69,7 +70,7 @@ export function registerIpcHandlers(): void {
     try {
       return get('SELECT * FROM rooms WHERE id = ?', [id]);
     } catch (error) {
-      console.error('Get room by ID error:', error);
+      console.error('Get room by ID error:', describeError(error));
       throw error;
     }
   });
@@ -82,7 +83,7 @@ export function registerIpcHandlers(): void {
         [pattern, pattern]
       );
     } catch (error) {
-      console.error('Search rooms error:', error);
+      console.error('Search rooms error:', describeError(error));
       throw error;
     }
   });
@@ -98,7 +99,7 @@ export function registerIpcHandlers(): void {
       }
       return query('SELECT * FROM persons ORDER BY person_type, display_name');
     } catch (error) {
-      console.error('Get persons error:', error);
+      console.error('Get persons error:', describeError(error));
       throw error;
     }
   });
@@ -107,7 +108,7 @@ export function registerIpcHandlers(): void {
     try {
       return get('SELECT * FROM persons WHERE id = ?', [id]);
     } catch (error) {
-      console.error('Get person by ID error:', error);
+      console.error('Get person by ID error:', describeError(error));
       throw error;
     }
   });
@@ -120,7 +121,7 @@ export function registerIpcHandlers(): void {
         [pattern, pattern, pattern, pattern]
       );
     } catch (error) {
-      console.error('Search persons error:', error);
+      console.error('Search persons error:', describeError(error));
       throw error;
     }
   });
@@ -135,7 +136,7 @@ export function registerIpcHandlers(): void {
         `SELECT person_id, room_id, role FROM person_room_assignments`
       );
     } catch (error) {
-      console.error('Get all assignments error:', error);
+      console.error('Get all assignments error:', describeError(error));
       throw error;
     }
   });
@@ -148,7 +149,7 @@ export function registerIpcHandlers(): void {
     try {
       return getDiscrepancies();
     } catch (error) {
-      console.error('Get discrepancies error:', error);
+      console.error('Get discrepancies error:', describeError(error));
       throw error;
     }
   });
@@ -157,7 +158,7 @@ export function registerIpcHandlers(): void {
     try {
       return getTagHealPlan();
     } catch (error) {
-      console.error('Get tag heal plan error:', error);
+      console.error('Get tag heal plan error:', describeError(error));
       throw error;
     }
   });
@@ -166,7 +167,7 @@ export function registerIpcHandlers(): void {
     try {
       return await healPersonTag(personId, tag);
     } catch (error) {
-      console.error('Tag heal error:', error);
+      console.error('Tag heal error:', describeError(error));
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
@@ -177,7 +178,7 @@ export function registerIpcHandlers(): void {
       try {
         return await planOrphanRemoval(accountId, groupId, roomId);
       } catch (error) {
-        console.error('Orphan access plan error:', error);
+        console.error('Orphan access plan error:', describeError(error));
         throw error;
       }
     },
@@ -189,7 +190,7 @@ export function registerIpcHandlers(): void {
       try {
         return await revokeOrphanAccess(accountId, groupId, roomId);
       } catch (error) {
-        console.error('Orphan access revoke error:', error);
+        console.error('Orphan access revoke error:', describeError(error));
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
@@ -201,7 +202,7 @@ export function registerIpcHandlers(): void {
     try {
       return await planTagPrune();
     } catch (error) {
-      console.error('Tag prune plan error:', error);
+      console.error('Tag prune plan error:', describeError(error));
       throw error;
     }
   });
@@ -213,7 +214,7 @@ export function registerIpcHandlers(): void {
     try {
       return listArchivableRooms();
     } catch (error) {
-      console.error('Archive list rooms error:', error);
+      console.error('Archive list rooms error:', describeError(error));
       throw error;
     }
   });
@@ -222,7 +223,7 @@ export function registerIpcHandlers(): void {
     try {
       return await listArchivedRooms();
     } catch (error) {
-      console.error('Archive list archived error:', error);
+      console.error('Archive list archived error:', describeError(error));
       throw error;
     }
   });
@@ -231,7 +232,7 @@ export function registerIpcHandlers(): void {
     try {
       return planArchive(roomId);
     } catch (error) {
-      console.error('Archive plan error:', error);
+      console.error('Archive plan error:', describeError(error));
       throw error;
     }
   });
@@ -244,7 +245,7 @@ export function registerIpcHandlers(): void {
     try {
       return await planRestore(folderId);
     } catch (error) {
-      console.error('Archive restore plan error:', error);
+      console.error('Archive restore plan error:', describeError(error));
       throw error;
     }
   });
@@ -261,7 +262,7 @@ export function registerIpcHandlers(): void {
       try {
         return await pruneDeadTags(personId, items);
       } catch (error) {
-        console.error('Tag prune execute error:', error);
+        console.error('Tag prune execute error:', describeError(error));
         return {
           success: false,
           error: error instanceof Error ? error.message : String(error),
@@ -283,7 +284,7 @@ export function registerIpcHandlers(): void {
         [personId]
       );
     } catch (error) {
-      console.error('Get assignments for person error:', error);
+      console.error('Get assignments for person error:', describeError(error));
       throw error;
     }
   });
@@ -299,7 +300,7 @@ export function registerIpcHandlers(): void {
         [roomId]
       );
     } catch (error) {
-      console.error('Get assignments for room error:', error);
+      console.error('Get assignments for room error:', describeError(error));
       throw error;
     }
   });
@@ -323,7 +324,7 @@ export function registerIpcHandlers(): void {
 
         return result;
       } catch (error) {
-        console.error('Create assignment error:', error);
+        console.error('Create assignment error:', describeError(error));
         throw error;
       }
     }
@@ -356,7 +357,7 @@ export function registerIpcHandlers(): void {
 
         return result;
       } catch (error) {
-        console.error('Delete assignment error:', error);
+        console.error('Delete assignment error:', describeError(error));
         throw error;
       }
     }
@@ -387,7 +388,7 @@ export function registerIpcHandlers(): void {
         isRunning: false,
       };
     } catch (error) {
-      console.error('Get sync status error:', error);
+      console.error('Get sync status error:', describeError(error));
       throw error;
     }
   });
@@ -396,7 +397,7 @@ export function registerIpcHandlers(): void {
     try {
       return query("SELECT * FROM change_log WHERE status = 'pending' ORDER BY created_at DESC");
     } catch (error) {
-      console.error('Get pending changes error:', error);
+      console.error('Get pending changes error:', describeError(error));
       throw error;
     }
   });
@@ -405,7 +406,7 @@ export function registerIpcHandlers(): void {
     try {
       return await runFullSync();
     } catch (error) {
-      console.error('Sync run error:', error);
+      console.error('Sync run error:', describeError(error));
       throw error;
     }
   });
@@ -442,7 +443,7 @@ export function registerIpcHandlers(): void {
       console.log('All settings saved successfully');
       return { success: true };
     } catch (error) {
-      console.error('Set API config error:', error);
+      console.error('Set API config error:', describeError(error));
       throw error;
     }
   });
@@ -472,7 +473,7 @@ export function registerIpcHandlers(): void {
 
       return config;
     } catch (error) {
-      console.error('Get API config error:', error);
+      console.error('Get API config error:', describeError(error));
       throw error;
     }
   });
@@ -499,7 +500,7 @@ export function registerIpcHandlers(): void {
       const result = get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
       return result?.value || null;
     } catch (error) {
-      console.error('Get setting error:', error);
+      console.error('Get setting error:', describeError(error));
       throw error;
     }
   });
@@ -513,7 +514,7 @@ export function registerIpcHandlers(): void {
         [key, value, value]
       );
     } catch (error) {
-      console.error('Set setting error:', error);
+      console.error('Set setting error:', describeError(error));
       throw error;
     }
   });
@@ -525,7 +526,7 @@ export function registerIpcHandlers(): void {
       const webhookUrl = query(`SELECT value FROM settings WHERE key = 'webhook_url'`)?.[0]?.value || '';
       return { adminId, templateId, webhookUrl };
     } catch (error) {
-      console.error('Get webhook config error:', error);
+      console.error('Get webhook config error:', describeError(error));
       throw error;
     }
   });
@@ -601,7 +602,7 @@ export function registerIpcHandlers(): void {
       return { success: true, templates };
 
     } catch (error) {
-      console.error('Fetch templates error:', error);
+      console.error('Fetch templates error:', describeError(error));
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, error: `Failed to fetch templates: ${errorMessage}` };
     }
@@ -671,7 +672,7 @@ export function registerIpcHandlers(): void {
       return { success: true, categories };
 
     } catch (error) {
-      console.error('Fetch profile categories error:', error);
+      console.error('Fetch profile categories error:', describeError(error));
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, error: `Failed to fetch profile categories: ${errorMessage}` };
     }
@@ -736,7 +737,7 @@ export function registerIpcHandlers(): void {
       return { success: true, templates };
 
     } catch (error) {
-      console.error('Fetch profile templates error:', error);
+      console.error('Fetch profile templates error:', describeError(error));
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, error: `Failed to fetch profile templates: ${errorMessage}` };
     }
@@ -750,7 +751,7 @@ export function registerIpcHandlers(): void {
     try {
       return query('SELECT id, name, title FROM user_types ORDER BY title');
     } catch (error) {
-      console.error('Get user types error:', error);
+      console.error('Get user types error:', describeError(error));
       throw error;
     }
   });
@@ -768,7 +769,7 @@ export function registerIpcHandlers(): void {
           [roomId, role]
         );
       } catch (error) {
-        console.error('Get distribution group error:', error);
+        console.error('Get distribution group error:', describeError(error));
         throw error;
       }
     }
@@ -793,7 +794,7 @@ export function registerIpcHandlers(): void {
         const result = await reliableUpdateUserRole(personId, roomId, oldRole, newRole);
         return { success: result.success, error: result.error };
       } catch (error) {
-        console.error('Update user role error:', error);
+        console.error('Update user role error:', describeError(error));
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
@@ -898,7 +899,7 @@ export function registerIpcHandlers(): void {
         console.log('[WEBHOOK_CREATE_ROOM] Room created successfully:', room.id);
         return { success: true, room };
       } catch (error) {
-        console.error('Webhook create room error:', error);
+        console.error('Webhook create room error:', describeError(error));
         let message = 'Unknown error';
         if (axios.isAxiosError(error)) {
           message = error.response?.data?.message || error.message;
@@ -1008,7 +1009,7 @@ export function registerIpcHandlers(): void {
               console.error('[CREATE_PERSON] Room assignment failed for', roomId, assignResult.error);
             }
           } catch (err) {
-            console.error('[CREATE_PERSON] Room assignment threw for', roomId, err);
+            console.error('[CREATE_PERSON] Room assignment threw for', roomId, describeError(err));
           }
         }
 
@@ -1028,7 +1029,7 @@ export function registerIpcHandlers(): void {
         console.log('[CREATE_PERSON] Person created successfully:', person.id);
         return { success: true, person };
       } catch (error) {
-        console.error('Create person error:', error);
+        console.error('Create person error:', describeError(error));
         let message = 'Unknown error';
         if (axios.isAxiosError(error)) {
           message = error.response?.data?.message || error.message;
@@ -1082,7 +1083,7 @@ export function registerIpcHandlers(): void {
 
       return { success: true };
     } catch (error) {
-      console.error('Webhook delete room error:', error);
+      console.error('Webhook delete room error:', describeError(error));
       let message = 'Unknown error';
       if (axios.isAxiosError(error)) {
         message = error.response?.data?.message || error.message;
@@ -1135,7 +1136,7 @@ export function registerIpcHandlers(): void {
 
       return { success: true };
     } catch (error) {
-      console.error('Webhook delete person error:', error);
+      console.error('Webhook delete person error:', describeError(error));
       let message = 'Unknown error';
       if (axios.isAxiosError(error)) {
         message = error.response?.data?.message || error.message;
@@ -1191,7 +1192,7 @@ export function registerIpcHandlers(): void {
 
         return { success: true };
       } catch (error) {
-        console.error('Webhook rename room error:', error);
+        console.error('Webhook rename room error:', describeError(error));
         let message = 'Unknown error';
         if (axios.isAxiosError(error)) {
           message = error.response?.data?.message || error.message;
@@ -1309,7 +1310,7 @@ export function registerIpcHandlers(): void {
       console.log('[FILE_PARSE] Parsed', rows.length, 'rows with', headers.length, 'columns');
       return { success: true, data: { headers, rows } };
     } catch (error) {
-      console.error('File parse error:', error);
+      console.error('File parse error:', describeError(error));
       const message = error instanceof Error ? error.message : 'Failed to parse file';
       return { success: false, error: message };
     }

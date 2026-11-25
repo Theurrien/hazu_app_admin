@@ -5,6 +5,7 @@
 import axios from "axios";
 import { CreateOptions, UpdateOptions, ApiParametersPropagate, HazuEntity } from "./interfaces";
 import { getApiKey, getApiEndpoint } from "./config";
+import { describeError } from "./describe-error";
 
 /**
  * Hazu accepts two header shapes and picks by key length. Exported so the S10 config probe
@@ -40,7 +41,7 @@ export const sendApiRequestRead = async (id: string): Promise<any> => {
     });
     return response.data;
   } catch (error) {
-    console.error("Error reading Hazu:", error);
+    console.error("Error reading Hazu:", describeError(error));
     throw error;
   }
 };
@@ -75,7 +76,7 @@ export const sendApiRequestList = async (
         parentId
       );
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     return null;
   }
@@ -190,7 +191,7 @@ export const sendApiRequestCreate = async (options: CreateOptions): Promise<any>
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error creating Hazu:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     return null;
   }
@@ -228,7 +229,7 @@ export const sendApiRequestUpdate = async (
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error updating Hazu:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     return null;
   }
@@ -245,7 +246,7 @@ export const sendApiRequestRemove = async (id: string): Promise<any> => {
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error removing Hazu:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     return null;
   }
@@ -270,7 +271,7 @@ export const sendApiRequestAddTags = async (itemId: string, tags: string[]): Pro
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error adding tags:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
   }
 };
@@ -308,7 +309,7 @@ export const sendApiRequestRemoveTags = async (itemId: string, tags: string[]): 
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error removing tags:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
   }
 };
@@ -362,7 +363,7 @@ export const sendApiRequestRemoveTagsChecked = async (
         error: (error.response?.data as any)?.message || error.message,
       };
     }
-    console.error("Unexpected error removing tags from item:", itemId, error);
+    console.error("Unexpected error removing tags from item:", itemId, describeError(error));
     return {
       ok: false,
       networkOrTimeout: false,
@@ -390,7 +391,7 @@ export const sendApiRequestAddGroup = async (hazuId: string, groupIdentifier: st
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error adding group:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
   }
 };
@@ -412,7 +413,7 @@ export const sendApiRequestRemoveGroup = async (hazuId: string, groupIdentifier:
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error removing group:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     return null;
   }
@@ -445,7 +446,7 @@ export const sendApiRequestCreateUser = async (
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error creating user:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
   }
 };
@@ -471,7 +472,7 @@ export const sendApiRequestUpdateRole = async (
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error updating role:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
   }
 };
@@ -501,7 +502,7 @@ export const sendApiRequestRemoveUser = async (
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error removing user:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     return null;
   }
@@ -554,7 +555,7 @@ export const sendApiRequestRemoveUserChecked = async (
       );
       return { ok: false, status, networkOrTimeout, error: (error.response?.data as any)?.message || error.message };
     }
-    console.error("Unexpected error removing user:", error);
+    console.error("Unexpected error removing user:", describeError(error));
     return { ok: false, networkOrTimeout: false, error: error instanceof Error ? error.message : String(error) };
   }
 };
@@ -572,7 +573,7 @@ export const sendApiRequestGetAclInfo = async (itemId: string): Promise<any> => 
     if (error && typeof error === "object" && "response" in error) {
       console.error("Error fetching ACL:", (error as any).response?.data ?? (error as any).message);
     } else {
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", describeError(error));
     }
     throw error;
   }
@@ -619,7 +620,7 @@ export const sendApiRequestPropagate = async (parameters: ApiParametersPropagate
 
     return await response.json();
   } catch (error) {
-    console.error("Error propagating permissions:", error);
+    console.error("Error propagating permissions:", describeError(error));
     throw error;
   }
 };

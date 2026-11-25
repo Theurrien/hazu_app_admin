@@ -11,6 +11,7 @@ import { HazuEntity } from "./hazu-api/interfaces";
 import { computeGroupAssignments, RoleGroup } from "./group-membership";
 import { walkRoomTree, summarizeWalkNotes, WalkNote } from "./room-tree";
 import { parseShareTag } from "./room-completion";
+import { describeError } from "./hazu-api/describe-error";
 
 // Tag patterns for identifying entity types
 const PERSON_TAG_PATTERNS = {
@@ -419,7 +420,7 @@ async function syncPersonsRecursive(parentId: string): Promise<void> {
           }
         }
       } catch (error) {
-        console.error(`Error fetching ACL for ${snapshot.key}:`, error);
+        console.error(`Error fetching ACL for ${snapshot.key}:`, describeError(error));
       }
     }
 
@@ -459,7 +460,7 @@ async function syncAssignments(): Promise<void> {
         }
       }
     } catch (error) {
-      console.error(`Error fetching ACL for room ${room.id}:`, error);
+      console.error(`Error fetching ACL for room ${room.id}:`, describeError(error));
     }
   }
 
@@ -710,7 +711,7 @@ async function syncGroupMemberships(): Promise<void> {
       }
       console.log(`[SYNC] Super-user exclusion: ${excludeUids.size} members from group ${superUserGroupId}`);
     } catch (err) {
-      console.error(`[SYNC] Failed to read super-user group ${superUserGroupId} ACL; proceeding without exclusion:`, err);
+      console.error(`[SYNC] Failed to read super-user group ${superUserGroupId} ACL; proceeding without exclusion:`, describeError(err));
     }
   }
 
