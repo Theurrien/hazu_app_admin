@@ -17,6 +17,7 @@ import {
   parsePersonRecordTags,
   runPersonArchive,
   runPersonRestore,
+  syncState,
 } from './person-archive';
 
 type Op = 'read' | 'list' | 'create' | 'move' | 'addTags' | 'removeTags' | 'remove';
@@ -410,5 +411,27 @@ describe('runPersonRestore', () => {
     const out = await runPersonRestore(rin, fake.deps);
     expect(out.success).toBe(false);
     expect(fake.nodes.has('pf')).toBe(true);
+  });
+});
+
+describe('syncState', () => {
+  const now = 1700000000000;
+  const H = 60 * 60 * 1000;
+  it('a recent completed sync: complete, not stale', () => {
+    expect(syncState(String(now - H), false, now)).toEqual({ incomplete: false, stale: false, lastSyncAt: now - H });
+  });
+  it('older than 24 h: complete but stale (a warning, not a refusal)', () => {
+    expect(syncState(String(now - 25 * H), false, now)).toEqual({ incomplete: false, stale: true, lastSyncAt: now - 25 * H });
+  });
+  it("'0' (seed, or a sync that started and never finished): incomplete", () => {
+    expect(syncState('0', false, now)).toEqual({ incomplete: true, stale: true, lastSyncAt: null });
+  });
+  it('null, empty or not a number: incomplete', () => {
+    for (const raw of [null, '', 'abc', '-5']) {
+      expect(syncState(raw, false, now).incomplete).toBe(true);
+    }
+  });
+  it('a sync running now: incomplete even with a good timestamp', () => {
+    expect(syncState(String(now - H), true, now)).toEqual({ incomplete: true, stale: false, lastSyncAt: now - H });
   });
 });

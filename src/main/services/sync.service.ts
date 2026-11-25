@@ -69,6 +69,11 @@ function clearOldData(): void {
   const db = getDb();
   console.log('[SYNC] Clearing old data before sync...');
 
+  // Mark the sync as unfinished BEFORE anything is wiped: only a successful end writes the real
+  // time back. A sync that fails or is quit midway then stays visible as incomplete ('0'), and the
+  // person archive refuses to run on the partial room list it leaves behind.
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_at', '0')").run();
+
   // Clear assignments first (foreign key constraint)
   db.exec("DELETE FROM person_room_assignments");
 

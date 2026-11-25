@@ -82,5 +82,7 @@ export interface ArchivedPerson { folderId: string; profileId: string; inFolder:
 export interface PersonArchivePlan {
   personId: string; displayName: string; personType: string;
   rooms: Array<{ roomId: string; title: string; role: string }>;
-  lastSyncAt: number | null; syncStale: boolean;   // stale = null or older than 24 h
+  lastSyncAt: number | null; syncStale: boolean;   // stale = null or older than 24 h (warns)
+  /** A sync is running, or the last one never finished: the room list is partial. Blocks the archive. */
+  syncIncomplete: boolean;
 }

@@ -5,12 +5,14 @@
 import { getDb } from '../database';
 import { buildDeps, findArchiveRoot, setting, toError } from './room-archive.service';
 import { reliableUpdateUserRole } from './role-write.service';
+import { getSyncProgress } from './sync.service';
 import {
   PERSONS_FOLDER_TAG,
   PersonArchiveDeps,
   archivedPersonEntry,
   runPersonArchive,
   runPersonRestore,
+  syncState,
 } from './person-archive';
 import type { ArchiveDeps } from './room-archive';
 import type {
@@ -19,8 +21,6 @@ import type {
   PersonArchivePlan,
   PersonRestoreOutcome,
 } from '../../shared/archive-types';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface PersonRow {
   id: string;
@@ -51,6 +51,13 @@ function assignmentsOf(personId: string): Array<{ roomId: string; role: string; 
   );
 }
 
+/** A running sync, or one that started and never finished, leaves the local room list partial. */
+function currentSyncState() {
+  return syncState(setting('last_sync_at'), getSyncProgress().status === 'syncing', Date.now());
+}
+
+const SYNC_INCOMPLETE = 'synchronisation incomplète — synchronisez d\'abord';
+
 // ---------------------------------------------------------------------------------------------
 // Plan (local only)
 
@@ -60,16 +67,15 @@ export function planPersonArchive(personId: string): PersonArchivePlan {
     | PersonRow
     | undefined;
   if (!person) throw new Error('personne introuvable');
-  const raw = setting('last_sync_at');
-  const parsed = raw ? Number(raw) : NaN;
-  const lastSyncAt = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const sync = currentSyncState();
   return {
     personId,
     displayName: person.display_name,
     personType: person.person_type,
     rooms: assignmentsOf(personId),
-    lastSyncAt,
-    syncStale: lastSyncAt === null || Date.now() - lastSyncAt > DAY_MS,
+    lastSyncAt: sync.lastSyncAt,
+    syncStale: sync.stale,
+    syncIncomplete: sync.incomplete,
   };
 }
 
@@ -134,6 +140,9 @@ async function archivePersonUnsafe(personId: string): Promise<PersonArchiveOutco
   if (!person) return fail('personne introuvable');
   const adminId = setting('admin_id');
   if (!adminId || !setting('root_hazu_id') || !setting('user_id')) return fail('synchronisation requise');
+  // The room list comes from person_room_assignments, which a sync empties first and refills last:
+  // during a sync, or after one that failed or was quit, it is partial. Refuse; write nothing.
+  if (currentSyncState().incomplete) return fail(SYNC_INCOMPLETE);
 
   const liveRooms = (
     db.prepare('SELECT id, class_id, title FROM rooms WHERE class_id IS NOT NULL AND class_id != ?').all('') as Array<{

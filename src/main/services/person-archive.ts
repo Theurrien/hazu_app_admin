@@ -80,6 +80,28 @@ export function archivedPersonEntry(folder: HazuNode, children: HazuNode[]): Arc
   };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the local room list can be trusted for an archive. The sync wipes person_room_assignments
+ * first and sets last_sync_at to '0' before it does; only a successful end writes the real time.
+ * Incomplete (a sync running, or last_sync_at not a positive number) blocks the archive; stale
+ * (older than 24 h, or never) only warns.
+ */
+export function syncState(
+  lastSyncAtRaw: string | null,
+  syncing: boolean,
+  now: number,
+): { incomplete: boolean; stale: boolean; lastSyncAt: number | null } {
+  const parsed = lastSyncAtRaw && /^\d+$/.test(lastSyncAtRaw.trim()) ? Number(lastSyncAtRaw) : NaN;
+  const lastSyncAt = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  return {
+    incomplete: syncing || lastSyncAt === null,
+    stale: lastSyncAt === null || now - lastSyncAt > DAY_MS,
+    lastSyncAt,
+  };
+}
+
 export interface PersonArchiveDeps extends ArchiveDeps {
   /** S4 role write to '_'. success = confirmed gone (or confirmed by truth after a failed status). */
   removeRole(roomId: string, role: string): Promise<{ success: boolean; error?: string }>;
