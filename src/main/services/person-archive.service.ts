@@ -6,6 +6,7 @@ import { getDb } from '../database';
 import { buildDeps, findArchiveRoot, setting, toError } from './room-archive.service';
 import { reliableUpdateUserRole } from './role-write.service';
 import { getSyncProgress } from './sync.service';
+import { withArchiveLock } from './archive-lock';
 import {
   PERSONS_FOLDER_TAG,
   PersonArchiveDeps,
@@ -13,6 +14,7 @@ import {
   removalConfirmed,
   runPersonArchive,
   runPersonRestore,
+  syncIncompleteMessage,
   syncState,
 } from './person-archive';
 import type { ArchiveDeps } from './room-archive';
@@ -54,10 +56,13 @@ function assignmentsOf(personId: string): Array<{ roomId: string; role: string; 
 
 /** A running sync, or one that started and never finished, leaves the local room list partial. */
 function currentSyncState() {
-  return syncState(setting('last_sync_at'), getSyncProgress().status === 'syncing', Date.now());
+  return syncState(
+    setting('last_sync_at'),
+    getSyncProgress().status === 'syncing',
+    Date.now(),
+    setting('sync_skipped_groups'),
+  );
 }
-
-const SYNC_INCOMPLETE = 'synchronisation incomplète — synchronisez d\'abord';
 
 // ---------------------------------------------------------------------------------------------
 // Plan (local only)
@@ -77,6 +82,7 @@ export function planPersonArchive(personId: string): PersonArchivePlan {
     lastSyncAt: sync.lastSyncAt,
     syncStale: sync.stale,
     syncIncomplete: sync.incomplete,
+    syncSkippedGroups: sync.skippedGroups,
   };
 }
 
@@ -126,7 +132,9 @@ function reconcileArchive(person: PersonRow): void {
 
 export async function archivePerson(personId: string): Promise<PersonArchiveOutcome> {
   try {
-    return await archivePersonUnsafe(personId);
+    // The lock is taken before the sync check below, synchronously: runFullSync refuses to start
+    // while it is held, so no sync can wipe the tables between that check and the reconcile.
+    return await withArchiveLock(() => archivePersonUnsafe(personId));
   } catch (e) {
     return { success: false, steps: [], remaining: [personId], error: toError(e).message };
   }
@@ -143,7 +151,8 @@ async function archivePersonUnsafe(personId: string): Promise<PersonArchiveOutco
   if (!adminId || !setting('root_hazu_id') || !setting('user_id')) return fail('synchronisation requise');
   // The room list comes from person_room_assignments, which a sync empties first and refills last:
   // during a sync, or after one that failed or was quit, it is partial. Refuse; write nothing.
-  if (currentSyncState().incomplete) return fail(SYNC_INCOMPLETE);
+  const sync = currentSyncState();
+  if (sync.incomplete) return fail(syncIncompleteMessage(sync.skippedGroups));
 
   const liveRooms = (
     db.prepare('SELECT id, class_id, title FROM rooms WHERE class_id IS NOT NULL AND class_id != ?').all('') as Array<{
@@ -180,7 +189,12 @@ async function archivePersonUnsafe(personId: string): Promise<PersonArchiveOutco
     outcome = fail(toError(e).message);
   }
 
-  if (outcome.success) {
+  // Belt and braces with the lock: re-check right before touching local tables. A sync running or
+  // left incomplete owns them; the API outcome stands, the next sync brings local state in line.
+  const syncNow = outcome.success ? currentSyncState() : null;
+  if (syncNow?.incomplete) {
+    console.warn(`[person-archive] person=${personId} local reconcile skipped: sync running or incomplete`);
+  } else if (outcome.success) {
     try {
       reconcileArchive(person);
     } catch (e) {

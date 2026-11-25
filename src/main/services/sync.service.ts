@@ -12,6 +12,7 @@ import { computeGroupAssignments, RoleGroup } from "./group-membership";
 import { walkRoomTree, summarizeWalkNotes, WalkNote } from "./room-tree";
 import { parseShareTag } from "./room-completion";
 import { describeError } from "./hazu-api/describe-error";
+import { archiveRunning } from "./archive-lock";
 
 // Tag patterns for identifying entity types
 const PERSON_TAG_PATTERNS = {
@@ -73,6 +74,7 @@ function clearOldData(): void {
   // time back. A sync that fails or is quit midway then stays visible as incomplete ('0'), and the
   // person archive refuses to run on the partial room list it leaves behind.
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_sync_at', '0')").run();
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync_skipped_groups', '0')").run();
 
   // Clear assignments first (foreign key constraint)
   db.exec("DELETE FROM person_room_assignments");
@@ -721,7 +723,7 @@ async function syncGroupMemberships(): Promise<void> {
   }
 
   syncProgress.message = `Reading membership of ${groups.length} groups...`;
-  const { assignments, issues } = await computeGroupAssignments(
+  const { assignments, issues, skippedGroups } = await computeGroupAssignments(
     groups,
     sendApiRequestGetAclInfo,
     byEmail,
@@ -742,6 +744,14 @@ async function syncGroupMemberships(): Promise<void> {
   });
   writeAll();
 
+  // Role groups whose ACL read failed for good: their memberships are missing from
+  // person_room_assignments, so the person archive treats the sync as incomplete while > 0.
+  // (Groups without a linked room are filtered out above and never counted.)
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync_skipped_groups', ?)").run(
+    String(skippedGroups),
+  );
+  if (skippedGroups > 0) console.warn(`[SYNC] ${skippedGroups} role group(s) could not be read; their memberships are missing`);
+
   syncProgress.assignmentsProcessed = assignments.length;
   console.log(`[SYNC] Group memberships: ${assignments.length} assignments, ${issues.length} issues`);
 }
@@ -757,6 +767,20 @@ export async function runFullSync(): Promise<SyncProgress> {
       userTypesProcessed: 0,
       distributionGroupsProcessed: 0,
       errors: ["API not configured"],
+    };
+  }
+
+  // An archive reads and reconciles the tables this sync wipes and rewrites: never both at once.
+  if (archiveRunning()) {
+    return {
+      status: "error",
+      message: "archivage en cours — réessayez ensuite",
+      roomsProcessed: 0,
+      personsProcessed: 0,
+      assignmentsProcessed: 0,
+      userTypesProcessed: 0,
+      distributionGroupsProcessed: 0,
+      errors: ["archivage en cours — réessayez ensuite"],
     };
   }
 

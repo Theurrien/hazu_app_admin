@@ -19,6 +19,7 @@ import {
   runPersonRestore,
   syncState,
   removalConfirmed,
+  syncIncompleteMessage,
 } from './person-archive';
 
 type Op = 'read' | 'list' | 'create' | 'move' | 'addTags' | 'removeTags' | 'remove';
@@ -449,13 +450,13 @@ describe('syncState', () => {
   const now = 1700000000000;
   const H = 60 * 60 * 1000;
   it('a recent completed sync: complete, not stale', () => {
-    expect(syncState(String(now - H), false, now)).toEqual({ incomplete: false, stale: false, lastSyncAt: now - H });
+    expect(syncState(String(now - H), false, now)).toMatchObject({ incomplete: false, stale: false, lastSyncAt: now - H });
   });
   it('older than 24 h: complete but stale (a warning, not a refusal)', () => {
-    expect(syncState(String(now - 25 * H), false, now)).toEqual({ incomplete: false, stale: true, lastSyncAt: now - 25 * H });
+    expect(syncState(String(now - 25 * H), false, now)).toMatchObject({ incomplete: false, stale: true, lastSyncAt: now - 25 * H });
   });
   it("'0' (seed, or a sync that started and never finished): incomplete", () => {
-    expect(syncState('0', false, now)).toEqual({ incomplete: true, stale: true, lastSyncAt: null });
+    expect(syncState('0', false, now)).toMatchObject({ incomplete: true, stale: true, lastSyncAt: null });
   });
   it('null, empty or not a number: incomplete', () => {
     for (const raw of [null, '', 'abc', '-5']) {
@@ -463,7 +464,24 @@ describe('syncState', () => {
     }
   });
   it('a sync running now: incomplete even with a good timestamp', () => {
-    expect(syncState(String(now - H), true, now)).toEqual({ incomplete: true, stale: false, lastSyncAt: now - H });
+    expect(syncState(String(now - H), true, now)).toMatchObject({ incomplete: true, stale: false, lastSyncAt: now - H });
+  });
+  it('a finished sync that skipped unreadable role groups: incomplete, with the count', () => {
+    expect(syncState(String(now - H), false, now, '3')).toEqual({
+      incomplete: true, stale: false, lastSyncAt: now - H, skippedGroups: 3,
+    });
+    expect(syncState(String(now - H), false, now, '0').incomplete).toBe(false);
+    expect(syncState(String(now - H), false, now, null).incomplete).toBe(false);
+  });
+  it('a last_sync_at more than 5 min in the future is invalid: incomplete', () => {
+    expect(syncState(String(now + 6 * 60 * 1000), false, now)).toMatchObject({ incomplete: true, lastSyncAt: null });
+    expect(syncState(String(now + 4 * 60 * 1000), false, now).incomplete).toBe(false);
+  });
+  it('the refusal message names the unreadable groups when there are some', () => {
+    expect(syncIncompleteMessage(0)).toBe("synchronisation incomplète — synchronisez d'abord");
+    expect(syncIncompleteMessage(2)).toBe(
+      "dernière synchronisation incomplète (2 groupe(s) illisible(s)) — synchronisez d'abord",
+    );
   });
 });
 

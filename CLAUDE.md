@@ -691,8 +691,18 @@ half-state a re-run finishes.
   sets `last_sync_at` to `'0'` before anything is wiped; only a successful end writes the real time.
   `archivePerson` refuses (« synchronisation incomplète — synchronisez d'abord », nothing written)
   while a sync runs or when `last_sync_at` is not a positive number, and the plan's `syncIncomplete`
-  makes the modal block with the confirm button disabled. The decision is `syncState` in the pure
-  core. The 24 h staleness only **warns**; it never refuses.
+  makes the modal block with the confirm button disabled. A sync that finished but could not read
+  some role-group ACLs is incomplete too: the membership step writes the count to the
+  `sync_skipped_groups` setting (reset to `'0'` with `last_sync_at`; only failed reads count, groups
+  without a room are never read), and the refusal reads « dernière synchronisation incomplète
+  (n groupe(s) illisible(s)) — synchronisez d'abord ». A `last_sync_at` more than 5 min in the future
+  is invalid. The decision is `syncState` in the pure core. The 24 h staleness only **warns**; it
+  never refuses.
+- **No sync during an archive.** `archivePerson`, `archiveRoom` and `restoreRoom` hold the counter
+  in [archive-lock.ts](src/main/services/archive-lock.ts) (taken synchronously, before the sync
+  check); `runFullSync` refuses to start while it is held (« archivage en cours — réessayez
+  ensuite »). The sync state is checked again right before the local reconcile, which is skipped
+  (one log line) when a sync is running or incomplete; the API outcome stands.
 - **Each room** goes through `reliableUpdateUserRole(personId, roomId, role, '_', { reconcileOnlyWhenVerified: true })`
   (S4: retry, verify against group truth). All rooms are attempted; if **any** is not confirmed the
   run stops there — nothing is created or moved, `success:false`, `remaining` names the rooms.

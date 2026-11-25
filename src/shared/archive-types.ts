@@ -85,4 +85,6 @@ export interface PersonArchivePlan {
   lastSyncAt: number | null; syncStale: boolean;   // stale = null or older than 24 h (warns)
   /** A sync is running, or the last one never finished: the room list is partial. Blocks the archive. */
   syncIncomplete: boolean;
+  /** Role groups the last sync could not read (their memberships are missing); > 0 is incomplete. */
+  syncSkippedGroups: number;
 }

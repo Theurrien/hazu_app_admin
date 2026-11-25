@@ -82,24 +82,39 @@ export function archivedPersonEntry(folder: HazuNode, children: HazuNode[]): Arc
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** How far ahead of now a last_sync_at may be (clock skew) before it is taken as invalid. */
+const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+
 /**
  * Whether the local room list can be trusted for an archive. The sync wipes person_room_assignments
- * first and sets last_sync_at to '0' before it does; only a successful end writes the real time.
- * Incomplete (a sync running, or last_sync_at not a positive number) blocks the archive; stale
- * (older than 24 h, or never) only warns.
+ * first and sets last_sync_at to '0' before it does; only a successful end writes the real time,
+ * and the membership step records how many role groups it could not read (sync_skipped_groups).
+ * Incomplete (a sync running, last_sync_at not a positive number or in the future, or unreadable
+ * groups) blocks the archive; stale (older than 24 h, or never) only warns.
  */
 export function syncState(
   lastSyncAtRaw: string | null,
   syncing: boolean,
   now: number,
-): { incomplete: boolean; stale: boolean; lastSyncAt: number | null } {
+  skippedGroupsRaw: string | null = null,
+): { incomplete: boolean; stale: boolean; lastSyncAt: number | null; skippedGroups: number } {
   const parsed = lastSyncAtRaw && /^\d+$/.test(lastSyncAtRaw.trim()) ? Number(lastSyncAtRaw) : NaN;
-  const lastSyncAt = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const lastSyncAt =
+    Number.isFinite(parsed) && parsed > 0 && parsed <= now + FUTURE_TOLERANCE_MS ? parsed : null;
+  const skipped = skippedGroupsRaw && /^\d+$/.test(skippedGroupsRaw.trim()) ? Number(skippedGroupsRaw) : 0;
   return {
-    incomplete: syncing || lastSyncAt === null,
+    incomplete: syncing || lastSyncAt === null || skipped > 0,
     stale: lastSyncAt === null || now - lastSyncAt > DAY_MS,
     lastSyncAt,
+    skippedGroups: skipped,
   };
+}
+
+/** The refusal text of an incomplete sync; names the unreadable role groups when there are some. */
+export function syncIncompleteMessage(skippedGroups: number): string {
+  return skippedGroups > 0
+    ? `dernière synchronisation incomplète (${skippedGroups} groupe(s) illisible(s)) — synchronisez d'abord`
+    : "synchronisation incomplète — synchronisez d'abord";
 }
 
 /**

@@ -33,6 +33,8 @@ export interface MembershipIssue {
 export interface ComputeResult {
   assignments: GroupAssignment[];
   issues: MembershipIssue[];
+  /** Groups whose ACL read failed for good: their memberships are missing from the result. */
+  skippedGroups: number;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -180,5 +182,5 @@ export async function computeGroupAssignments(
     }
   });
 
-  return { assignments, issues };
+  return { assignments, issues, skippedGroups: acls.filter((a) => a === null).length };
 }

@@ -257,7 +257,9 @@ back, no rooms.
   a removal, and the local assignment row stays (`reconcileOnlyWhenVerified`).
 - **An incomplete sync blocks**: the sync sets `last_sync_at` to `'0'` before it wipes anything, and
   the archive refuses while a sync runs or after one that did not finish; the modal blocks. The
-  24 h staleness only warns. The room list is keyed by room and role, so a second role in an
+  24 h staleness only warns. A sync whose membership step could not read some role groups
+  (`sync_skipped_groups` > 0), or a `last_sync_at` in the future, counts as incomplete; no sync
+  starts while an archive runs (archive lock). The room list is keyed by room and role, so a second role in an
   assigned room named only by a tag is removed too.
 - **The leaver list needs a name column**: an e-mail alone cannot match the profiles whose
   identity tag holds a UID, so without a name the list would be full of false leavers.

@@ -18,6 +18,7 @@ export function PersonArchiveConfirmModal({ plans, onConfirm, onCancel }: Props)
   const stale = plans.filter((p) => p.syncStale);
   // A sync running or never finished leaves the room list partial: the archive would be refused.
   const incomplete = plans.some((p) => p.syncIncomplete);
+  const skippedGroups = Math.max(0, ...plans.map((p) => p.syncSkippedGroups ?? 0));
   // Every plan of one batch shares the same last sync; take the oldest known.
   const syncDates = plans.map((p) => p.lastSyncAt).filter((t): t is number => t !== null);
   const lastSync = syncDates.length > 0 ? Math.min(...syncDates) : null;
@@ -63,7 +64,9 @@ export function PersonArchiveConfirmModal({ plans, onConfirm, onCancel }: Props)
           </p>
           {incomplete && (
             <p className="p-3 rounded bg-red-50 border border-red-200 text-red-900">
-              Synchronisation incomplète : une synchronisation est en cours, ou la dernière n'a pas abouti.
+              {skippedGroups > 0
+                ? `Dernière synchronisation incomplète (${skippedGroups} groupe(s) illisible(s)) : `
+                : 'Synchronisation incomplète : une synchronisation est en cours, ou la dernière n\'a pas abouti. '}
               La liste des salles est partielle. Synchronisez d'abord, puis archivez.
             </p>
           )}

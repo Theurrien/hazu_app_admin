@@ -2,6 +2,7 @@
 // No step logic lives here: every Hazu call goes through the core's deps. Spec §6–§7, §10–§11.
 
 import axios from 'axios';
+import { withArchiveLock } from './archive-lock';
 import { getDb } from '../database';
 import {
   sendApiRequestReadChecked,
@@ -268,7 +269,7 @@ function reconcileArchive(room: RoomRow, outcome: ArchiveOutcome, roleNames: str
 
 export async function archiveRoom(roomId: string): Promise<ArchiveOutcome> {
   try {
-    return await archiveRoomUnsafe(roomId);
+    return await withArchiveLock(() => archiveRoomUnsafe(roomId));
   } catch (e) {
     return { success: false, steps: [], remaining: [roomId], error: toFailure(e).message, removedTags: [] };
   }
@@ -403,7 +404,7 @@ function reconcileRestore(outcome: RestoreOutcome): void {
 
 export async function restoreRoom(folderId: string): Promise<RestoreOutcome> {
   try {
-    return await restoreRoomUnsafe(folderId);
+    return await withArchiveLock(() => restoreRoomUnsafe(folderId));
   } catch (e) {
     return {
       success: false, steps: [], remaining: [folderId], error: toFailure(e).message,
