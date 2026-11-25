@@ -375,18 +375,22 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
     // Only ticked students that are still on the list and not already queued.
     const ids = leavers.filter(l => ticked.has(l.id) && !pending.has(l.id)).map(l => l.id);
     if (ids.length === 0) return;
+    const run = runRef.current;
     planningRef.current = true;
     setPlanning(true);
     setArchiveError(null);
     try {
       const planned = await Promise.all(ids.map(id => window.electronAPI.planPersonArchive(id)));
+      if (run !== runRef.current) return;
       enqueuedRef.current = false;
       setPlans(planned);
     } catch (e) {
-      setArchiveError(errMsg(e));
+      if (run === runRef.current) setArchiveError(errMsg(e));
     } finally {
-      planningRef.current = false;
-      setPlanning(false);
+      if (run === runRef.current) {
+        planningRef.current = false;
+        setPlanning(false);
+      }
     }
   };
 
@@ -417,9 +421,10 @@ export function VerifyAssignmentsTab({ fileData }: VerifyAssignmentsTabProps) {
     if (fresh.length === 0) return;
     fresh.forEach(t => seen.add(t.id));
     if (!snapshot) return;
+    const run = runRef.current;
     void fetchSnapshot(snapshot.sheet, snapshot.personType, selectedRoomType, snapshot.withDiff)
-      .then(setSnapshot)
-      .catch(e => setArchiveError(errMsg(e)));
+      .then(snap => { if (run === runRef.current) setSnapshot(snap); })
+      .catch(e => { if (run === runRef.current) setArchiveError(errMsg(e)); });
   }, [tasks, snapshot, fetchSnapshot, selectedRoomType]);
 
   if (!fileData) {
