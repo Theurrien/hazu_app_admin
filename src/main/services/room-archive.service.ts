@@ -41,7 +41,7 @@ import type {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-function setting(key: string): string {
+export function setting(key: string): string {
   const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return (row?.value ?? '').trim();
 }
@@ -50,7 +50,7 @@ function roles(): string[] {
   return (getDb().prepare('SELECT name FROM user_types').all() as Array<{ name: string }>).map((r) => r.name);
 }
 
-function safeTags(raw: string | null | undefined): string[] {
+export function safeTags(raw: string | null | undefined): string[] {
   try {
     const v = JSON.parse(raw || '[]');
     return Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string') : [];
@@ -75,7 +75,7 @@ function toFailure(e: unknown): ApiFailure {
 }
 
 /** Anything leaving the service as a rejection is an Error with a readable message. */
-function toError(e: unknown): Error {
+export function toError(e: unknown): Error {
   return e instanceof Error ? e : new Error(toFailure(e).message);
 }
 
@@ -92,7 +92,7 @@ function toNode(raw: unknown): HazuNode | null {
   return row ? { id: row.id, parentId: row.parentId, title: row.title, tags: row.tags } : null;
 }
 
-function buildDeps(): ArchiveDeps {
+export function buildDeps(): ArchiveDeps {
   const loginId = setting('user_id');
   const authorId = loginId;
   const displayName = setting('user_display_name');
@@ -216,7 +216,7 @@ export function planArchive(roomId: string): ArchivePlan {
 // ---------------------------------------------------------------------------------------------
 // Live reads
 
-async function findArchiveRoot(deps: ArchiveDeps): Promise<HazuNode | null> {
+export async function findArchiveRoot(deps: ArchiveDeps): Promise<HazuNode | null> {
   const adminId = setting('admin_id');
   if (!adminId) return null;
   return (await deps.list(adminId)).find((c) => c.tags.includes(ARCHIVE_ROOT_TAG)) ?? null;

@@ -75,3 +75,12 @@ export interface RestorePlan {
   fromParentExists: boolean;
   groupCount: number;
 }
+
+export interface PersonArchiveOutcome { success: boolean; steps: StepResult[]; remaining: string[]; error?: string; folderId?: string }
+export interface PersonRestoreOutcome { success: boolean; steps: StepResult[]; remaining: string[]; error?: string }
+export interface ArchivedPerson { folderId: string; profileId: string; inFolder: boolean; displayName: string; fromParentId: string; archivedAt: number }
+export interface PersonArchivePlan {
+  personId: string; displayName: string; personType: string;
+  rooms: Array<{ roomId: string; title: string; role: string }>;
+  lastSyncAt: number | null; syncStale: boolean;   // stale = null or older than 24 h
+}

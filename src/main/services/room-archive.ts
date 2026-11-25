@@ -131,13 +131,13 @@ export interface ArchiveInput {
 
 // ---------------------------------------------------------------------------------------------
 
-function failureMessage(e: unknown): string {
+export function failureMessage(e: unknown): string {
   if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
   return String(e);
 }
 
 /** Run a deps call, retrying transient failures (5xx / network / timeout), 3 attempts. 4xx fails fast. */
-async function withRetry<T>(deps: ArchiveDeps, fn: () => Promise<T>): Promise<T> {
+export async function withRetry<T>(deps: ArchiveDeps, fn: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
@@ -151,7 +151,7 @@ async function withRetry<T>(deps: ArchiveDeps, fn: () => Promise<T>): Promise<T>
 }
 
 /** Read until `ok(node)` holds (up to 3 reads, 750 ms apart); returns whether it did. */
-async function readUntil(
+export async function readUntil(
   deps: ArchiveDeps,
   id: string,
   ok: (n: HazuNode | null) => boolean,
@@ -167,7 +167,7 @@ async function readUntil(
 /** Move `id` into `targetId` unless already there. The live read decides, never the status: after a
  *  transient failure the node is read before any resend, and after a final failure it is read once
  *  more, because a failed status says nothing about whether the move committed. */
-async function moveVerified(
+export async function moveVerified(
   deps: ArchiveDeps,
   node: HazuNode,
   targetId: string,
@@ -221,7 +221,7 @@ export function stripHtml(html: string): string {
  * retryable failure the parent is re-listed and a child carrying the identifying tag is adopted
  * before anything is resent.
  */
-async function createOnce(
+export async function createOnce(
   deps: ArchiveDeps,
   parentId: string,
   title: string,
