@@ -62,6 +62,7 @@ export function crossCheck(input: CheckInput): CheckResult {
     }
   }
 
+  // person_room_assignments is UNIQUE(person_id, room_id): one role per person and room.
   const heldBy = new Map<string, Map<string, string>>(); // person → room → role
   for (const a of input.assignments) {
     let rooms = heldBy.get(a.person_id);
@@ -85,21 +86,22 @@ export function crossCheck(input: CheckInput): CheckResult {
 
       const named = new Set<string>();
       let anyIgnored = false;
-      const base = { personId, rowIndexes: p.rowIndexes, category };
+      const base = { personId, category };
       for (const value of values) {
         const res = input.cellOf(category, value);
-        if (res.kind === 'ignored') {
+        // A room of another type (or unknown locally) can never be added to or compared: unverifiable.
+        if (res.kind === 'ignored' || input.roomCategory.get(res.roomId) !== category) {
           anyIgnored = true;
-          lines.push({ ...base, key: `${personId}|${category}|file:${value}`, fileValue: value, roomId: null, status: 'unverifiable' });
+          lines.push({ ...base, rowIndexes: [...p.rowIndexes], key: `${personId}|${category}|file:${value}`, fileValue: value, roomId: null, status: 'unverifiable' });
           continue;
         }
         if (named.has(res.roomId)) continue;
         named.add(res.roomId);
         const role = held.get(res.roomId);
         const key = `${personId}|${category}|${res.roomId}`;
-        if (role === 'student') lines.push({ ...base, key, fileValue: value, roomId: res.roomId, status: 'ok' });
-        else if (role !== undefined) lines.push({ ...base, key, fileValue: value, roomId: res.roomId, status: 'other-role', hazuRole: role });
-        else lines.push({ ...base, key, fileValue: value, roomId: res.roomId, status: 'missing' });
+        if (role === 'student') lines.push({ ...base, rowIndexes: [...p.rowIndexes], key, fileValue: value, roomId: res.roomId, status: 'ok' });
+        else if (role !== undefined) lines.push({ ...base, rowIndexes: [...p.rowIndexes], key, fileValue: value, roomId: res.roomId, status: 'other-role', hazuRole: role });
+        else lines.push({ ...base, rowIndexes: [...p.rowIndexes], key, fileValue: value, roomId: res.roomId, status: 'missing' });
       }
 
       if (anyIgnored) continue;
@@ -108,7 +110,7 @@ export function crossCheck(input: CheckInput): CheckResult {
         .map(([roomId]) => roomId);
       for (const roomId of studentRooms) {
         if (named.has(roomId)) continue;
-        const line: PairLine = { ...base, key: `${personId}|${category}|${roomId}`, fileValue: null, roomId, status: 'extra' };
+        const line: PairLine = { ...base, rowIndexes: [...p.rowIndexes], key: `${personId}|${category}|${roomId}`, fileValue: null, roomId, status: 'extra' };
         if (category !== 'class' && studentRooms.length > 1) line.multipleInHazu = studentRooms.length;
         lines.push(line);
       }

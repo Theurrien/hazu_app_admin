@@ -136,6 +136,38 @@ describe('crossCheck', () => {
   });
 });
 
+describe('crossCheck hardening', () => {
+  it('a named room of another type or unknown is unverifiable, never ok or missing', () => {
+    const r = crossCheck(input({
+      rows: [{ rowIndex: 2, personId: 'p1', cells: { class: 'cie1', state: 'clsA', enterprise: 'nowhere' } }],
+      assignments: [asg('p1', 'cie1'), asg('p1', 'clsA')],
+    }));
+    expect(r.lines.map((l) => [l.category, l.status, l.roomId])).toEqual([
+      ['class', 'unverifiable', null], ['enterprise', 'unverifiable', null], ['state', 'unverifiable', null],
+    ]);
+    expect(fixesFor(r.lines)).toEqual([]);
+  });
+
+  it('lines do not share one rowIndexes array', () => {
+    const r = crossCheck(input({
+      rows: [{ rowIndex: 2, personId: 'p1', cells: { class: 'clsA' } }],
+      assignments: [asg('p1', 'clsA'), asg('p1', 'clsB')],
+    }));
+    expect(r.lines[0].rowIndexes).not.toBe(r.lines[1].rowIndexes);
+  });
+
+  it('ignored value on one row and resolved on another: no extra for a third held room', () => {
+    const r = crossCheck(input({
+      rows: [
+        { rowIndex: 2, personId: 'p1', cells: { enterprise: 'ign-co' } },
+        { rowIndex: 5, personId: 'p1', cells: { enterprise: 'co1' } },
+      ],
+      assignments: [asg('p1', 'co2')],
+    }));
+    expect(r.lines.map((l) => l.status).sort()).toEqual(['missing', 'unverifiable']);
+  });
+});
+
 describe('fixesFor', () => {
   it('missing adds, extra removes, the rest nothing', () => {
     const r = crossCheck(input({
