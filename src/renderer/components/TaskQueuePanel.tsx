@@ -59,6 +59,8 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
         return `Archiver ${task.displayName} (${task.roomCount} salles)`;
       case 'restorePerson':
         return `Restaurer ${task.displayName}`;
+      case 'levelChange':
+        return `Changement de niveau — ${task.displayName} → ${task.toLevel === 'cfc' ? 'CFC' : 'AFP'}`;
     }
   };
 

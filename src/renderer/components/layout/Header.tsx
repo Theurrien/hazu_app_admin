@@ -15,6 +15,7 @@ const pageTitles: Record<PageId, string> = {
   missions: 'Missions',
   archive: 'Archive',
   discrepancies: 'Discrepancies',
+  tools: 'Outils',
   settings: 'Settings',
 };
 
