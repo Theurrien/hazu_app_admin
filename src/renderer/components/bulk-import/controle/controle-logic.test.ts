@@ -5,8 +5,14 @@ import {
   mappedCategories,
   checkRows,
   resetForNewFile,
+  openCount,
+  linkFromDecision,
+  roomCandidates,
+  distinctRoomValues,
+  applyStudentOverrides,
   type ControleColumns,
 } from './controle-logic';
+import type { RoomCategory, RoomResolution, StudentResolution } from '../../../../shared/correspondence';
 
 describe('controleColumns', () => {
   it('reads the column names from the mappings', () => {
@@ -108,5 +114,94 @@ describe('resetForNewFile', () => {
   });
   it('returns fresh objects each time', () => {
     expect(resetForNewFile().mappings).not.toBe(resetForNewFile().mappings);
+  });
+});
+
+describe('openCount', () => {
+  it('counts what is not resolved', () => {
+    expect(
+      openCount([
+        { kind: 'saved', hazuId: 'r1' },
+        { kind: 'exact', hazuId: 'r2' },
+        { kind: 'ignored' },
+        { kind: 'stale', suggestionId: null },
+        { kind: 'open', suggestionId: 'r3', twins: [] },
+        { kind: 'matched', personId: 'p1' },
+        { kind: 'check', candidateIds: ['p1'], reason: 'near' },
+        { kind: 'unknown' },
+        { kind: 'stale' },
+      ]),
+    ).toBe(5);
+  });
+  it('reads any iterable, e.g. map values', () => {
+    const m = new Map<string, RoomResolution>([['a', { kind: 'open', suggestionId: null, twins: [] }]]);
+    expect(openCount(m.values())).toBe(1);
+    expect(openCount([])).toBe(0);
+  });
+});
+
+describe('linkFromDecision', () => {
+  it('builds a saved link stamped with now', () => {
+    expect(linkFromDecision('class', 'cui 2a', 'CUI 2A', 'r1', 1234)).toEqual({
+      category: 'class',
+      fileKey: 'cui 2a',
+      fileLabel: 'CUI 2A',
+      hazuId: 'r1',
+      decidedAt: 1234,
+    });
+  });
+  it('keeps an ignored decision as null', () => {
+    const l = linkFromDecision('student', 'email:a@example.invalid', 'Exemple Alice', null, 99);
+    expect(l.hazuId).toBeNull();
+    expect(l.decidedAt).toBe(99);
+  });
+});
+
+describe('roomCandidates', () => {
+  const rooms = [
+    { id: 'cat', title: 'École professionnelle', room_type: 'class', parent_id: 'root' },
+    { id: 'r1', title: 'CUI 2A', room_type: 'class', parent_id: 'cat' },
+    { id: 'r2', title: 'Hôtel Exemple', room_type: 'enterprise', parent_id: 'gone' },
+    { id: 'r3', title: 'Sans parent', room_type: 'class', parent_id: null },
+  ];
+  it('keeps the rooms of the type, with their parent title', () => {
+    expect(roomCandidates(rooms, 'class')).toEqual([
+      { id: 'cat', title: 'École professionnelle', parentTitle: null },
+      { id: 'r1', title: 'CUI 2A', parentTitle: 'École professionnelle' },
+      { id: 'r3', title: 'Sans parent', parentTitle: null },
+    ]);
+  });
+  it('gives null when the parent is not a local room', () => {
+    expect(roomCandidates(rooms, 'enterprise')).toEqual([{ id: 'r2', title: 'Hôtel Exemple', parentTitle: null }]);
+  });
+});
+
+describe('distinctRoomValues', () => {
+  it('one entry per room key, first spelling kept, in file order', () => {
+    const cells = new Map<number, Partial<Record<RoomCategory, string>>>([
+      [0, { class: 'CUI 2A', enterprise: 'Hôtel Exemple' }],
+      [1, { class: 'cui  2a' }],
+      [2, { class: 'RES 1B' }],
+    ]);
+    expect(distinctRoomValues(cells, 'class')).toEqual([
+      { key: 'cui 2a', label: 'CUI 2A' },
+      { key: 'res 1b', label: 'RES 1B' },
+    ]);
+    expect(distinctRoomValues(cells, 'state')).toEqual([]);
+  });
+});
+
+describe('applyStudentOverrides', () => {
+  it('replaces the resolution of overridden rows only', () => {
+    const res = new Map<number, { res: StudentResolution; saveKey: string | null }>([
+      [0, { res: { kind: 'check', candidateIds: ['p1', 'p2'], reason: 'ambiguous' }, saveKey: null }],
+      [1, { res: { kind: 'unknown' }, saveKey: null }],
+      [2, { res: { kind: 'matched', personId: 'p3' }, saveKey: 'email:c@example.invalid' }],
+    ]);
+    const out = applyStudentOverrides(res, new Map([[0, 'p2'], [1, null]]));
+    expect(out.get(0)).toEqual({ res: { kind: 'matched', personId: 'p2' }, saveKey: null });
+    expect(out.get(1)).toEqual({ res: { kind: 'ignored' }, saveKey: null });
+    expect(out.get(2)).toEqual(res.get(2));
+    expect(res.get(1)!.res.kind).toBe('unknown'); // input untouched
   });
 });

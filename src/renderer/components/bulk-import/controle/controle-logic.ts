@@ -1,8 +1,16 @@
 /**
- * Contrôle, step 1 — pure decisions about the column mapping and the sheet rows. No IO, no React.
+ * Contrôle, steps 1 and 2 — pure decisions about the column mapping and the sheet rows. No IO, no React.
  */
 import type { SheetPerson } from '../../../../shared/person-match';
-import type { RoomCategory } from '../../../../shared/correspondence';
+import { isResolved, roomKey } from '../../../../shared/correspondence';
+import type {
+  CorrCategory,
+  RoomCandidate,
+  RoomCategory,
+  RoomResolution,
+  SavedLink,
+  StudentResolution,
+} from '../../../../shared/correspondence';
 import type { ColumnMapping } from '../ColumnMappingDropdown';
 
 export interface ControleColumns {
@@ -104,4 +112,77 @@ export interface ControleState {
 /** A new (or cleared) file: back to step 1, nothing mapped or ticked. Saved links are never touched. */
 export function resetForNewFile(): ControleState {
   return { step: 1, mappings: {}, ticked: new Set() };
+}
+
+// ---- Step 2: correspondences ----
+
+/** How many resolutions still need the operator (an ignored value counts as resolved). */
+export function openCount(res: Iterable<RoomResolution | StudentResolution>): number {
+  let n = 0;
+  for (const r of res) if (!isResolved(r)) n++;
+  return n;
+}
+
+/** The link saved for one operator decision; `hazuId` null = ignored on purpose. */
+export function linkFromDecision(
+  category: CorrCategory,
+  fileKey: string,
+  fileLabel: string,
+  hazuId: string | null,
+  now: number,
+): SavedLink {
+  return { category, fileKey, fileLabel, hazuId, decidedAt: now };
+}
+
+/** Local rooms of one type as candidates; parentTitle = title of the local room that is its parent, else null. */
+export function roomCandidates(
+  rooms: Array<{ id: string; title: string; room_type: string; parent_id: string | null }>,
+  type: RoomCategory,
+): RoomCandidate[] {
+  const titleOf = new Map(rooms.map((r) => [r.id, r.title]));
+  return rooms
+    .filter((r) => r.room_type === type)
+    .map((r) => ({ id: r.id, title: r.title, parentTitle: (r.parent_id && titleOf.get(r.parent_id)) ?? null }));
+}
+
+/** The distinct values of one room column, one per `roomKey`, first spelling kept, in file order. */
+export function distinctRoomValues(
+  cells: Map<number, Partial<Record<RoomCategory, string>>>,
+  category: RoomCategory,
+): Array<{ key: string; label: string }> {
+  const seen = new Map<string, string>();
+  const rows = [...cells.keys()].sort((a, b) => a - b);
+  for (const i of rows) {
+    const v = cells.get(i)?.[category];
+    if (v === undefined) continue;
+    const key = roomKey(v);
+    if (key !== '' && !seen.has(key)) seen.set(key, v);
+  }
+  return [...seen].map(([key, label]) => ({ key, label }));
+}
+
+/**
+ * Session-only decisions (rows whose key cannot be saved) laid over the resolved rows:
+ * a person id → matched, null → ignored. The input map is not modified.
+ */
+export function applyStudentOverrides(
+  res: Map<number, { res: StudentResolution; saveKey: string | null }>,
+  overrides: Map<number, string | null>,
+): Map<number, { res: StudentResolution; saveKey: string | null }> {
+  const out = new Map(res);
+  for (const [rowIndex, personId] of overrides) {
+    const cur = out.get(rowIndex);
+    if (!cur) continue;
+    out.set(rowIndex, {
+      res: personId === null ? { kind: 'ignored' } : { kind: 'matched', personId },
+      saveKey: cur.saveKey,
+    });
+  }
+  return out;
+}
+
+/** What step 3 receives from step 2: the student per row and the room per (category, roomKey). */
+export interface ResolvedForCheck {
+  students: Map<number, StudentResolution>;
+  rooms: Partial<Record<RoomCategory, Map<string, RoomResolution>>>;
 }
