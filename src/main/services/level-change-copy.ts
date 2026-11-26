@@ -323,9 +323,17 @@ async function alignAcl(
       if (fix.raiseStudent && studentId) {
         const role = fix.raiseStudent;
         await withRetry(deps, () => deps.setRole(c.id, studentId, role));
-        // never detach on a 2xx alone: the next read must show the grant first, or a lagging
-        // grant plus a detach would leave the student with no access to this node
-        continue;
+        // never detach on a 2xx alone: a read must show the grant first, or a lagging grant plus a
+        // detach would leave the student with no access to this node. Wait for it here, so the
+        // detach is still attempted in this pass instead of using up a verify read.
+        const detachSet = new Set(fix.detachGroups);
+        let shown = false;
+        for (let j = 0; j < VERIFY_READS && !shown; j++) {
+          await deps.sleep(VERIFY_DELAY_MS);
+          const now = await withRetry(deps, () => deps.acl(c.id));
+          shown = studentRank(now, studentId, detachSet) >= fix.studentRequired;
+        }
+        if (!shown) continue;
       }
       // only groups of the baseline's detach set, one call per distinct groupId
       for (const g of fix.detachGroups.filter(x => baseline!.detach.has(x))) {

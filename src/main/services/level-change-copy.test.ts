@@ -418,13 +418,20 @@ describe('copySection — R12 access cases', () => {
     w.setInitialAcl(() => [row(S, 'editor', true, 'g-st'), row('own', 'owner', true, 'g-owner')]);
     const setRole = w.deps.setRole;
     const pending = new Map<string, () => Promise<void>>();
-    // the grant answers 2xx but only lands after the next ACL read of that node
-    w.deps.setRole = async (id, p, role) => { pending.set(id, () => setRole(id, p, role)); };
+    // the grant answers 2xx but only shows on the third ACL read after it of that node
+    const readsLeft = new Map<string, number>();
+    w.deps.setRole = async (id, p, role) => {
+      if (!pending.has(id)) { pending.set(id, () => setRole(id, p, role)); readsLeft.set(id, 3); }
+    };
     const acl = w.deps.acl;
     w.deps.acl = async (id) => {
       const rows = await acl(id);
       const land = pending.get(id);
-      if (land) { pending.delete(id); await land(); }
+      if (land) {
+        const left = (readsLeft.get(id) ?? 0) - 1;
+        readsLeft.set(id, left);
+        if (left <= 0) { pending.delete(id); await land(); }
+      }
       return rows;
     };
     const detach = w.deps.detachGroup;
@@ -434,12 +441,14 @@ describe('copySection — R12 access cases', () => {
       if (!w.acls.get(id)!.some(r => r.authorId === S && r.groupId === null)) early.push(id);
       return detach(id, g);
     };
-    await copySection('t-sec', 'prof', w.deps, groups, S);
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
     expect(early).toEqual([]); // the grant was visible before every detach
     for (const [id, rows] of w.acls) {
       if (!id.startsWith('new-')) continue;
-      expect(rows.some(r => r.authorId === S)).toBe(true); // the student never loses access
+      expect(rows.some(x => x.authorId === S)).toBe(true); // the student never loses access
+      expect(rows.some(x => x.groupId === 'g-st')).toBe(false); // the detach still happened
     }
+    expect(r.ok).toBe(true); // a lagging grant does not use up the verify budget
   });
   it('studentId null → no detach on any node, unconfirmed', async () => {
     const w = world();
