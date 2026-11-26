@@ -34,3 +34,15 @@ export interface LevelChangePlan {
   profileOnly: string[];
   templateOnly: string[];
 }
+
+export interface LevelChangeOutcome {
+  success: boolean;
+  dryRun: boolean;
+  plan: LevelChangePlan | null;
+  /** section changes + colour confirmed by the read */
+  applied: number;
+  /** French, one line per unconfirmed change */
+  remaining: string[];
+  /** refusal / abort reason, nothing written */
+  error?: string;
+}

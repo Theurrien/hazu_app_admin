@@ -4,7 +4,8 @@
 // Only the difference between the two levels' templates is applied to a profile; a tag the
 // templates do not differ on, and any tag specific to the student, is never touched.
 
-import type { Level, LevelChangePlan, SectionChange } from '../../shared/level-change-types';
+import type { Level, LevelChangeOutcome, LevelChangePlan, SectionChange } from '../../shared/level-change-types';
+import { withRetry, failureMessage } from './room-archive';
 
 export interface LcNode {
   id: string;
@@ -187,4 +188,141 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
     ],
     sections, profileOnly, templateOnly,
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Orchestrator. All IO injected. The live read decides, never the status code.
+
+export interface LevelChangeDeps {
+  /** null only on 404 */
+  read(id: string): Promise<LcNode | null>;
+  /** throws on failure; parent echo removed */
+  list(parentId: string): Promise<LcNode[]>;
+  updateDescription(id: string, html: string): Promise<void>;
+  updateColor(id: string, hex: string): Promise<void>;
+  addTags(id: string, tags: string[]): Promise<void>;
+  removeTags(id: string, tags: string[]): Promise<void>;
+  sleep(ms: number): Promise<void>;
+}
+
+export interface LevelChangeInput {
+  profileId: string;
+  toLevel: Level;
+  targetTemplateId: string;
+  templateRootId: string;
+  dryRun: boolean;
+}
+
+const VERIFY_READS = 3;
+const VERIFY_DELAY_MS = 750;
+
+function sectionConfirmation(c: SectionChange, live: LcNode | undefined): { tags: boolean; description: boolean } {
+  if (!live) return { tags: false, description: false };
+  const tags = c.addTags.every(t => live.tags.includes(t)) && c.removeTags.every(t => !live.tags.includes(t));
+  const description = !c.description || normDesc(live.description) === normDesc(c.description.to);
+  return { tags, description };
+}
+
+export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeDeps): Promise<LevelChangeOutcome> {
+  const refuse = (error: string, plan: LevelChangePlan | null = null): LevelChangeOutcome =>
+    ({ success: false, dryRun: input.dryRun, plan, applied: 0, remaining: [], error });
+  const EMPTY = "liste vide — rien n'a été écrit";
+
+  let plan: LevelChangePlan;
+  try {
+    const profile = await withRetry(deps, () => deps.read(input.profileId));
+    if (!profile) return refuse('profil introuvable');
+    const current = levelOfColor(profile.color);
+    if (!current) return refuse('niveau du profil non reconnu (couleur inattendue)');
+
+    const rootChildren = await withRetry(deps, () => deps.list(input.templateRootId));
+    const templates = studentTemplates(input.templateRootId, rootChildren);
+    const targets = templatesFor(templates, profile.icon, input.toLevel);
+    const targetRef = targets.find(t => t.id === input.targetTemplateId);
+    if (!targetRef) return refuse('modèle cible invalide pour ce profil');
+
+    const fromTemplates = templatesFor(templates, profile.icon, otherLevel(input.toLevel));
+    const sourceId = pickV3(fromTemplates);
+    if (!sourceId) return refuse('modèle source introuvable (aucun v3 unique)');
+    const sourceRef = fromTemplates.find(t => t.id === sourceId)!;
+    const otherRefs = fromTemplates.filter(t => t.id !== sourceId);
+
+    const listNonEmpty = async (id: string): Promise<LcNode[] | null> => {
+      const kids = await withRetry(deps, () => deps.list(id));
+      return kids.length === 0 ? null : kids;
+    };
+    const profileChildren = await listNonEmpty(profile.id);
+    const targetChildren = await listNonEmpty(targetRef.id);
+    const sourceChildren = await listNonEmpty(sourceRef.id);
+    const otherChildren: Array<LcNode[] | null> = [];
+    for (const o of otherRefs) otherChildren.push(await listNonEmpty(o.id));
+    if (!profileChildren || !targetChildren || !sourceChildren || otherChildren.some(c => c === null)) {
+      return refuse(EMPTY);
+    }
+
+    plan = buildPlan({
+      profile, profileChildren, toLevel: input.toLevel,
+      target: { ref: targetRef, children: targetChildren },
+      source: { ref: sourceRef, children: sourceChildren },
+      sourceOthers: otherRefs.map((o, i) => ({ ref: o, children: otherChildren[i]! })),
+    });
+  } catch (e) {
+    return refuse(`lecture impossible : ${failureMessage(e)} — rien n'a été écrit`);
+  }
+
+  if (input.dryRun) return { success: true, dryRun: true, plan, applied: 0, remaining: [] };
+
+  const changes = plan.sections.filter(s => s.description || s.addTags.length || s.removeTags.length);
+  if (changes.length === 0 && !plan.colorChange) {
+    return { success: true, dryRun: false, plan, applied: 0, remaining: [] };
+  }
+
+  // Write sections: failures are kept, not fatal — only the live read decides.
+  for (const c of changes) {
+    const attempt = async (fn: () => Promise<void>) => {
+      try { await withRetry(deps, fn); } catch { /* verified below */ }
+    };
+    if (c.removeTags.length) await attempt(() => deps.removeTags(c.sectionId, c.removeTags));
+    if (c.addTags.length) await attempt(() => deps.addTags(c.sectionId, c.addTags));
+    if (c.description) await attempt(() => deps.updateDescription(c.sectionId, c.description!.to));
+  }
+
+  // Verify sections against the re-listed profile.
+  let lastLive: LcNode[] = [];
+  let sectionsOk = false;
+  for (let i = 0; i < VERIFY_READS && !sectionsOk; i++) {
+    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+    try {
+      lastLive = await withRetry(deps, () => deps.list(plan.profileId));
+    } catch { continue; }
+    sectionsOk = changes.every(c => {
+      const r = sectionConfirmation(c, lastLive.find(n => n.id === c.sectionId));
+      return r.tags && r.description;
+    });
+  }
+
+  const remaining: string[] = [];
+  let applied = 0;
+  for (const c of changes) {
+    const r = sectionConfirmation(c, lastLive.find(n => n.id === c.sectionId));
+    if (r.tags && r.description) { applied++; continue; }
+    if (!r.tags) remaining.push(`« ${c.title} » : étiquettes non confirmées`);
+    if (!r.description) remaining.push(`« ${c.title} » : description non confirmée`);
+  }
+  if (!sectionsOk) return { success: false, dryRun: false, plan, applied, remaining };
+
+  // Colour last: it is what marks the profile as changed, so it only moves once every section holds.
+  if (plan.colorChange) {
+    try { await withRetry(deps, () => deps.updateColor(plan.profileId, plan.colorTo)); } catch { /* verified below */ }
+    let colorOk = false;
+    for (let i = 0; i < VERIFY_READS && !colorOk; i++) {
+      if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+      try {
+        const p = await withRetry(deps, () => deps.read(plan.profileId));
+        colorOk = !!p && (p.color ?? '').toLowerCase() === plan.colorTo.toLowerCase();
+      } catch { /* retry */ }
+    }
+    if (colorOk) applied++; else remaining.push('couleur du profil non confirmée');
+  }
+  return { success: remaining.length === 0, dryRun: false, plan, applied, remaining };
 }

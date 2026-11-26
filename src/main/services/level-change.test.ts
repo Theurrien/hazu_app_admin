@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { runLevelChange, type LevelChangeDeps } from './level-change';
 import {
   levelOfColor, studentTemplates, pickV3, sectionKey, normDesc, tagFamily, buildPlan,
   templatesFor, otherLevel, LEVEL_COLORS, STUDENT_TEMPLATE_TAG,
@@ -217,5 +218,155 @@ describe('buildPlan structure', () => {
   it('templates listed', () => {
     const p = plan({ others: [[]] });
     expect(p.templates.map(t => t.role)).toEqual(['target', 'source', 'source-other']);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+describe('runLevelChange', () => {
+  const ROOT = 'ROOT';
+  const OLD = 'hz-config-skills-enable-' + id20('a');
+  const NEW = 'hz-config-skills-enable-' + id20('b');
+  const tpl = (id: string, title: string, color: string) =>
+    node({ id, title, color, icon: 'fa-carrot', tags: [STUDENT_TEMPLATE_TAG], parentId: ROOT });
+
+  function world() {
+    const nodes = new Map<string, LcNode>();
+    const kids = new Map<string, string[]>();
+    const put = (n: LcNode, parent: string) => { nodes.set(n.id, { ...n, parentId: parent }); kids.set(parent, [...(kids.get(parent) ?? []), n.id]); };
+    put(tpl('TA', 'Apprenti AFP v3', AFP), ROOT);
+    put(tpl('TC', 'Apprenti CFC v3', CFC), ROOT);
+    put(tpl('TC2', 'Apprenti CFC v2', CFC), ROOT);
+    put(node({ id: 'P', title: 'p', color: CFC, icon: 'fa-carrot' }), 'CAT');
+    put(node({ id: 'ta1', title: 'Sec', tags: [NEW], description: '<p>afp</p>' }), 'TA');
+    put(node({ id: 'tc1', title: 'Sec', tags: [OLD], description: '<p>cfc</p>' }), 'TC');
+    put(node({ id: 'tc21', title: 'Sec', tags: [OLD], description: '<p>cfc</p>' }), 'TC2');
+    put(node({ id: 'p1', title: 'Sec', tags: [OLD], description: '<p>cfc</p>' }), 'P');
+    return { nodes, kids };
+  }
+
+  function harness(w = world(), opts: {
+    failList?: string; dropWrites?: boolean; failWrites?: boolean; mangleDesc?: boolean; noColor?: boolean;
+  } = {}) {
+    const calls: string[] = [];
+    const get = (id: string) => w.nodes.get(id)!;
+    const deps: LevelChangeDeps = {
+      async read(id) { const n = w.nodes.get(id); return n ? { ...n, tags: [...n.tags] } : null; },
+      async list(pid) {
+        if (opts.failList === pid) throw { networkOrTimeout: false, status: 403, message: 'interdit' };
+        return (w.kids.get(pid) ?? []).map(i => ({ ...get(i), tags: [...get(i).tags] }));
+      },
+      async updateDescription(id, html) {
+        calls.push('desc:' + id);
+        if (!opts.dropWrites) get(id).description = opts.mangleDesc ? `\n ${html.replace('><', '>\n<')} \n` : html;
+        if (opts.failWrites) throw { status: 500, networkOrTimeout: false, message: 'boom' };
+      },
+      async updateColor(id, hex) { calls.push('color:' + id); if (!opts.noColor) get(id).color = hex; },
+      async addTags(id, tags) {
+        calls.push('add:' + id);
+        if (!opts.dropWrites) get(id).tags.push(...tags.filter(t => !get(id).tags.includes(t)));
+        if (opts.failWrites) throw { status: 500, networkOrTimeout: false, message: 'boom' };
+      },
+      async removeTags(id, tags) {
+        calls.push('rm:' + id);
+        if (!opts.dropWrites) get(id).tags = get(id).tags.filter(t => !tags.includes(t));
+      },
+      async sleep() {},
+    };
+    return { w, deps, calls };
+  }
+  const input = (over: Record<string, unknown> = {}) =>
+    ({ profileId: 'P', toLevel: 'afp' as const, targetTemplateId: 'TA', templateRootId: ROOT, dryRun: false, ...over });
+
+  it('refuses without writing', async () => {
+    let h = harness();
+    expect((await runLevelChange(input({ profileId: 'nope' }), h.deps)).error).toBe('profil introuvable');
+    h = harness(); h.w.nodes.get('P')!.color = '#C85E00';
+    expect((await runLevelChange(input(), h.deps)).error).toContain('niveau');
+    h = harness();
+    expect((await runLevelChange(input({ targetTemplateId: 'TC' }), h.deps)).error).toContain('modèle');
+    h = harness(); h.w.nodes.get('TC')!.title = 'Apprenti CFC';
+    expect((await runLevelChange(input(), h.deps)).error).toContain('modèle source');
+    expect(h.calls).toEqual([]);
+  });
+
+  it('aborts before any write when a listing throws or is empty', async () => {
+    for (const id of ['P', 'TA', 'TC', 'TC2']) {
+      const h = harness(world(), { failList: id });
+      const o = await runLevelChange(input(), h.deps);
+      expect(o.success).toBe(false);
+      expect(h.calls).toEqual([]);
+    }
+    for (const id of ['P', 'TA', 'TC', 'TC2']) {
+      const h = harness();
+      h.w.kids.set(id, []);
+      const o = await runLevelChange(input(), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.error).toContain('liste vide');
+      expect(h.calls).toEqual([]);
+    }
+  });
+
+  it('dry run returns the plan and writes nothing', async () => {
+    const h = harness();
+    const o = await runLevelChange(input({ dryRun: true }), h.deps);
+    expect(o.success).toBe(true);
+    expect(o.plan?.sections).toHaveLength(1);
+    expect(h.calls).toEqual([]);
+  });
+
+  it('happy path: tags, descriptions, colour last', async () => {
+    const h = harness();
+    const o = await runLevelChange(input(), h.deps);
+    expect(o).toMatchObject({ success: true, applied: 2, remaining: [] });
+    expect(h.calls).toEqual(['rm:p1', 'add:p1', 'desc:p1', 'color:P']);
+    expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
+    expect(h.w.nodes.get('P')!.color).toBe(AFP);
+  });
+
+  it('a write failing 500 that landed counts as applied', async () => {
+    const h = harness(world(), { failWrites: true });
+    const o = await runLevelChange(input(), h.deps);
+    expect(o.success).toBe(true);
+    expect(h.calls.filter(c => c === 'add:p1')).toHaveLength(3);
+  });
+
+  it('a 2xx the read never shows fails, colour not written', async () => {
+    const h = harness(world(), { dropWrites: true });
+    const o = await runLevelChange(input(), h.deps);
+    expect(o.success).toBe(false);
+    expect(o.remaining.some(r => r.includes('Sec'))).toBe(true);
+    expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+  });
+
+  it('whitespace-only description difference counts as applied', async () => {
+    const h = harness(world(), { mangleDesc: true });
+    expect((await runLevelChange(input(), h.deps)).success).toBe(true);
+  });
+
+  it('colour not confirmed is reported', async () => {
+    const h = harness(world(), { noColor: true });
+    const o = await runLevelChange(input(), h.deps);
+    expect(o.success).toBe(false);
+    expect(o.remaining).toContain('couleur du profil non confirmée');
+  });
+
+  it('re-run after success writes nothing', async () => {
+    const h = harness();
+    await runLevelChange(input(), h.deps);
+    h.calls.length = 0;
+    const o = await runLevelChange(input(), h.deps);
+    expect(o).toMatchObject({ success: true, applied: 0 });
+    expect(o.plan?.sections).toEqual([]);
+    expect(o.plan?.colorChange).toBe(false);
+    expect(h.calls).toEqual([]);
+  });
+
+  it('finishing run: colour already target, a section still old', async () => {
+    const h = harness();
+    h.w.nodes.get('P')!.color = AFP;
+    const o = await runLevelChange(input(), h.deps);
+    expect(o).toMatchObject({ success: true, applied: 1 });
+    expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+    expect(h.calls).toContain('add:p1');
   });
 });
