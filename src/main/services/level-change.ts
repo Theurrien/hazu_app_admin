@@ -309,7 +309,10 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     if (!r.tags) remaining.push(`« ${c.title} » : étiquettes non confirmées`);
     if (!r.description) remaining.push(`« ${c.title} » : description non confirmée`);
   }
-  if (!sectionsOk) return { success: false, dryRun: false, plan, applied, remaining };
+  if (!sectionsOk) {
+    if (plan.colorChange) remaining.push('couleur du profil non modifiée — sections non confirmées');
+    return { success: false, dryRun: false, plan, applied, remaining };
+  }
 
   // Colour last: it is what marks the profile as changed, so it only moves once every section holds.
   if (plan.colorChange) {

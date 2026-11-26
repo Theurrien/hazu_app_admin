@@ -280,10 +280,13 @@ describe('runLevelChange', () => {
   it('refuses without writing', async () => {
     let h = harness();
     expect((await runLevelChange(input({ profileId: 'nope' }), h.deps)).error).toBe('profil introuvable');
+    expect(h.calls).toEqual([]);
     h = harness(); h.w.nodes.get('P')!.color = '#C85E00';
     expect((await runLevelChange(input(), h.deps)).error).toContain('niveau');
+    expect(h.calls).toEqual([]);
     h = harness();
     expect((await runLevelChange(input({ targetTemplateId: 'TC' }), h.deps)).error).toContain('modèle');
+    expect(h.calls).toEqual([]);
     h = harness(); h.w.nodes.get('TC')!.title = 'Apprenti CFC';
     expect((await runLevelChange(input(), h.deps)).error).toContain('modèle source');
     expect(h.calls).toEqual([]);
@@ -335,7 +338,16 @@ describe('runLevelChange', () => {
     const o = await runLevelChange(input(), h.deps);
     expect(o.success).toBe(false);
     expect(o.remaining.some(r => r.includes('Sec'))).toBe(true);
+    expect(o.remaining).toContain('couleur du profil non modifiée — sections non confirmées');
     expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+  });
+
+  it('unconfirmed section with colour already target: no colour line', async () => {
+    const h = harness(world(), { dropWrites: true });
+    h.w.nodes.get('P')!.color = AFP;
+    const o = await runLevelChange(input(), h.deps);
+    expect(o.success).toBe(false);
+    expect(o.remaining.some(r => r.startsWith('couleur'))).toBe(false);
   });
 
   it('whitespace-only description difference counts as applied', async () => {
