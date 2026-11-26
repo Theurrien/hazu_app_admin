@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import type { Level } from '../../shared/level-change-types';
 
 // Task type discriminated union
-export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags' | 'archiveRoom' | 'restoreRoom' | 'archivePerson' | 'restorePerson';
+export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags' | 'archiveRoom' | 'restoreRoom' | 'archivePerson' | 'restorePerson' | 'levelChange';
 
 interface BaseTask {
   id: string;
@@ -102,7 +103,19 @@ export interface RestorePersonTask extends BaseTask {
   displayName: string;
 }
 
-export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask | ArchiveRoomTask | RestoreRoomTask | ArchivePersonTask | RestorePersonTask;
+export interface LevelChangeTask extends BaseTask {
+  type: 'levelChange';
+  personId: string;
+  displayName: string;
+  toLevel: Level;
+  targetTemplateId: string;
+  // Called once, when the change is confirmed.
+  onDone?: () => void;
+  // Called once each time the task ends in error.
+  onError?: () => void;
+}
+
+export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask | ArchiveRoomTask | RestoreRoomTask | ArchivePersonTask | RestorePersonTask | LevelChangeTask;
 
 // Input types for adding tasks to queue
 type AddRoleUpdateInput = Omit<RoleUpdateTask, 'id' | 'status' | 'type'>;
@@ -115,6 +128,7 @@ type AddArchiveRoomInput = Omit<ArchiveRoomTask, 'id' | 'status' | 'type'>;
 type AddRestoreRoomInput = Omit<RestoreRoomTask, 'id' | 'status' | 'type' | 'unresolvedMembers'>;
 type AddArchivePersonInput = Omit<ArchivePersonTask, 'id' | 'status' | 'type'>;
 type AddRestorePersonInput = Omit<RestorePersonTask, 'id' | 'status' | 'type'>;
+type AddLevelChangeInput = Omit<LevelChangeTask, 'id' | 'status' | 'type'>;
 
 // Notification types (for already-completed operations like modal creates)
 type CreateRoomNotification = { type: 'createRoom'; roomName: string; roomId: string };
@@ -133,6 +147,7 @@ interface TaskQueueContextType {
   addArchiveRoomTask: (task: AddArchiveRoomInput) => string;
   addRestoreRoomTask: (task: AddRestoreRoomInput) => string;
   addArchivePersonTask: (task: AddArchivePersonInput) => string;
+  addLevelChangeTask: (task: AddLevelChangeInput) => string;
   addRestorePersonTask: (task: AddRestorePersonInput) => string;
   // Add already-completed notification (for modals that call API directly)
   addNotification: (notification: NotificationInput) => string;
@@ -328,6 +343,26 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
             prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
           );
         }
+      } else if (nextTask.type === 'levelChange') {
+        const task = nextTask as LevelChangeTask;
+        const outcome = await window.electronAPI.executeLevelChange(
+          task.personId,
+          task.toLevel,
+          task.targetTemplateId
+        );
+
+        if (outcome.success) {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+          );
+          try { task.onDone?.(); } catch { /* a callback failure cannot flip the result */ }
+        } else {
+          const error = outcome.error ?? (outcome.remaining.join(' · ') || 'Échec');
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
+          );
+          try { task.onError?.(); } catch { /* a callback failure cannot change the result */ }
+        }
       } else if (nextTask.type === 'restorePerson') {
         const task = nextTask as RestorePersonTask;
         const outcome = await window.electronAPI.restorePerson(task.folderId);
@@ -351,6 +386,9 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
       if (nextTask.type === 'roleUpdate') (nextTask as RoleUpdateTask).onError?.();
       if (nextTask.type === 'createRoom') (nextTask as CreateRoomTask).onError?.();
       if (nextTask.type === 'createPerson') (nextTask as CreatePersonTask).onError?.();
+      if (nextTask.type === 'levelChange') {
+        try { (nextTask as LevelChangeTask).onError?.(); } catch { /* cannot change the result */ }
+      }
     }
 
     processingRef.current = false;
@@ -433,6 +471,14 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
+  // Add level-change task
+  const addLevelChangeTask = useCallback((taskData: AddLevelChangeInput) => {
+    const id = `level-change-${Date.now()}-${++taskIdCounter.current}`;
+    const task: LevelChangeTask = { ...taskData, id, type: 'levelChange', status: 'queued' };
+    setTasks((prev) => [...prev, task]);
+    return id;
+  }, []);
+
   // Add restore-person task
   const addRestorePersonTask = useCallback((taskData: AddRestorePersonInput) => {
     const id = `restore-person-${Date.now()}-${++taskIdCounter.current}`;
@@ -503,6 +549,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         addArchiveRoomTask,
         addRestoreRoomTask,
         addArchivePersonTask,
+        addLevelChangeTask,
         addRestorePersonTask,
         addNotification,
         dismissTask,

@@ -29,6 +29,13 @@ import {
   archivePerson,
   restorePerson,
 } from '../services/person-archive.service';
+import {
+  executeLevelChange,
+  levelChangeCandidates,
+  listLevelChangeStudents,
+  planLevelChange,
+} from '../services/level-change.service';
+import type { Level } from '../../shared/level-change-types';
 import { validateApiConfig } from '../services/config-probe.service';
 import { completeAndStoreNewRoom } from '../services/room-completion.service';
 import { describeError } from '../services/hazu-api/describe-error';
@@ -286,6 +293,40 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ARCHIVE_PERSON_RESTORE_EXECUTE, async (_event, folderId: string) => {
     return restorePerson(folderId);
   });
+
+  // Level change: students / candidates rethrow so the page shows the error;
+  // plan and execute return an outcome (failures in `error`).
+  ipcMain.handle(IPC_CHANNELS.LEVEL_CHANGE_STUDENTS, async () => {
+    try {
+      return listLevelChangeStudents();
+    } catch (error) {
+      console.error('Level change students error:', describeError(error));
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LEVEL_CHANGE_CANDIDATES, async (_event, personId: string) => {
+    try {
+      return await levelChangeCandidates(personId);
+    } catch (error) {
+      console.error('Level change candidates error:', describeError(error));
+      throw error;
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.LEVEL_CHANGE_PLAN,
+    // planLevelChange never rejects: failures come back as outcome.error.
+    async (_event, personId: string, toLevel: Level, targetTemplateId: string) =>
+      planLevelChange(personId, toLevel, targetTemplateId),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LEVEL_CHANGE_EXECUTE,
+    async (_event, personId: string, toLevel: Level, targetTemplateId: string) => {
+      return executeLevelChange(personId, toLevel, targetTemplateId);
+    },
+  );
 
   // Execute returns its failure: this runs inside a Task Queue task, which renders the
   // error on the task row and offers a retry.

@@ -137,7 +137,7 @@ export function failureMessage(e: unknown): string {
 }
 
 /** Run a deps call, retrying transient failures (5xx / network / timeout), 3 attempts. 4xx fails fast. */
-export async function withRetry<T>(deps: ArchiveDeps, fn: () => Promise<T>): Promise<T> {
+export async function withRetry<T>(deps: { sleep(ms: number): Promise<void> }, fn: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();

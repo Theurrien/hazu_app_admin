@@ -7,6 +7,9 @@ import type {
   ArchivableRoom, ArchivedRoom, ArchivePlan, ArchiveOutcome, RestorePlan, RestoreOutcome,
   ArchivedPerson, PersonArchivePlan, PersonArchiveOutcome, PersonRestoreOutcome,
 } from '../shared/archive-types';
+import type {
+  Level, LevelChangeCandidates, LevelChangeOutcome, LevelChangeStudent,
+} from '../shared/level-change-types';
 
 // Inline IPC channels to avoid module resolution issues in preload sandbox
 const IPC_CHANNELS = {
@@ -70,6 +73,12 @@ const IPC_CHANNELS = {
   ARCHIVE_PERSON_LIST_ARCHIVED: 'archive:person:listArchived',
   ARCHIVE_PERSON_EXECUTE: 'archive:person:execute',
   ARCHIVE_PERSON_RESTORE_EXECUTE: 'archive:person:restoreExecute',
+
+  // Level change (CFC <-> AFP)
+  LEVEL_CHANGE_STUDENTS: 'levelChange:students',
+  LEVEL_CHANGE_CANDIDATES: 'levelChange:candidates',
+  LEVEL_CHANGE_PLAN: 'levelChange:plan',
+  LEVEL_CHANGE_EXECUTE: 'levelChange:execute',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -198,6 +207,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listArchivedPersons: () => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_LIST_ARCHIVED),
   archivePerson: (personId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_EXECUTE, personId),
   restorePerson: (folderId: string) => ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_PERSON_RESTORE_EXECUTE, folderId),
+
+  // Level change (CFC <-> AFP)
+  getLevelChangeStudents: () => ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_STUDENTS),
+  getLevelChangeCandidates: (personId: string) => ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_CANDIDATES, personId),
+  planLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_PLAN, personId, toLevel, targetTemplateId),
+  executeLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_EXECUTE, personId, toLevel, targetTemplateId),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -389,6 +406,10 @@ declare global {
       listArchivedPersons: () => Promise<ArchivedPerson[]>;
       archivePerson: (personId: string) => Promise<PersonArchiveOutcome>;
       restorePerson: (folderId: string) => Promise<PersonRestoreOutcome>;
+      getLevelChangeStudents: () => Promise<LevelChangeStudent[]>;
+      getLevelChangeCandidates: (personId: string) => Promise<LevelChangeCandidates>;
+      planLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) => Promise<LevelChangeOutcome>;
+      executeLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) => Promise<LevelChangeOutcome>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;

@@ -8,6 +8,7 @@ import {
   faFileImport,
   faBullseye,
   faBoxArchive,
+  faToolbox,
   faTriangleExclamation,
   faCog,
   IconDefinition,
@@ -35,6 +36,7 @@ const navItems: NavItem[] = [
   { id: 'import', label: 'Bulk Import', icon: faFileImport },
   { id: 'missions', label: 'Missions', icon: faBullseye },
   { id: 'archive', label: 'Archive', icon: faBoxArchive },
+  { id: 'tools', label: 'Outils', icon: faToolbox },
   { id: 'discrepancies', label: 'Discrepancies', icon: faTriangleExclamation },
   { id: 'settings', label: 'Settings', icon: faCog },
 ];
