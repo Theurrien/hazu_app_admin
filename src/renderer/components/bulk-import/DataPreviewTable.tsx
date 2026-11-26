@@ -27,6 +27,13 @@ const mappingLabels: Record<ColumnMapping, string> = {
   verifyFullName: 'Full Name',
   assignEmail: 'Email',
   assignRoom: 'Room',
+  ctlEmail: 'E-mail',
+  ctlFirstName: 'Prénom',
+  ctlLastName: 'Nom',
+  ctlFullName: 'Nom complet',
+  ctlClass: 'Classe',
+  ctlCompany: 'Entreprise',
+  ctlCanton: 'Canton',
 };
 
 export function DataPreviewTable({

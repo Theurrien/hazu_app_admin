@@ -10,6 +10,7 @@ import { TemplateSelector } from '../components/bulk-import/TemplateSelector';
 import { RoomAssignmentPanel, RoomAssignment } from '../components/bulk-import/RoomAssignmentPanel';
 import type { ColumnMapping } from '../components/bulk-import/ColumnMappingDropdown';
 import { VerifyAssignmentsTab } from '../components/bulk-import/VerifyAssignmentsTab';
+import { ControleTab } from '../components/bulk-import/controle/ControleTab';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { AssignmentRoleSelector } from '../components/bulk-import/AssignmentRoleSelector';
 import { PersonMatchingPanel } from '../components/bulk-import/PersonMatchingPanel';
@@ -49,6 +50,7 @@ const WORKFLOW_LABELS: Record<Workflow, string> = {
   person: 'Person',
   assignment: 'Assignment',
   verify: 'Verify',
+  controle: 'Contrôle',
 };
 
 // Email validation regex
@@ -1147,6 +1149,11 @@ function BulkImportPage() {
         {/* Verify workflow */}
         {activeWorkflow === 'verify' && (
           <VerifyAssignmentsTab fileData={fileData} />
+        )}
+
+        {/* Contrôle workflow */}
+        {activeWorkflow === 'controle' && (
+          <ControleTab fileData={fileData} />
         )}
       </div>
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export type ColumnMapping = 'roomName' | 'firstName' | 'lastName' | 'email' | 'grouping1' | 'grouping2' | 'templateGroup' | 'verifyEmail' | 'verifyRoomName' | 'verifyFirstName' | 'verifyLastName' | 'verifyFullName' | 'assignEmail' | 'assignRoom';
+export type ColumnMapping = 'roomName' | 'firstName' | 'lastName' | 'email' | 'grouping1' | 'grouping2' | 'templateGroup' | 'verifyEmail' | 'verifyRoomName' | 'verifyFirstName' | 'verifyLastName' | 'verifyFullName' | 'assignEmail' | 'assignRoom' | 'ctlEmail' | 'ctlFirstName' | 'ctlLastName' | 'ctlFullName' | 'ctlClass' | 'ctlCompany' | 'ctlCanton';
 
-export type MappingMode = 'room' | 'person' | 'verify' | 'assignment';
+export type MappingMode = 'room' | 'person' | 'verify' | 'assignment' | 'controle';
 
 interface ColumnMappingDropdownProps {
   isOpen: boolean;
@@ -30,6 +30,13 @@ const mappingLabels: Record<ColumnMapping, string> = {
   verifyFullName: 'Full Name',
   assignEmail: 'Email',
   assignRoom: 'Room',
+  ctlEmail: 'E-mail',
+  ctlFirstName: 'Prénom',
+  ctlLastName: 'Nom',
+  ctlFullName: 'Nom complet',
+  ctlClass: 'Classe',
+  ctlCompany: 'Entreprise',
+  ctlCanton: 'Canton',
 };
 
 const ColumnMappingDropdown: React.FC<ColumnMappingDropdownProps> = ({
@@ -175,6 +182,43 @@ const ColumnMappingDropdown: React.FC<ColumnMappingDropdownProps> = ({
         <div className="py-1">
           {renderOption('assignEmail')}
           {renderOption('assignRoom')}
+
+          <div className="border-t border-gray-200 my-1"></div>
+
+          <button
+            type="button"
+            onClick={() => handleSelect(null)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-100 cursor-pointer transition-colors"
+          >
+            <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-gray-500">
+              ✕
+            </span>
+            <span className="text-gray-700">Clear</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Contrôle mode: identity columns, then the three room columns
+  if (mode === 'controle') {
+    return (
+      <div
+        ref={dropdownRef}
+        className={`${positionClass} bg-white border border-gray-300 rounded-md shadow-lg z-50 min-w-[200px]`}
+        style={positionStyle}
+      >
+        <div className="py-1">
+          {renderOption('ctlEmail')}
+          {renderOption('ctlFirstName')}
+          {renderOption('ctlLastName')}
+          {renderOption('ctlFullName')}
+
+          <div className="border-t border-gray-200 my-1"></div>
+
+          {renderOption('ctlClass')}
+          {renderOption('ctlCompany')}
+          {renderOption('ctlCanton')}
 
           <div className="border-t border-gray-200 my-1"></div>
 

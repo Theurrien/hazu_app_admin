@@ -115,16 +115,19 @@ describe('visibleWorkflows', () => {
   it('hides person creation and verify in cie mode', () => {
     expect(visibleWorkflows('cie')).not.toContain('person');
     expect(visibleWorkflows('cie')).not.toContain('verify');
+    expect(visibleWorkflows('cie')).not.toContain('controle');
   });
 
-  it('shows all four in complete mode', () => {
-    expect(visibleWorkflows('complete')).toEqual(['room', 'person', 'assignment', 'verify']);
+  it('shows all five in complete mode', () => {
+    expect(visibleWorkflows('complete')).toEqual(['room', 'person', 'assignment', 'verify', 'controle']);
   });
 
   it('answers isWorkflowVisible consistently', () => {
     expect(isWorkflowVisible('cie', 'assignment')).toBe(true);
     expect(isWorkflowVisible('cie', 'verify')).toBe(false);
     expect(isWorkflowVisible('complete', 'verify')).toBe(true);
+    expect(isWorkflowVisible('cie', 'controle')).toBe(false);
+    expect(isWorkflowVisible('complete', 'controle')).toBe(true);
   });
 });
 

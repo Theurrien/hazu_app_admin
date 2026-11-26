@@ -31,7 +31,7 @@ export type PageId =
   | 'tools'
   | 'settings';
 
-export type BulkImportWorkflow = 'room' | 'person' | 'assignment' | 'verify';
+export type BulkImportWorkflow = 'room' | 'person' | 'assignment' | 'verify' | 'controle';
 
 export const APP_MODE_SETTING_KEY = 'app_mode';
 
@@ -54,7 +54,7 @@ const ALL_PAGES: readonly PageId[] = [
 // and the Dashboard's Sync button is the app's only trigger for refreshing it.
 const CIE_PAGES: readonly PageId[] = ['dashboard', 'matrix', 'import'];
 
-const ALL_WORKFLOWS: readonly BulkImportWorkflow[] = ['room', 'person', 'assignment', 'verify'];
+const ALL_WORKFLOWS: readonly BulkImportWorkflow[] = ['room', 'person', 'assignment', 'verify', 'controle'];
 const CIE_WORKFLOWS: readonly BulkImportWorkflow[] = ['room', 'assignment'];
 
 const ALL_PERSON_TYPES: readonly PersonType[] = [
