@@ -6,7 +6,10 @@ import type {
 } from '../../../shared/level-change-types';
 import { defaultDecisions, type LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import { useTaskQueue } from '../../contexts/TaskQueueContext';
-import { eligibility, hasApplicableChange, levelLabel, searchStudents, toggleForced, toggleTagAdd } from './level-change-logic';
+import {
+  certainAdds, eligibility, hasApplicableChange, levelLabel, resultView, searchStudents, toggleForced, toggleTagAdd,
+  type LevelChangeResultView,
+} from './level-change-logic';
 import { LevelChangeActions } from './LevelChangeActions';
 
 const panel = { border: '1px solid var(--hazu-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
@@ -16,6 +19,29 @@ interface Preview {
   studentId: string;
   templateId: string;
   outcome: LevelChangeOutcome;
+}
+
+/** The last run, as the operator must see it: what remains, what was ignored, the notes. */
+function LevelChangeResult({ displayName, view }: { displayName: string; view: LevelChangeResultView }) {
+  const list = (items: string[], cls: string) =>
+    items.length > 0 && (
+      <ul className={`list-disc ml-5 ${cls}`}>
+        {items.map((m, i) => <li key={i}>{m}</li>)}
+      </ul>
+    );
+  return (
+    <div className={`rounded-lg p-4 text-sm space-y-2 ${view.ok ? 'bg-green-50' : 'bg-red-50'}`}>
+      <p className="font-medium">
+        {displayName} — <span className={view.ok ? 'text-green-700' : 'text-red-700'}>{view.headline}</span>
+      </p>
+      {view.remaining.length > 0 && <p className="font-medium">Reste à faire</p>}
+      {list(view.remaining, 'text-red-700')}
+      {view.ignored.length > 0 && <p className="font-medium">Ignoré</p>}
+      {list(view.ignored, 'text-amber-700')}
+      {view.notes.length > 0 && <p className="font-medium">Notes</p>}
+      {list(view.notes, 'text-gray-600')}
+    </div>
+  );
 }
 
 /** « Changement de niveau » — move a student between CFC and AFP (spec: level-change-design). */
@@ -33,6 +59,8 @@ function LevelChangeSection() {
   const [decisions, setDecisions] = useState<LevelChangeDecisions | null>(null);
   const [queued, setQueued] = useState(false);
   const [applyFailed, setApplyFailed] = useState(false);
+  // The last run's result (ignored items and notes too), kept until the next pick or preview.
+  const [result, setResult] = useState<{ displayName: string; view: LevelChangeResultView } | null>(null);
   // The student the answers on screen must belong to; late answers for another one are dropped.
   const selectedRef = useRef<string | null>(null);
 
@@ -61,6 +89,7 @@ function LevelChangeSection() {
     setDecisions(null);
     setQueued(false);
     setApplyFailed(false);
+    setResult(null);
     try {
       const c = await window.electronAPI.getLevelChangeCandidates(s.id);
       if (selectedRef.current !== s.id) return;
@@ -86,6 +115,7 @@ function LevelChangeSection() {
     setPreview(null);
     setDecisions(null);
     setApplyFailed(false);
+    setResult(null);
     try {
       const outcome = await window.electronAPI.planLevelChange(studentId, candidates.toLevel, tpl);
       if (selectedRef.current !== studentId) return;
@@ -118,8 +148,10 @@ function LevelChangeSection() {
       toLevel: candidates.toLevel,
       targetTemplateId: templateId,
       decisions,
-      onDone: () => {
+      onDone: (outcome) => {
         void loadStudents();
+        // shown even when another student was picked meanwhile: the lines exist nowhere else
+        setResult({ displayName: selected.displayName, view: resultView(outcome) });
         if (selectedRef.current === selected.id) {
           selectedRef.current = null;
           setSelected(null);
@@ -130,7 +162,8 @@ function LevelChangeSection() {
           setQueued(false);
         }
       },
-      onError: () => {
+      onError: (outcome, message) => {
+        setResult({ displayName: selected.displayName, view: resultView(outcome, message) });
         if (selectedRef.current === selected.id) {
           setQueued(false);
           setApplyFailed(true);
@@ -187,6 +220,8 @@ function LevelChangeSection() {
         )}
       </div>
 
+      {result && <LevelChangeResult displayName={result.displayName} view={result.view} />}
+
       {selected && (
         <div className="space-y-3 pt-2" style={{ borderTop: '1px solid var(--hazu-border)' }}>
           <p className="text-sm font-medium">{selected.displayName}</p>
@@ -201,6 +236,7 @@ function LevelChangeSection() {
                 <select
                   value={templateId}
                   onChange={(e) => changeTemplate(e.target.value)}
+                  disabled={queued}
                   className="mt-1 w-full px-3 py-2 border rounded-lg text-sm bg-white"
                   style={{ borderColor: 'var(--hazu-border)' }}
                 >
@@ -263,7 +299,7 @@ function LevelChangeSection() {
                     <div key={s.sectionId}>
                       <p className="font-medium">{s.title}</p>
                       <ul className="ml-5 space-y-0.5">
-                        {s.addTags.map((t) => (
+                        {certainAdds(s).map((t) => (
                           <li key={`+${t}`} className="text-green-700 font-mono text-xs">+ {t}</li>
                         ))}
                         {s.removeTags.map((t) => (
@@ -274,6 +310,7 @@ function LevelChangeSection() {
                             <label className="flex items-center gap-2">
                               <input
                                 type="checkbox"
+                                disabled={queued}
                                 checked={decisions.acceptedTagAdds.some((a) => a.sectionKey === s.sectionKey && a.tag === t)}
                                 onChange={() => setDecisions(toggleTagAdd(decisions, s.sectionKey, t))}
                               />
@@ -289,6 +326,7 @@ function LevelChangeSection() {
                             <label className="flex items-center gap-2 text-gray-800">
                               <input
                                 type="checkbox"
+                                disabled={queued}
                                 checked={decisions.forcedDescriptions.includes(s.sectionKey)}
                                 onChange={() => setDecisions(toggleForced(decisions, s.sectionKey))}
                               />
@@ -300,7 +338,7 @@ function LevelChangeSection() {
                     </div>
                   ))}
 
-                  <LevelChangeActions plan={plan} decisions={decisions} onChange={setDecisions} />
+                  <LevelChangeActions plan={plan} decisions={decisions} onChange={setDecisions} disabled={queued} />
 
                   {plan.noSourceCounterpart.length > 0 && (
                     <p>
@@ -316,17 +354,6 @@ function LevelChangeSection() {
                     </p>
                   )}
                   {localColourDiffers && <p className="text-amber-700">couleur locale différente de Hazu</p>}
-
-                  {preview.outcome.ignored.length > 0 && (
-                    <ul className="list-disc ml-5 text-amber-700">
-                      {preview.outcome.ignored.map((m, i) => <li key={`i${i}`}>{m}</li>)}
-                    </ul>
-                  )}
-                  {(preview.outcome.notes ?? []).length > 0 && (
-                    <ul className="list-disc ml-5 text-gray-600">
-                      {preview.outcome.notes!.map((m, i) => <li key={`n${i}`}>{m}</li>)}
-                    </ul>
-                  )}
 
                   <p className="text-gray-600">
                     Les classes et rôles ne changent pas — déplacez l'élève dans Matrix.

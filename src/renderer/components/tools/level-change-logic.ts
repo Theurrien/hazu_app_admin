@@ -1,4 +1,4 @@
-import type { Level, LevelChangePlan, LevelChangeStudent } from '../../../shared/level-change-types';
+import type { Level, LevelChangeOutcome, LevelChangePlan, LevelChangeStudent, SectionChange } from '../../../shared/level-change-types';
 import type { LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import { normalizeName } from '../../../shared/person-match';
 
@@ -23,13 +23,18 @@ export function levelLabel(l: Level): 'CFC' | 'AFP' {
   return l === 'cfc' ? 'CFC' : 'AFP';
 }
 
+/** The adds written without a box: the core lists every uncertain tag inside addTags too. */
+export function certainAdds(s: Pick<SectionChange, 'addTags' | 'uncertainTags'>): string[] {
+  return s.addTags.filter((t) => !s.uncertainTags.includes(t));
+}
+
 /** Something « Appliquer » would write, given the operator's decisions: colour, a certain section
  *  change, an accepted uncertain tag, a forced description, a copy, a delete, or the widget.
  *  A section only « modifiée à la main » (descriptionKept) writes nothing unless forced. */
 export function hasApplicableChange(plan: LevelChangePlan | null, decisions: LevelChangeDecisions): boolean {
   if (!plan) return false;
   if (plan.colorChange) return true;
-  if (plan.sections.some((s) => !!s.description || s.addTags.length > 0 || s.removeTags.length > 0)) return true;
+  if (plan.sections.some((s) => !!s.description || certainAdds(s).length > 0 || s.removeTags.length > 0)) return true;
   if (plan.sections.some((s) =>
     s.uncertainTags.some((t) => decisions.acceptedTagAdds.some((a) => a.sectionKey === s.sectionKey && a.tag === t)) ||
     (s.descriptionKept && decisions.forcedDescriptions.includes(s.sectionKey)))) return true;
@@ -74,4 +79,32 @@ export function descendantsLabel(n: number | null, exact: boolean): string {
   if (n === null) return 'contenu inconnu';
   if (!exact) return `au moins ${n}`;
   return `${n} ${n === 1 ? 'élément' : 'éléments'}`;
+}
+
+/** What a finished run tells the operator, kept on screen until the next pick or preview. */
+export interface LevelChangeResultView {
+  ok: boolean;
+  headline: string;
+  remaining: string[];
+  ignored: string[];
+  notes: string[];
+}
+
+export function resultView(outcome: LevelChangeOutcome | null, failure?: string): LevelChangeResultView {
+  if (!outcome) {
+    return { ok: false, headline: `Échec — ${failure ?? 'erreur inconnue'}`, remaining: [], ignored: [], notes: [] };
+  }
+  const ok = outcome.success;
+  const headline = ok
+    ? `Changement appliqué (${outcome.applied} étape${outcome.applied === 1 ? '' : 's'} confirmée${outcome.applied === 1 ? '' : 's'})`
+    : `Échec${outcome.error ? ` — ${outcome.error}` : ''}`;
+  return { ok, headline, remaining: outcome.remaining, ignored: outcome.ignored, notes: outcome.notes ?? [] };
+}
+
+/** Appended to the Task Queue line: counts only, the lines themselves are in the Outils section. */
+export function taskCountsSuffix(ignored: number, notes: number): string {
+  const parts: string[] = [];
+  if (ignored > 0) parts.push(`${ignored} ignoré${ignored === 1 ? '' : 's'}`);
+  if (notes > 0) parts.push(`${notes} note${notes === 1 ? '' : 's'}`);
+  return parts.length ? ` — ${parts.join(', ')} (voir Outils)` : '';
 }

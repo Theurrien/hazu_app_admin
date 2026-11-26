@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useTaskQueue, Task } from '../contexts/TaskQueueContext';
 import { useAppMode } from '../contexts/AppModeContext';
 import { allowedTaskTypes } from '../../shared/app-mode';
+import { taskCountsSuffix } from './tools/level-change-logic';
 
 interface TaskItemProps {
   task: Task;
@@ -60,7 +61,8 @@ const TaskItem = React.memo(function TaskItem({ task, onDismiss, onRetry, onOpen
       case 'restorePerson':
         return `Restaurer ${task.displayName}`;
       case 'levelChange':
-        return `Changement de niveau — ${task.displayName} → ${task.toLevel === 'cfc' ? 'CFC' : 'AFP'}`;
+        return `Changement de niveau — ${task.displayName} → ${task.toLevel === 'cfc' ? 'CFC' : 'AFP'}` +
+          taskCountsSuffix(task.ignoredCount ?? 0, task.notesCount ?? 0);
     }
   };
 

@@ -8,10 +8,12 @@ interface Props {
   plan: LevelChangePlan;
   decisions: LevelChangeDecisions;
   onChange: (d: LevelChangeDecisions) => void;
+  /** every box locked while the task is queued: the task holds a snapshot of the decisions */
+  disabled?: boolean;
 }
 
 /** « Actions supplémentaires »: copy template-only sections, delete profile-only ones, add the widget. */
-export function LevelChangeActions({ plan, decisions, onChange }: Props) {
+export function LevelChangeActions({ plan, decisions, onChange, disabled = false }: Props) {
   const [pending, setPending] = useState<ProfileOnlyItem | null>(null);
   const { templateOnlyItems, profileOnlyItems, widget } = plan;
   if (templateOnlyItems.length === 0 && profileOnlyItems.length === 0 && !widget.needed) return null;
@@ -27,6 +29,7 @@ export function LevelChangeActions({ plan, decisions, onChange }: Props) {
             <label key={i.sectionKey} className="flex items-center gap-2 ml-3">
               <input
                 type="checkbox"
+                disabled={disabled}
                 checked={decisions.copySections.includes(i.sectionKey)}
                 onChange={() => onChange(toggleCopy(decisions, i.sectionKey))}
               />
@@ -43,6 +46,7 @@ export function LevelChangeActions({ plan, decisions, onChange }: Props) {
             <label key={i.sectionKey} className="flex items-center gap-2 ml-3">
               <input
                 type="checkbox"
+                disabled={disabled}
                 checked={decisions.deleteSections.some((d) => d.sectionKey === i.sectionKey)}
                 onChange={(e) =>
                   e.target.checked ? setPending(i) : onChange(setDelete(decisions, i.sectionKey, i.sectionId, false))
@@ -59,6 +63,7 @@ export function LevelChangeActions({ plan, decisions, onChange }: Props) {
         <label className="flex items-center gap-2 ml-2">
           <input
             type="checkbox"
+            disabled={disabled}
             checked={decisions.addWidget}
             onChange={() => onChange({ ...decisions, addWidget: !decisions.addWidget })}
           />

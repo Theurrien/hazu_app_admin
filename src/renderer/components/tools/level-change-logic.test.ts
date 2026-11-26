@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   searchStudents, eligibility, levelLabel, hasApplicableChange, toggleTagAdd, toggleForced, toggleCopy, setDelete,
-  descendantsLabel,
+  descendantsLabel, certainAdds, resultView, taskCountsSuffix,
 } from './level-change-logic';
 import type { LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import type { LevelChangePlan, LevelChangeStudent, SectionChange } from '../../../shared/level-change-types';
@@ -73,10 +73,17 @@ describe('hasApplicableChange', () => {
     expect(hasApplicableChange(pl([sc({ description: { from: 'a', to: 'b' } })]), none())).toBe(true);
     expect(hasApplicableChange(pl([sc({ descriptionKept: true })], true), none())).toBe(true);
   });
-  it('an uncertain tag counts only when accepted', () => {
-    const p = pl([sc({ uncertainTags: ['t'] })]);
+  it('an uncertain tag counts only when accepted (the core puts it in addTags too)', () => {
+    const p = pl([sc({ addTags: ['t'], uncertainTags: ['t'] })]);
     expect(hasApplicableChange(p, none())).toBe(false);
     expect(hasApplicableChange(p, { ...none(), acceptedTagAdds: [{ sectionKey: 'k', tag: 't' }] })).toBe(true);
+  });
+  it('a plan whose only change is an unticked uncertain tag is not applicable', () => {
+    const p = pl([sc({ addTags: ['t'], uncertainTags: ['t'] })]);
+    expect(hasApplicableChange(p, none())).toBe(false);
+  });
+  it('a certain add beside an uncertain one is a change', () => {
+    expect(hasApplicableChange(pl([sc({ addTags: ['c', 't'], uncertainTags: ['t'] })]), none())).toBe(true);
   });
   it('a copy, a delete or the widget alone is a change', () => {
     const p = pl([]);
@@ -115,5 +122,35 @@ describe('descendantsLabel', () => {
     expect(descendantsLabel(1, true)).toBe('1 élément');
     expect(descendantsLabel(40, false)).toBe('au moins 40');
     expect(descendantsLabel(null, false)).toBe('contenu inconnu');
+  });
+});
+
+describe('certainAdds', () => {
+  it('drops the uncertain tags from addTags', () => {
+    expect(certainAdds({ addTags: ['a', 'u'], uncertainTags: ['u'] })).toEqual(['a']);
+    expect(certainAdds({ addTags: ['u'], uncertainTags: ['u'] })).toEqual([]);
+  });
+});
+
+describe('resultView and taskCountsSuffix', () => {
+  const base = { dryRun: false, plan: null, applied: 3, remaining: [], ignored: [] as string[] };
+  it('a success keeps ignored and notes on screen', () => {
+    const v = resultView({ ...base, success: true, ignored: ['« X » : copie — non coché ou non vu à l\'aperçu — ignoré'], notes: ['n'] });
+    expect(v.ok).toBe(true);
+    expect(v.headline).toBe('Changement appliqué (3 étapes confirmées)');
+    expect(v.ignored).toHaveLength(1);
+    expect(v.notes).toEqual(['n']);
+  });
+  it('a failure shows the error and what remains', () => {
+    const v = resultView({ ...base, success: false, remaining: ['r'], error: 'boom' });
+    expect(v).toMatchObject({ ok: false, headline: 'Échec — boom', remaining: ['r'], notes: [] });
+  });
+  it('no outcome (the call threw)', () => {
+    expect(resultView(null, 'réseau').headline).toBe('Échec — réseau');
+  });
+  it('counts suffix', () => {
+    expect(taskCountsSuffix(0, 0)).toBe('');
+    expect(taskCountsSuffix(1, 0)).toBe(' — 1 ignoré (voir Outils)');
+    expect(taskCountsSuffix(2, 1)).toBe(' — 2 ignorés, 1 note (voir Outils)');
   });
 });
