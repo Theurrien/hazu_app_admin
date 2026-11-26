@@ -93,6 +93,7 @@ hazu-admin/
 │   │       │   ├── aggregate.ts        #   school overview + formation drill-down
 │   │       │   └── rows.ts             #   StudentRaw ↔ table rows, keepFailedParts
 │   │       ├── formation-sync.service.ts # IO layer: background run, one-transaction write, queries
+│   │       ├── correspondence.service.ts # Contrôle — saved links table, sync state (IO layer)
 │   │       ├── room-archive.ts         # Room Archive — pure core (archive/restore order, record tags)
 │   │       ├── room-archive.service.ts # Room Archive — IO layer, local reconcile
 │   │       ├── person-archive.ts       # Person Archive — pure core (archive/restore order, record tags)
@@ -157,6 +158,9 @@ hazu-admin/
 │   │   │   ├── bulk-import/         # Bulk Import workflow components (uploader, mapping, matching, preview, verify)
 │   │   │   │                        #   Verify: VerifyAssignmentsTab, PersonCheckResults (À vérifier,
 │   │   │   │                        #   unmatched rows, leaver list), verify-logic.ts (+ tests)
+│   │   │   │                        #   controle/: Contrôle workflow — ControleTab, RoomCorrespondencePanel,
+│   │   │   │                        #   StudentCorrespondencePanel, SavedCorrespondencesDrawer,
+│   │   │   │                        #   ControleResults, FixConfirmModal, controle-logic.ts (+ tests)
 │   │   │   ├── MatrixGrid.tsx       # Virtualized person × room assignment grid
 │   │   │   ├── MatrixFilters.tsx
 │   │   │   ├── CreatePersonModal.tsx
@@ -180,6 +184,8 @@ hazu-admin/
 │       ├── level-change-types.ts # Outils level change: plan, outcome, candidates, student
 │       ├── level-change-decisions.ts # Outils level change: operator decisions, defaults, widget detection
 │       ├── archive-types.ts   # Room + person archive outcomes, plans, ArchivableRoom, ArchivedPerson
+│       ├── correspondence.ts  # Contrôle: saved links, room / student resolution (pure, + tests)
+│       ├── cross-check.ts     # Contrôle: student × room pairs, statuses, fix list (pure, + tests)
 │       ├── person-match.ts    # Verify: spreadsheet row ↔ Hazu person matcher, leaver list (pure, + tests)
 │       ├── formation-types.ts # Missions formation overview types (Row, StudentRaw, SchoolOverview…)
 │       ├── types.ts           # TypeScript interfaces
@@ -228,6 +234,9 @@ const result = await window.electronAPI.runSync();
 - `change_log` - Track local modifications for n8n sync
 - `settings` - App configuration (API key, environment, etc.)
 - `tag_mappings` - Hazu tag → semantic type mappings
+- `file_correspondence` - Contrôle's saved links, local only: `(category, file_key)` primary key,
+  `category` ∈ `student` / `class` / `enterprise` / `state`, `file_label` (the value as last written,
+  for display), `hazu_id` (NULL = ignored on purpose), `decided_at`
 
 ### Missions formation tables
 Raw-ish facts from the last formation sync; every figure is computed from them at query time, so a
@@ -1063,7 +1072,7 @@ deleting persons is Matrix-only (in CIE mode: room rename/delete only, gated per
 
 ## Bulk Import
 
-The Bulk Import tab ([BulkImportPage.tsx](src/renderer/pages/BulkImportPage.tsx)) pushes spreadsheet data (CSV/Excel) **into** Hazu. One shared file upload feeds four sub-workflow tabs:
+The Bulk Import tab ([BulkImportPage.tsx](src/renderer/pages/BulkImportPage.tsx)) pushes spreadsheet data (CSV/Excel) **into** Hazu. One shared file upload feeds five sub-workflow tabs:
 
 | Tab | Purpose | Writes |
 |-----|---------|--------|
@@ -1071,6 +1080,7 @@ The Bulk Import tab ([BulkImportPage.tsx](src/renderer/pages/BulkImportPage.tsx)
 | **Person** | Create persons (students, teachers…), optionally assigning rooms at creation (grouped) | Creates persons |
 | **Assignment** | Assign **existing** persons to **existing** rooms with a role | Updates roles |
 | **Verify** | Diff of the spreadsheet vs. Hazu's synced state (match by e-mail or name), leaver list | Nothing itself; « Archiver la sélection » queues `archivePerson` (complete mode only) |
+| **Contrôle** | Student × class / company / canton check of the file against Hazu, with saved correspondences and the leaver list (complete mode only) | `roleUpdate` add / remove via the Task Queue; `archivePerson` from the leaver list |
 
 ### Task Queue (all writes go through it)
 Writes are never called directly — each workflow **enqueues** tasks into the Task Queue
@@ -1152,6 +1162,110 @@ pure decisions in [verify-logic.ts](src/renderer/components/bulk-import/verify-l
   the lists recomputed.
 - **Everything resets when the file changes** — column mappings, results, decisions, ticks, the
   class filter, pending plans — and a plan or reload that finishes after the file changed is discarded.
+
+### Contrôle (complete mode only)
+
+The **Contrôle** tab ([ControleTab.tsx](src/renderer/components/bulk-import/controle/ControleTab.tsx))
+treats the school's spreadsheet (one row per student) as the reference and Hazu as its copy: it lists
+what is **missing** in Hazu and what Hazu has **in excess**, per student and per class, company and
+canton, and fixes the ticked lines through the Task Queue. Verify stays as it is. Workflow
+`'controle'` in `ALL_WORKFLOWS` of [app-mode.ts](src/shared/app-mode.ts), **not** in `CIE_WORKFLOWS`.
+Spec: [docs/specs/2026-11-26-controle-design.md](docs/specs/2026-11-26-controle-design.md). It reads
+local SQLite only (sync first); roles other than `student` are neither checked nor fixed; nothing is
+created (a file value with no Hazu room is « ignoré », not created); no CIE column, and CIE rooms
+are never candidates for the class column.
+
+**Three steps.**
+1. **Colonnes** — map identity (e-mail and/or first + last name or full name) and at least one of
+   class, company, canton (mapping keys `ctlFirstName`, `ctlLastName`, `ctlFullName`, `ctlEmail`,
+   `ctlClass`, `ctlCompany`, `ctlCanton`). A column mapped twice or no room column disables
+   « Continuer » with the reason (`columnsReady`).
+2. **Correspondances** — one panel per category (students, classes, companies, cantons) with an
+   « n à résoudre » counter; « Contrôler » opens when every counter is 0 (an « ignoré » value counts
+   as resolved).
+3. **Résultats** — the check, filters, ticks, « Corriger la sélection », and the leaver list.
+
+**Saved correspondences** (`file_correspondence`, local only, never written to Hazu; the sync and the
+archives never touch it). A link is keyed by `(category, file_key)`: rooms by the value trimmed,
+spaces collapsed and lower-cased, accents kept (`roomKey`); students by `email:{e-mail}` when the row
+has one, else `name:{nameKey}` — lookup tries the e-mail key, then the name key. The same text in two
+categories is two independent links. Confirming a choice saves it, « Ignorer » saves it with no Hazu
+id. Rooms: saved link → exact title match on exactly one room of the column's type (used, **not saved**,
+so it follows a rename) → otherwise open, with the best fuzzy suggestion preselected; two rooms of that
+type with the same title stay open and the dropdown shows their parent folders. Students: saved
+link, else `matchRows` ([person-match.ts](src/shared/person-match.ts)); matched rows are used, not
+saved; « à vérifier » and unknown rows are resolved by hand and the decision is saved. The
+« Correspondances enregistrées » drawer lists every saved link per category with « Modifier » and
+« Supprimer ».
+- **Stale, never ignored.** A saved link whose room is no longer in local `rooms` (or whose person is
+  no longer a local student) is « lien périmé » and goes back to open — treating it as ignored would
+  hide a leaver. Two saved links on one key that disagree are a conflict, treated as stale.
+- **Collisions.** A saved student link is applied only when the row does not contradict it: if the
+  row's e-mail exactly hits **another** person, or the link was found by name and both sides carry a
+  different real address, the row goes to « à vérifier » (saved person and the e-mail's person as
+  candidates). Rows with no e-mail that share a name key get no saved link and their decisions are
+  not saved (the key cannot tell them apart); a name match shared by such rows is « à vérifier ».
+- **Changing the file** resets mappings, results and ticks (`resetForNewFile`) — never the saved links.
+
+**The check** ([cross-check.ts](src/shared/cross-check.ts), `crossCheck`). Per student row whose
+student is resolved, per mapped category, with the group truth of the last sync
+(`person_room_assignments`) as the Hazu side:
+- cell empty → not checked for that category; value resolved to room R → **OK** when the student holds
+  `student` in R, **Manquant** (fix: add) when he holds nothing there, **autre rôle** (reported, not
+  fixed) when he holds another role; every other room of the same type where he holds `student` →
+  **En trop** (fix: remove);
+- **No removal on a guess.** A value that is « ignoré », or names a room of another type, is **non
+  vérifiable**, and then **no « En trop » is proposed for that category of that student** — the right
+  room is unknown, so no other room can be called wrong. A row whose student is ignored or unresolved
+  is not checked.
+- « En trop » is proposed for every category, always unticked (a student may legitimately be in
+  several classes); for company and canton the line also carries « Hazu : n entreprises / n cantons »
+  when he holds more than one. Two rows resolving to one student are both checked, excess is computed
+  against the union of their rooms, and the student is flagged « deux lignes du fichier ».
+
+**Fixes go through the Task Queue and S4.** Nothing is ticked by default; « Cocher les manquants »
+ticks the visible « Manquant » lines, there is **no** shortcut for removals. A tick is keyed by line
+and status (`tickId`), so a line whose status changes loses it. « Corriger la sélection » opens one
+confirmation (counts, the **removal lines listed by name**, a company warning « 5-Enterprise ne
+trouvera plus l'entreprise de l'élève », and S4's slowness of ~22 s per write); confirming enqueues
+one `roleUpdate` per line through `addRoleUpdateTask` — add `'_' → 'student'`, remove
+`'student' → '_'` — i.e. [Reliable Role Writes (S4)](#reliable-role-writes-s4), success decided by
+group truth. A line shows its task's state and is locked while queued or running; when the queue
+drains, persons and assignments are reloaded and the check recomputed (links kept). A failed line
+stays with « échec — voir la file ».
+
+**Sync-state gate.** The archive's `syncState` ([person-archive.ts](src/main/services/person-archive.ts))
+decides, through `CONTROLE_SYNC_STATE`: a sync running, failed, quit, or with unreadable groups
+(`sync_skipped_groups > 0`) **blocks step 3** (« synchronisation incomplète — synchronisez
+d'abord »), because partial group truth would produce false « Manquant » / « En trop ». Older than
+24 h only warns above the results.
+
+**Only what the operator saw is fixed or archived.** Selection is taken from the **visible** lines
+(`selectedLines`): a ticked line hidden by a filter is never enqueued, and changing a filter never
+fixes hidden lines. At « Confirmer » the modal's lines are **re-derived** from the current check
+(`confirmCheck`, after a fresh sync-state read): every shown line must still exist with the same
+status, boxed and unlocked, and the sync complete — otherwise nothing is enqueued, the still-valid
+lines are shown again with « La liste a changé — vérifiez à nouveau. », and an incomplete sync closes
+the modal. A double click enqueues once. The leaver archive confirmation does the same
+(`plansToEnqueue`: persons still on the list and not already queued; none on an incomplete sync).
+
+**Leavers.** Verify's leaver list (`findLeavers`, the class filter that starts empty, « Archiver la
+sélection » → `archivePerson`, see [Person Archive](#person-archive)) is the last section, fed by the
+resolved students (`leaverMatches`: an ignored row names nobody).
+
+**Files.**
+- [correspondence.ts](src/shared/correspondence.ts) — **pure**: `roomKey`, `studentKeys`,
+  `resolveRoomValues`, `resolveStudents`, `isResolved`. Tests beside it.
+- [cross-check.ts](src/shared/cross-check.ts) — **pure**: `crossCheck`, `fixesFor`. Tests beside it.
+- [correspondence.service.ts](src/main/services/correspondence.service.ts) — **thin IO layer**: list /
+  save (one transaction; an invalid category rejects the batch) / delete, `controleSyncState`. Logs
+  never carry file values (they may be names).
+- [controle/](src/renderer/components/bulk-import/controle/) — `ControleTab`, `RoomCorrespondencePanel`,
+  `StudentCorrespondencePanel`, `SavedCorrespondencesDrawer`, `ControleResults`, `FixConfirmModal`,
+  and `controle-logic.ts` (+ test): column readiness, rows, saved-link decisions, visible lines,
+  ticks, `confirmCheck`.
+- IPC `CORRESPONDENCE_LIST`, `CORRESPONDENCE_SAVE` (upsert), `CORRESPONDENCE_DELETE`,
+  `CONTROLE_SYNC_STATE`.
 
 ### Prerequisites
 - Run the main sync first (Dashboard > Sync). Persons, rooms, roles, and `admin_id` all come from
@@ -1735,6 +1849,13 @@ installer, run the acceptance run again on Windows before calling it working.
    Verify: with a file missing one student, map a name column, choose the class → that student is
    listed as a leaver; misspell a name in the file → the row lands in « À vérifier », not on the
    leaver list; no class chosen → the list stays empty.
+8b. Bulk Import → Contrôle (**scratch userData copy**, never the real DB: the fixes write to the live
+   Hazu). Use an invented test file (`@example.invalid` addresses, invented names) with the test
+   student. Map the columns → resolve one renamed class by hand → « Contrôler »; reload the tab with
+   the same file → that class reads « enregistré ». Queue one « Manquant » fix on the test student
+   and check the task succeeds and the line disappears. Also check: an « En trop » removal is listed
+   **by name** in the confirmation; changing a filter never fixes hidden lines; a sync older than
+   24 h warns, an incomplete one blocks step 3.
 9. Go to Discrepancies → try "Heal all missing-tags" on a `missing-tag` row, then "Revoke access" on an `unknown` row (confirm the modal lists every grant, then verify against group truth — reverts to an error if not confirmed)
 9b. On the same page, click "Check & prune missing rooms" (probes every unmatched class id live);
    confirm the modal, which lists the tags/persons/rooms to delete and any skipped ids with their
