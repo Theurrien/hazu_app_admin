@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   searchStudents, eligibility, levelLabel, hasApplicableChange, toggleTagAdd, toggleForced, toggleCopy, setDelete,
-  descendantsLabel, certainAdds, resultView, taskCountsSuffix,
+  descendantsLabel, certainAdds, resultView, taskCountsSuffix, hintFor, GROUP_ROLE_HINT,
 } from './level-change-logic';
 import type { LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import type { LevelChangePlan, LevelChangeStudent, SectionChange } from '../../../shared/level-change-types';
@@ -135,18 +135,29 @@ describe('certainAdds', () => {
 describe('resultView and taskCountsSuffix', () => {
   const base = { dryRun: false, plan: null, applied: 3, remaining: [], ignored: [] as string[] };
   it('a success keeps ignored and notes on screen', () => {
-    const v = resultView({ ...base, success: true, ignored: ['« X » : copie — non coché ou non vu à l\'aperçu — ignoré'], notes: ['n'] });
+    const v = resultView({ ...base, success: true, ignored: ['« X » : copie — non coché ou non vu à l\'aperçu — ignoré'], notes: ['n'] }, 'P');
     expect(v.ok).toBe(true);
     expect(v.headline).toBe('Changement appliqué (3 étapes confirmées)');
     expect(v.ignored).toHaveLength(1);
     expect(v.notes).toEqual(['n']);
   });
   it('a failure shows the error and what remains', () => {
-    const v = resultView({ ...base, success: false, remaining: ['r'], error: 'boom' });
-    expect(v).toMatchObject({ ok: false, headline: 'Échec — boom', remaining: ['r'], notes: [] });
+    const v = resultView({ ...base, success: false, remaining: ['r'], error: 'boom' }, 'P');
+    expect(v).toMatchObject({ ok: false, headline: 'Changement non terminé — boom', remaining: ['r'], notes: [], personId: 'P' });
+  });
+  it('a failure without an error text', () => {
+    expect(resultView({ ...base, success: false, remaining: ['r'] }, 'P').headline).toBe('Changement non terminé');
   });
   it('no outcome (the call threw)', () => {
-    expect(resultView(null, 'réseau').headline).toBe('Échec — réseau');
+    const v = resultView(null, 'P', 'réseau');
+    expect(v.headline).toBe('Changement non terminé — réseau');
+    expect(v.personId).toBe('P');
+  });
+  it('the group-role line gets the hand-fix hint, others none', () => {
+    expect(hintFor('rôle du groupe companymentor à ajuster à la main sur « Boîte de guidance »')).toBe(GROUP_ROLE_HINT);
+    expect(GROUP_ROLE_HINT).toBe('Réessayer ne corrige pas ceci : réglez le rôle dans Hazu, puis Réessayer pour écrire la couleur.');
+    expect(hintFor('« Boîte de guidance » : rôle du groupe companymentor à ajuster à la main sur « Boîte de guidance »')).toBe(GROUP_ROLE_HINT);
+    expect(hintFor('« X » : copie non confirmée')).toBeNull();
   });
   it('counts suffix', () => {
     expect(taskCountsSuffix(0, 0)).toBe('');
