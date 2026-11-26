@@ -488,14 +488,41 @@ describe('copySection — empty role groups (no members, so no ACL entry)', () =
     const r = await copySection('t-sec', 'prof', w.deps, all, S, new Map([['g-cm', 'companymentor']]));
     expect((r.notes ?? []).some(n => n.includes('sans membres'))).toBe(false);
   });
-  it('a failed detach of an empty group is a note to check by hand, not a failure', async () => {
+  it('a failed detach of an empty group is a problem (the operator must check it), not a note', async () => {
     const w = world();
     w.setInitialAcl(() => [row(S, 'admin'), row('own', 'owner', true, 'g-owner')]);
     const detach = w.deps.detachGroup;
     w.deps.detachGroup = async (id, g) => { if (g === 'g-ct') throw { status: 404, networkOrTimeout: false, message: 'x' }; return detach(id, g); };
     const r = await copySection('t-sec', 'prof', w.deps, all, S, room);
-    expect(r.ok).toBe(true);
-    expect(r.notes).toContain(
-      '« Learning FSRS » : groupe courseteacher sans membres — détachement non confirmé, à vérifier dans Hazu');
+    expect(r.ok).toBe(false);
+    expect(r.problems).toContain(
+      'groupe courseteacher sans membres — détachement non confirmé sur « Learning FSRS », à vérifier dans Hazu');
+  });
+  it('a group whose entries show up late (absent on the first read only) is not taken for empty', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('own', 'owner', true, 'g-owner'), row('t1', 'reader', true, 'g-ct')]);
+    const acl = w.deps.acl;
+    const reads = new Map<string, number>();
+    w.deps.acl = async (id) => {
+      const n = (reads.get(id) ?? 0) + 1; reads.set(id, n);
+      const rows = await acl(id);
+      return n === 1 ? rows.filter(x => x.groupId !== 'g-ct') : rows; // the inherited rows lag one read
+    };
+    const r = await copySection('t-sec', 'prof', w.deps, all, S, room);
+    expect((r.notes ?? []).some(n => n.includes('courseteacher sans membres'))).toBe(false);
+  });
+  it('a group the student belongs to is never detached by this step', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('own', 'owner', true, 'g-owner')]);
+    const acl = w.deps.acl;
+    w.deps.acl = async (id) => (id === 'g-ct' ? [row(S, 'reader')] : acl(id)); // the group's own ACL = its members
+    const r = await copySection('t-sec', 'prof', w.deps, all, S, room);
+    expect(w.log.detach.some(d => d.endsWith(':g-ct'))).toBe(false);
+  });
+  it('without the student account, no empty group is detached', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row('own', 'owner', true, 'g-owner')]);
+    await copySection('t-sec', 'prof', w.deps, all, null, room);
+    expect(w.log.detach).toEqual([]);
   });
 });

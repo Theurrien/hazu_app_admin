@@ -960,7 +960,10 @@ access check, the run takes the role groups of the student's rooms (last sync's 
 rooms named by the profile's class tags, `studentRoomGroups`) that have **no** entry on the node: no
 share tag for the role → detached (« groupe … sans membres détaché — non vérifiable »); named by a share
 tag → not touched, its role cannot be read (« rôle non vérifiable, à contrôler dans Hazu (editor
-attendu) »). These are **notes**, never failures: nothing can be read back. Setting an empty group's role
+attendu) »). « Empty » is proven, never assumed from one read of a fresh copy whose inherited rows may
+lag: the group is absent from 3 reads 750 ms apart **and** its own ACL (its members) does not hold the
+student; without the student's account nothing is detached (as R12). A done detach is a **note**
+(nothing can be read back); a failed detach or an unreadable ACL is a **problem** (colour withheld). Setting an empty group's role
 needs the call behind Hazu's « Hazu référencé » role dropdown, not known yet.
 
 **Known limitation:** a copy kept with unconfirmed access is named in `remaining`

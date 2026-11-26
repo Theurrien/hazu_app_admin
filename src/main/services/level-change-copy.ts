@@ -221,20 +221,28 @@ export interface CopyResult {
  * attached: a member joining later gets access. For each of the student's room groups with no entry on
  * the node: no share tag for its role → detached (unverifiable: nothing to read back); named by a share
  * tag → its role cannot be read, noted for a check. Groups with entries are the access check's (R12).
+ * "Empty" must be proven, never assumed from one read of a fresh copy whose inherited rows may lag: the
+ * group is absent from 3 reads (750 ms apart) AND its own ACL (= its members) does not hold the student.
+ * Student unresolved → nothing is detached (as R12). A failed detach or an unreadable ACL is a problem.
  */
 async function detachEmptyGroups(
   deps: CopyDeps, nodeId: string, title: string, tags: string[], roomGroups: Map<string, string>,
-): Promise<string[]> {
-  if (roomGroups.size === 0) return [];
-  let rows: AclRow[];
-  try {
-    rows = await withRetry(deps, () => deps.acl(nodeId));
-  } catch {
-    return [`« ${title} » : groupes sans membres non vérifiés (accès illisible)`];
-  }
-  const seen = new Set(rows.map(r => r.groupId).filter((g): g is string => !!g));
-  const shares = shareRoles(tags);
+  studentId: string | null,
+): Promise<{ notes: string[]; problems: string[] }> {
   const notes: string[] = [];
+  const problems: string[] = [];
+  if (roomGroups.size === 0 || studentId === null) return { notes, problems };
+  const seen = new Set<string>();
+  try {
+    for (let i = 0; i < VERIFY_READS; i++) {
+      if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+      for (const r of await withRetry(deps, () => deps.acl(nodeId))) if (r.groupId) seen.add(r.groupId);
+    }
+  } catch {
+    problems.push(`groupes sans membres non vérifiés sur « ${title} » (accès illisible), à vérifier dans Hazu`);
+    return { notes, problems };
+  }
+  const shares = shareRoles(tags);
   for (const [g, role] of roomGroups) {
     if (seen.has(g)) continue;
     const want = shares.get(role);
@@ -242,14 +250,22 @@ async function detachEmptyGroups(
       notes.push(`« ${title} » : groupe ${role} sans membres — rôle non vérifiable, à contrôler dans Hazu (${want} attendu)`);
       continue;
     }
+    let members: AclRow[];
+    try {
+      members = await withRetry(deps, () => deps.acl(g));
+    } catch {
+      problems.push(`groupe ${role} sans membres — non vérifié sur « ${title} » (groupe illisible), à vérifier dans Hazu`);
+      continue;
+    }
+    if (members.some(r => r.authorId === studentId)) continue; // the student's access may come through it
     try {
       await withRetry(deps, () => deps.detachGroup(nodeId, g));
       notes.push(`« ${title} » : groupe ${role} sans membres détaché — non vérifiable (aucune entrée à relire)`);
     } catch {
-      notes.push(`« ${title} » : groupe ${role} sans membres — détachement non confirmé, à vérifier dans Hazu`);
+      problems.push(`groupe ${role} sans membres — détachement non confirmé sur « ${title} », à vérifier dans Hazu`);
     }
   }
-  return notes;
+  return { notes, problems };
 }
 
 /** Re-list the parent up to 3 times (750 ms apart) for a node matching `from` that is not excluded. */
@@ -464,7 +480,9 @@ export async function copySection(
   const emptyNotes: string[] = [];
   for (const c of copies) {
     // before the access check: it removes groups with members, which this step must not mistake for empty
-    emptyNotes.push(...await detachEmptyGroups(deps, c.id, c.node.title, c.node.tags, roomGroups));
+    const empty = await detachEmptyGroups(deps, c.id, c.node.title, c.node.tags, roomGroups, studentId);
+    emptyNotes.push(...empty.notes);
+    problems.push(...empty.problems);
     const a = await alignAcl(deps, c, roleGroups, studentId);
     for (const m of a.mismatched) problems.push(groupRoleProblem(m, c.node.title));
     if (!a.confirmed) problems.push(`accès non confirmés : « ${c.node.title} »`);
