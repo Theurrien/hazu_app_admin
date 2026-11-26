@@ -183,4 +183,13 @@ describe('studentWarning', () => {
     expect(studentWarning(plan({ templateOnlyItems: copy }))).toBeNull();
     expect(studentWarning(plan({ studentFound: false }))).toBeNull();
   });
+  it('the warning follows the reason', () => {
+    expect(studentWarning(plan({ templateOnlyItems: copy, studentFound: false, studentUnknown: 'absent' }))).toBe(STUDENT_NOT_FOUND);
+    expect(studentWarning(plan({ templateOnlyItems: copy, studentFound: false, studentUnknown: 'unreadable' }))).toBe(
+      "Accès du profil illisible — refaites l'aperçu ; sinon les accès des sections copiées devront être réglés à la main.");
+    expect(studentWarning(plan({ templateOnlyItems: copy, studentFound: false, studentUnknown: 'ambiguous' }))).toBe(
+      "Plusieurs comptes portent l'adresse de l'élève dans l'accès du profil — les accès des sections copiées ne pourront pas être réglés (à faire à la main).");
+    expect(studentWarning(plan({ templateOnlyItems: copy, studentFound: false, studentUnknown: 'no-identity' }))).toBe(
+      "Profil sans étiquette d'identité (hz-config-userid) — les accès des sections copiées ne pourront pas être réglés (à faire à la main).");
+  });
 });

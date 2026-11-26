@@ -787,7 +787,7 @@ describe('runLevelChange', () => {
     it('studentId null with an invite-tagged copy: grant unconfirmed, colour withheld, copy kept', async () => {
       const h = harness(richWorld());
       const d = await defaults(h);
-      const o = await runLevelChange(input({ decisions: d, studentId: null }), h.deps);
+      const o = await runLevelChange(input({ decisions: d, studentId: null, studentUnknown: 'absent' }), h.deps);
       expect(o.success).toBe(false);
       // the reason is named: without the student's account no access was changed on the copy
       expect(o.remaining).toContain(
@@ -797,6 +797,14 @@ describe('runLevelChange', () => {
       expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
       expect(h.calls.some(c => c.startsWith('detach'))).toBe(false); // R12: no detach without the student
       expect(copiesOf(h.w)).toHaveLength(1);
+    });
+
+    it('the access line names the real reason: an unreadable access list is not « add the student »', async () => {
+      const h = harness(richWorld());
+      const o = await runLevelChange(input({ decisions: await defaults(h), studentId: null, studentUnknown: 'unreadable' }), h.deps);
+      expect(o.remaining).toContain(
+        "accès non confirmé sur « Boîte » — accès du profil illisible, l'élève n'a pas pu être identifié : réglez l'accès à la main (une nouvelle exécution ne le refait pas)");
+      expect(o.remaining.some(r => r.includes('ajoutez l\'élève'))).toBe(false);
     });
 
     it('KNOWN LIMITATION: a copy kept with unconfirmed access is not re-checked — the re-run writes the colour and succeeds', async () => {

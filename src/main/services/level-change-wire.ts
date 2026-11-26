@@ -1,4 +1,5 @@
 // Level change — raw API rows → the copy core's shapes. PURE (no DB, HTTP or Electron), vitest-runnable.
+import type { StudentUnknown } from '../../shared/level-change-types';
 import { normalizeRow } from './formation/parse';
 import type { AclRow, CopyNode } from './level-change-copy';
 
@@ -72,16 +73,24 @@ export function toAclRows(resp: unknown): AclRow[] {
  * the same e-mail → null (unresolved), never a guess.
  */
 export function studentIdFromAcl(identityTag: string | null, entries: unknown[]): string | null {
+  return studentLookup(identityTag, entries).id;
+}
+
+/** The student's account id and, when it is unknown, why (the report and the preview name the reason). */
+export function studentLookup(
+  identityTag: string | null, entries: unknown[],
+): { id: string | null; reason: StudentUnknown | null } {
   const tag = (identityTag ?? '').trim();
-  if (!tag) return null;
-  if (!tag.includes('@')) return tag;
+  if (!tag) return { id: null, reason: 'no-identity' };
+  if (!tag.includes('@')) return { id: tag, reason: null };
   const want = tag.toLowerCase();
   const ids = new Set<string>();
   for (const e of entries) {
     if (!isObj(e) || !e.authorId) continue;
     if (String(e.description ?? '').trim().toLowerCase() === want) ids.add(String(e.authorId));
   }
-  return ids.size === 1 ? [...ids][0] : null;
+  if (ids.size === 1) return { id: [...ids][0], reason: null };
+  return { id: null, reason: ids.size === 0 ? 'absent' : 'ambiguous' };
 }
 
 export const NO_ROLE_GROUPS = "groupes de rôle inconnus — synchronisez d'abord";

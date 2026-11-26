@@ -56,7 +56,13 @@ export interface LevelChangePlan {
   /** preview only, when copies are proposed: the student's account is on the profile's access list.
    *  false → the copies' access cannot be set (no detach, no grant); absent → not checked. */
   studentFound?: boolean;
+  /** why the student is unknown, when studentFound is false */
+  studentUnknown?: StudentUnknown;
 }
+
+/** Why the student's account could not be found: no identity tag, e-mail not on the profile's access
+ *  list, e-mail on several accounts, or the access list could not be read. */
+export type StudentUnknown = 'no-identity' | 'absent' | 'ambiguous' | 'unreadable';
 
 export interface LevelChangeOutcome {
   success: boolean;

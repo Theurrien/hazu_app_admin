@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toAclRows, toCopyNode, aclEntries, studentIdFromAcl, copiesRefusal, NO_ROLE_GROUPS, PRINCIPAL_MISSING } from './level-change-wire';
+import { toAclRows, toCopyNode, aclEntries, studentIdFromAcl, studentLookup, copiesRefusal, NO_ROLE_GROUPS, PRINCIPAL_MISSING } from './level-change-wire';
 import { buildCreateFullBody, createdIdOf, newIdFromCreate, strictListRows } from './hazu-api/create-full';
 import { sendApiRequestRemoveUserChecked } from './hazu-api/api';
 
@@ -182,4 +182,15 @@ describe('sendApiRequestRemoveUserChecked', () => {
     const r2 = await sendApiRequestRemoveUserChecked('item1', '', '');
     expect(r2.ok).toBe(false);
   });
+});
+
+describe('studentLookup (why the student is unknown)', () => {
+  const e = (authorId: string, description: string) => ({ authorId, description, role: 'reader', isGroup: false, groupId: null });
+  it('a UID is the id', () => expect(studentLookup('uid123', [])).toEqual({ id: 'uid123', reason: null }));
+  it('no identity tag', () => expect(studentLookup(null, [])).toEqual({ id: null, reason: 'no-identity' }));
+  it('e-mail found once', () => expect(studentLookup('a@example.invalid', [e('U1', 'A@example.invalid')])).toEqual({ id: 'U1', reason: null }));
+  it('e-mail absent from the access list', () =>
+    expect(studentLookup('a@example.invalid', [e('U2', 'b@example.invalid')])).toEqual({ id: null, reason: 'absent' }));
+  it('e-mail on several accounts', () =>
+    expect(studentLookup('a@example.invalid', [e('U1', 'a@example.invalid'), e('U2', 'a@example.invalid')])).toEqual({ id: null, reason: 'ambiguous' }));
 });

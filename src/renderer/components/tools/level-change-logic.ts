@@ -1,4 +1,6 @@
-import type { Level, LevelChangeOutcome, LevelChangePlan, LevelChangeStudent, SectionChange } from '../../../shared/level-change-types';
+import type {
+  Level, LevelChangeOutcome, LevelChangePlan, LevelChangeStudent, SectionChange, StudentUnknown,
+} from '../../../shared/level-change-types';
 import type { LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import { normalizeName } from '../../../shared/person-match';
 
@@ -126,6 +128,16 @@ export function taskCountsSuffix(ignored: number, notes: number): string {
 export const STUDENT_NOT_FOUND =
   "Élève introuvable dans l'accès du profil — les accès des sections copiées ne pourront pas être réglés (à faire à la main).";
 
+const STUDENT_WARNINGS: Record<StudentUnknown, string> = {
+  absent: STUDENT_NOT_FOUND,
+  ambiguous:
+    "Plusieurs comptes portent l'adresse de l'élève dans l'accès du profil — les accès des sections copiées ne pourront pas être réglés (à faire à la main).",
+  unreadable: "Accès du profil illisible — refaites l'aperçu ; sinon les accès des sections copiées devront être réglés à la main.",
+  'no-identity':
+    "Profil sans étiquette d'identité (hz-config-userid) — les accès des sections copiées ne pourront pas être réglés (à faire à la main).",
+};
+
 export function studentWarning(plan: LevelChangePlan): string | null {
-  return plan.templateOnlyItems.length > 0 && plan.studentFound === false ? STUDENT_NOT_FOUND : null;
+  if (plan.templateOnlyItems.length === 0 || plan.studentFound !== false) return null;
+  return STUDENT_WARNINGS[plan.studentUnknown ?? 'absent'];
 }

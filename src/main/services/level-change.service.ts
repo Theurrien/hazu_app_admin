@@ -18,7 +18,7 @@ import {
   sendApiRequestListStrictChecked,
 } from './hazu-api/api';
 import { normalizeRow } from './formation/parse';
-import { aclEntries, copiesRefusal, studentIdFromAcl, toAclRows, toCopyNode } from './level-change-wire';
+import { aclEntries, copiesRefusal, studentIdFromAcl, studentLookup, toAclRows, toCopyNode } from './level-change-wire';
 import type { CopyNode } from './level-change-copy';
 import type { LevelChangeDecisions } from '../../shared/level-change-decisions';
 import { setting, toError, toFailure, wrap } from './room-archive.service';
@@ -44,6 +44,7 @@ import type {
   LevelChangeCandidates,
   LevelChangeOutcome,
   LevelChangeStudent,
+  StudentUnknown,
 } from '../../shared/level-change-types';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -176,17 +177,16 @@ export function resolveStudentId(personId: string, profileAcl: unknown[]): strin
   return studentIdFromAcl(identityTag(personId), profileAcl);
 }
 
-/** Reads the profile ACL only when the identity tag holds an e-mail. Unreadable → null (unresolved). */
-async function liveStudentId(personId: string): Promise<string | null> {
+/** Reads the profile ACL only when the identity tag holds an e-mail. Unknown → null with the reason. */
+async function liveStudent(personId: string): Promise<{ id: string | null; reason: StudentUnknown | null }> {
   const tag = identityTag(personId);
-  if (!tag) return null;
-  if (!tag.includes('@')) return resolveStudentId(personId, []);
+  if (!tag || !tag.includes('@')) return studentLookup(tag, []);
   try {
     const resp = await withRetry({ sleep }, () => wrap(() => sendApiRequestGetAclInfoChecked(personId)));
-    return resolveStudentId(personId, aclEntries(resp));
+    return studentLookup(tag, aclEntries(resp));
   } catch (e) {
     console.warn(`[level-change] profile=${personId} profile ACL unreadable, student id unresolved:`, toFailure(e).message);
-    return null;
+    return { id: null, reason: 'unreadable' };
   }
 }
 
@@ -270,11 +270,14 @@ async function run(
   if (!isLocalStudent(personId)) return refusal(dryRun, 'profil introuvable');
   try {
     // The student id matters only to copies (invite grants): resolved on an execute that asks for one.
-    const studentId = !dryRun && decisions && decisions.copySections.length > 0 ? await liveStudentId(personId) : null;
+    const student = !dryRun && decisions && decisions.copySections.length > 0
+      ? await liveStudent(personId)
+      : { id: null, reason: null };
+    const studentId = student.id;
     return await runLevelChange(
       {
         profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun,
-        decisions, roleGroups: roleGroupMap(), studentId,
+        decisions, roleGroups: roleGroupMap(), studentId, studentUnknown: student.reason,
       },
       buildDeps(),
     );
@@ -291,7 +294,9 @@ export async function planLevelChange(
   const outcome = await run(personId, toLevel, targetTemplateId, true);
   // copies proposed: tell the preview whether their access can be set (the student must be found)
   if (outcome.plan && outcome.plan.templateOnlyItems.length > 0) {
-    outcome.plan.studentFound = (await liveStudentId(personId)) !== null;
+    const student = await liveStudent(personId);
+    outcome.plan.studentFound = student.id !== null;
+    if (student.reason) outcome.plan.studentUnknown = student.reason;
   }
   return outcome;
 }

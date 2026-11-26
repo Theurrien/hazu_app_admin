@@ -4,7 +4,7 @@
 // Only the difference between the two levels' templates is applied to a profile; a tag the
 // templates do not differ on, and any tag specific to the student, is never touched.
 
-import type { Level, LevelChangeOutcome, LevelChangePlan, SectionChange } from '../../shared/level-change-types';
+import type { Level, LevelChangeOutcome, LevelChangePlan, SectionChange, StudentUnknown } from '../../shared/level-change-types';
 import { isWidgetPresent, type LevelChangeDecisions } from '../../shared/level-change-decisions';
 import { withRetry, failureMessage } from './room-archive';
 // Runtime cycle with these two modules is safe: each only calls the other's functions at call time.
@@ -258,6 +258,8 @@ export interface LevelChangeInput {
   roleGroups: Map<string, string>;
   /** the student's account id; null = identity unresolved (invite grants then stay unconfirmed) */
   studentId: string | null;
+  /** why studentId is null (named in the report) */
+  studentUnknown?: StudentUnknown | null;
 }
 
 const VERIFY_READS = 3;
@@ -368,12 +370,21 @@ const ACCESS_PROBLEM = /^accès non confirmés : « (.*) »$/;
  * The copy is kept with its access unconfirmed. A re-run does not repair it: the section then
  * exists in the profile, is no longer template-only, and existing sections' access is out of scope.
  */
-function accessLine(sectionTitle: string, nodeTitle: string, studentFound: boolean): string {
+const STUDENT_UNKNOWN_WHY: Record<StudentUnknown, string> = {
+  absent: "élève introuvable dans l'accès du profil : ajoutez l'élève au profil, puis réglez l'accès à la main",
+  ambiguous: "plusieurs comptes portent l'adresse de l'élève dans l'accès du profil : réglez l'accès à la main",
+  unreadable: "accès du profil illisible, l'élève n'a pas pu être identifié : réglez l'accès à la main",
+  'no-identity': "profil sans étiquette d'identité (hz-config-userid) : réglez l'accès à la main",
+};
+
+function accessLine(
+  sectionTitle: string, nodeTitle: string, studentId: string | null, unknown: StudentUnknown | null | undefined,
+): string {
   const node = nodeTitle !== sectionTitle ? ` (élément « ${nodeTitle} »)` : '';
-  // without the student's account nothing was changed on the copy (R12): say so, and what to do
-  const why = studentFound
+  // without the student's account nothing was changed on the copy (R12): say so, why, and what to do
+  const why = studentId !== null
     ? 'à corriger à la main'
-    : "élève introuvable dans l'accès du profil : ajoutez l'élève au profil, puis réglez l'accès à la main";
+    : unknown ? STUDENT_UNKNOWN_WHY[unknown] : "élève non identifié : réglez l'accès à la main";
   return `accès non confirmé sur « ${sectionTitle} »${node} — ${why} (une nouvelle exécution ne le refait pas)`;
 }
 
@@ -386,7 +397,7 @@ const hasActions = (a: Actions) => a.copies.length > 0 || a.deletes.length > 0 |
 async function runActions(
   a: Actions, ctx: {
     profile: LcNode; targetRootDescription: string; targetKeys: Set<string>;
-    roleGroups: Map<string, string>; studentId: string | null;
+    roleGroups: Map<string, string>; studentId: string | null; studentUnknown?: StudentUnknown | null;
   }, deps: LevelChangeDeps,
 ): Promise<{ applied: number; remaining: string[]; notes: string[] }> {
   const remaining: string[] = [];
@@ -401,7 +412,7 @@ async function runActions(
       const access = ACCESS_PROBLEM.exec(p);
       if (p === DUPLICATE_REMOVED_NOTE) notes.push(`« ${c.title} » : ${p}`); // informational, never a failure
       else if (r.ok) notes.push(`« ${c.title} » : ${p}`);
-      else if (access) failures.push(accessLine(c.title, access[1], ctx.studentId !== null));
+      else if (access) failures.push(accessLine(c.title, access[1], ctx.studentId, ctx.studentUnknown));
       else failures.push(`« ${c.title} » : ${p}`);
     }
     if (r.ok) { applied++; continue; }
@@ -550,7 +561,7 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
   const acted = await runActions(actions, {
     profile: profile!, targetRootDescription: targetRef!.description,
     targetKeys: new Set(targetChildren!.map(sectionKey)),
-    roleGroups: input.roleGroups, studentId: input.studentId,
+    roleGroups: input.roleGroups, studentId: input.studentId, studentUnknown: input.studentUnknown,
   }, deps);
   applied += acted.applied;
   const notes = acted.notes;

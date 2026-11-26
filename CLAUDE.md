@@ -903,7 +903,9 @@ group-role line names the role to set (« mettre editor (actuellement reader) »
 a retry cannot fix it. When copies are proposed, the preview checks whether the student's account is on
 the profile's access list (`plan.studentFound`); if not it warns « Élève introuvable dans l'accès du
 profil — … », and the run's access lines name that reason (nothing is changed on a copy without the
-student, R12). Both reports have « Ouvrir le profil dans
+student, R12). The reason is precise (`StudentUnknown`): e-mail absent from the access list (« ajoutez
+l'élève au profil »), on several accounts, access list unreadable (« refaites l'aperçu »), or no identity
+tag — only the first advises adding the student. Both reports have « Ouvrir le profil dans
 Hazu » (environment-aware link, `utils/hazu-url.ts`, shared with the Task Queue). While the task is queued every box is locked (the task holds a
 snapshot of the decisions).
 A delete happens only if the node, re-read at execute, is **still a direct child of the profile, its
