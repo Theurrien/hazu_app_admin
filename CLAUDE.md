@@ -934,7 +934,7 @@ granting group ([archive-move-probe-findings.md](docs/archive-move-probe-finding
 The student is only ever **granted or raised directly** (`PUT /acl`, `setRole`), never lowered or
 removed: the `hz-invite-self-{role}` tag raises the student to that role, and when every row of the
 student on the node comes from a group about to be detached, the student is first granted
-`max(reader, invite role)` directly — **before** the detach. Student unresolved (`studentId` null) →
+`max(reader, invite role)` directly — **before** the detach, and no group is detached until a later ACL read shows that grant (a 2xx alone is not enough: a lagging grant plus a detach would leave the student without access). Student unresolved (`studentId` null) →
 **no detach at all** on that node, access unconfirmed. The **read-back** compares with the ACL read
 before the first write: no row of a detached group remains, the student holds at least the required
 role, and **every other row** (not the student's, not a detached group's — owner groups, persons,

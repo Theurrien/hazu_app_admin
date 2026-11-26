@@ -413,6 +413,34 @@ describe('copySection — R12 access cases', () => {
     expect(gi).toBeLessThan(order.indexOf(`detach:${grandchild.id}:g-st`));
     expect(w.acls.get(grandchild.id)).toEqual([row('own', 'owner', true, 'g-owner'), row(S, 'reader')]);
   });
+  it('a direct grant that has not shown yet → no detach until a read shows it', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'editor', true, 'g-st'), row('own', 'owner', true, 'g-owner')]);
+    const setRole = w.deps.setRole;
+    const pending = new Map<string, () => Promise<void>>();
+    // the grant answers 2xx but only lands after the next ACL read of that node
+    w.deps.setRole = async (id, p, role) => { pending.set(id, () => setRole(id, p, role)); };
+    const acl = w.deps.acl;
+    w.deps.acl = async (id) => {
+      const rows = await acl(id);
+      const land = pending.get(id);
+      if (land) { pending.delete(id); await land(); }
+      return rows;
+    };
+    const detach = w.deps.detachGroup;
+    const early: string[] = [];
+    w.deps.detachGroup = async (id, g) => {
+      // the core swallows a throwing dep, so record instead of asserting here
+      if (!w.acls.get(id)!.some(r => r.authorId === S && r.groupId === null)) early.push(id);
+      return detach(id, g);
+    };
+    await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(early).toEqual([]); // the grant was visible before every detach
+    for (const [id, rows] of w.acls) {
+      if (!id.startsWith('new-')) continue;
+      expect(rows.some(r => r.authorId === S)).toBe(true); // the student never loses access
+    }
+  });
   it('studentId null → no detach on any node, unconfirmed', async () => {
     const w = world();
     const r = await copySection('t-sec', 'prof', w.deps, groups, null);

@@ -323,6 +323,9 @@ async function alignAcl(
       if (fix.raiseStudent && studentId) {
         const role = fix.raiseStudent;
         await withRetry(deps, () => deps.setRole(c.id, studentId, role));
+        // never detach on a 2xx alone: the next read must show the grant first, or a lagging
+        // grant plus a detach would leave the student with no access to this node
+        continue;
       }
       // only groups of the baseline's detach set, one call per distinct groupId
       for (const g of fix.detachGroups.filter(x => baseline!.detach.has(x))) {
