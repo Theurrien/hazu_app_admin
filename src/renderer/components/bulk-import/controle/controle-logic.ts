@@ -134,14 +134,19 @@ export function linkFromDecision(
   return { category, fileKey, fileLabel, hazuId, decidedAt: now };
 }
 
-/** Local rooms of one type as candidates; parentTitle = title of the local room that is its parent, else null. */
+/**
+ * Local rooms of one type as candidates; parentTitle = title of the local room that is its parent,
+ * else null. Category folders (`categoryIds`, from `categoryIdsOf`) are never candidates — and so
+ * never twins — but still give their title as a parent.
+ */
 export function roomCandidates(
   rooms: Array<{ id: string; title: string; room_type: string; parent_id: string | null }>,
   type: RoomCategory,
+  categoryIds: ReadonlySet<string> = new Set(),
 ): RoomCandidate[] {
   const titleOf = new Map(rooms.map((r) => [r.id, r.title]));
   return rooms
-    .filter((r) => r.room_type === type)
+    .filter((r) => r.room_type === type && !categoryIds.has(r.id))
     .map((r) => ({ id: r.id, title: r.title, parentTitle: (r.parent_id && titleOf.get(r.parent_id)) ?? null }));
 }
 
@@ -185,4 +190,6 @@ export function applyStudentOverrides(
 export interface ResolvedForCheck {
   students: Map<number, StudentResolution>;
   rooms: Partial<Record<RoomCategory, Map<string, RoomResolution>>>;
+  /** Category folder ids: never a room to check against (empty when root_hazu_id is unknown). */
+  categoryIds: Set<string>;
 }

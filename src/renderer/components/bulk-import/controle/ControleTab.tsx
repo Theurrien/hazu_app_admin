@@ -9,6 +9,7 @@ import {
   type SavedLink,
 } from '../../../../shared/correspondence';
 import type { HazuPerson, SheetPerson } from '../../../../shared/person-match';
+import { categoryIdsOf } from '../../../../shared/app-mode';
 import { findBestMatch } from '../../../utils/fuzzyMatch';
 import type { ColumnMapping } from '../ColumnMappingDropdown';
 import { DataPreviewTable } from '../DataPreviewTable';
@@ -44,7 +45,9 @@ interface ControleTabProps {
 /** What step 2 reads from the local database. */
 interface StepData {
   students: HazuPerson[];
+  /** Candidates per type, category folders left out. */
   rooms: Record<RoomCategory, RoomCandidate[]>;
+  categoryIds: Set<string>;
   saved: SavedLink[];
 }
 
@@ -123,16 +126,19 @@ export function ControleTab({ fileData }: ControleTabProps) {
       window.electronAPI.getPersons('student'),
       window.electronAPI.getRooms(),
       window.electronAPI.listCorrespondences(),
+      window.electronAPI.getSetting('root_hazu_id'),
     ])
-      .then(([persons, rooms, saved]) => {
+      .then(([persons, rooms, saved, rootHazuId]) => {
         if (gen !== generationRef.current) return;
+        const categoryIds = categoryIdsOf(rooms, rootHazuId);
         setData({
           students: persons.map((p: any) => ({ id: p.id, email: p.email ?? null, displayName: p.display_name })),
           rooms: {
-            class: roomCandidates(rooms, 'class'),
-            enterprise: roomCandidates(rooms, 'enterprise'),
-            state: roomCandidates(rooms, 'state'),
+            class: roomCandidates(rooms, 'class', categoryIds),
+            enterprise: roomCandidates(rooms, 'enterprise', categoryIds),
+            state: roomCandidates(rooms, 'state', categoryIds),
           },
+          categoryIds,
           saved,
         });
       })
@@ -256,10 +262,14 @@ export function ControleTab({ fileData }: ControleTabProps) {
   };
 
   const goToCheck = () => {
-    if (!allResolved || !studentRes) return;
+    if (!allResolved || !studentRes || !data) return;
     const rooms: ResolvedForCheck['rooms'] = {};
     for (const c of categories) rooms[c] = roomRes[c];
-    setResolved({ students: new Map([...studentRes].map(([i, v]) => [i, v.res])), rooms });
+    setResolved({
+      students: new Map([...studentRes].map(([i, v]) => [i, v.res])),
+      rooms,
+      categoryIds: data.categoryIds,
+    });
     setState((prev) => ({ ...prev, step: 3 }));
   };
 

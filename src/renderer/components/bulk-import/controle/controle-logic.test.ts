@@ -12,7 +12,7 @@ import {
   applyStudentOverrides,
   type ControleColumns,
 } from './controle-logic';
-import type { RoomCategory, RoomResolution, StudentResolution } from '../../../../shared/correspondence';
+import { resolveRoomValues, type RoomCategory, type RoomResolution, type StudentResolution } from '../../../../shared/correspondence';
 
 describe('controleColumns', () => {
   it('reads the column names from the mappings', () => {
@@ -170,6 +170,21 @@ describe('roomCandidates', () => {
       { id: 'r1', title: 'CUI 2A', parentTitle: 'École professionnelle' },
       { id: 'r3', title: 'Sans parent', parentTitle: null },
     ]);
+  });
+  it('never offers a category folder, but still names it as parent', () => {
+    expect(roomCandidates(rooms, 'class', new Set(['cat']))).toEqual([
+      { id: 'r1', title: 'CUI 2A', parentTitle: 'École professionnelle' },
+      { id: 'r3', title: 'Sans parent', parentTitle: null },
+    ]);
+  });
+  it('a category is never a twin of a room with the same title', () => {
+    const twins = [
+      { id: 'cat', title: 'CUI 2A', room_type: 'class', parent_id: 'root' },
+      { id: 'r1', title: 'CUI 2A', room_type: 'class', parent_id: 'cat' },
+    ];
+    const c = roomCandidates(twins, 'class', new Set(['cat']));
+    expect(c.map((r) => r.id)).toEqual(['r1']);
+    expect(resolveRoomValues('class', ['CUI 2A'], c, [], () => null).get('cui 2a')).toEqual({ kind: 'exact', hazuId: 'r1' });
   });
   it('gives null when the parent is not a local room', () => {
     expect(roomCandidates(rooms, 'enterprise')).toEqual([{ id: 'r2', title: 'Hôtel Exemple', parentTitle: null }]);
