@@ -43,11 +43,13 @@ describe('levelLabel', () => {
 
 describe('hasApplicableChange', () => {
   const sc = (over: Partial<SectionChange> = {}): SectionChange => ({
-    sectionId: 's', title: 'S', description: null, descriptionKept: false, addTags: [], removeTags: [], ...over,
+    sectionId: 's', sectionKey: 'k', title: 'S', description: null, descriptionKept: false, addTags: [], removeTags: [],
+    uncertainTags: [], keptTargetDescription: null, ...over,
   });
   const pl = (sections: SectionChange[], colorChange = false): LevelChangePlan => ({
     profileId: 'P', fromLevel: 'cfc', toLevel: 'afp', colorFrom: '#1A237E', colorTo: '#9AD9EA', colorChange,
     templates: [], sections, profileOnly: [], templateOnly: [], noSourceCounterpart: [],
+    templateOnlyItems: [], profileOnlyItems: [], widget: { needed: false, profileEmpty: false },
   });
   it('null plan or nothing to do', () => {
     expect(hasApplicableChange(null)).toBe(false);

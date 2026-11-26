@@ -5,6 +5,8 @@ import {
   templatesFor, otherLevel, LEVEL_COLORS, STUDENT_TEMPLATE_TAG,
   type LcNode, type TemplateTree,
 } from './level-change';
+import { defaultDecisions, type LevelChangeDecisions } from '../../shared/level-change-decisions';
+import type { LevelChangePlan } from '../../shared/level-change-types';
 
 const CFC = '#1A237E';
 const AFP = '#9AD9EA';
@@ -19,12 +21,15 @@ function tree(id: string, children: LcNode[], color = CFC): TemplateTree {
 }
 function plan(opts: {
   profile?: LcNode[]; target?: LcNode[]; source?: LcNode[]; others?: LcNode[][]; color?: string; toLevel?: 'cfc' | 'afp';
+  profileDesc?: string; targetDesc?: string;
 }) {
+  const target = tree('T', opts.target ?? [], AFP);
+  target.ref.description = opts.targetDesc ?? '';
   return buildPlan({
-    profile: node({ id: 'P', title: 'p', color: opts.color ?? CFC }),
+    profile: node({ id: 'P', title: 'p', color: opts.color ?? CFC, description: opts.profileDesc ?? '' }),
     profileChildren: opts.profile ?? [],
     toLevel: opts.toLevel ?? 'afp',
-    target: tree('T', opts.target ?? [], AFP),
+    target,
     source: tree('S', opts.source ?? [], CFC),
     sourceOthers: (opts.others ?? []).map((c, i) => tree('O' + i, c, CFC)),
   });
@@ -233,6 +238,67 @@ describe('buildPlan structure', () => {
   });
 });
 
+describe('buildPlan decision additions', () => {
+  const sk = (x: string) => fam + id20(x);
+  it('a swap is certain; a family-absent add is uncertain', () => {
+    const swap = plan({
+      source: [sec('s', { tags: [sk('S')] })], target: [sec('t', { tags: [sk('T')] })], profile: [sec('p', { tags: [sk('S')] })],
+    });
+    expect(swap.sections[0].addTags).toEqual([sk('T')]);
+    expect(swap.sections[0].uncertainTags).toEqual([]);
+    expect(swap.sections[0].sectionKey).toBe('sec|fa-x|#111111');
+    const absent = plan({
+      source: [sec('s', { tags: [sk('S')] })], target: [sec('t', { tags: [sk('T')] })], profile: [sec('p')],
+    });
+    expect(absent.sections[0].uncertainTags).toEqual([sk('T')]);
+    const unpaired = plan({ source: [sec('s')], target: [sec('t', { tags: [sk('T')] })], profile: [sec('p')] });
+    expect(unpaired.sections[0].uncertainTags).toEqual([sk('T')]);
+  });
+  it('a target-only tag without a trailing id stays certain', () => {
+    const p = plan({ source: [sec('s')], target: [sec('t', { tags: ['hz-plain'] })], profile: [sec('p')] });
+    expect(p.sections[0].addTags).toEqual(['hz-plain']);
+    expect(p.sections[0].uncertainTags).toEqual([]);
+  });
+  it('a kept description carries the template description it could take', () => {
+    const p = plan({
+      source: [sec('s', { description: '<p>S</p>' })], target: [sec('t', { description: '<p>T</p>' })],
+      profile: [sec('p', { description: '<p>hand</p>' })],
+    });
+    expect(p.sections[0]).toMatchObject({ descriptionKept: true, keptTargetDescription: '<p>T</p>', description: null });
+    const empty = plan({
+      source: [sec('s', { description: '<p>S</p>' })], target: [sec('t', { description: '' })],
+      profile: [sec('p', { description: '<p>hand</p>' })],
+    });
+    expect(empty.sections[0].keptTargetDescription).toBe('<p><br></p>');
+    const none = plan({
+      source: [sec('s', { description: '<p>S</p>' })], target: [sec('t', { description: '<p>T</p>' })],
+      profile: [sec('p', { description: '<p>S</p>' })],
+    });
+    expect(none.sections[0].keptTargetDescription).toBeNull();
+  });
+  it('template-only and profile-only items carry keys and ids', () => {
+    const p = plan({
+      source: [],
+      target: [node({ id: 't1', title: 'Both' }), node({ id: 't2', title: 'TplOnly' })],
+      profile: [node({ id: 'p1', title: 'Both' }), node({ id: 'p2', title: 'ProfOnly' })],
+    });
+    expect(p.templateOnlyItems).toEqual([{ sectionKey: 'tplonly|fa-x|#111111', title: 'TplOnly', templateSectionId: 't2' }]);
+    expect(p.profileOnlyItems).toEqual([
+      { sectionKey: 'profonly|fa-x|#111111', title: 'ProfOnly', sectionId: 'p2', descendants: null, descendantsExact: false },
+    ]);
+    expect(p.profileOnly).toEqual(['ProfOnly']);
+    expect(p.templateOnly).toEqual(['TplOnly']);
+  });
+  it('widget: needed unless the profile holds student_app.html; profileEmpty on empty descriptions', () => {
+    const W = '<p>x</p><iframe src="https://h.example/student_app.html"></iframe>';
+    expect(plan({ targetDesc: W, profileDesc: '' }).widget).toEqual({ needed: true, profileEmpty: true });
+    expect(plan({ targetDesc: W, profileDesc: '<p><br></p>' }).widget).toEqual({ needed: true, profileEmpty: true });
+    expect(plan({ targetDesc: W, profileDesc: '<p>mine</p>' }).widget).toEqual({ needed: true, profileEmpty: false });
+    expect(plan({ targetDesc: W, profileDesc: W }).widget).toMatchObject({ needed: false });
+    expect(plan({ targetDesc: '<p>no widget</p>', profileDesc: '' }).widget).toMatchObject({ needed: false });
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 describe('runLevelChange', () => {
   const ROOT = 'ROOT';
@@ -288,8 +354,17 @@ describe('runLevelChange', () => {
     };
     return { w, deps, calls, opts };
   }
+  const NO_DECISIONS: LevelChangeDecisions = {
+    acceptedTagAdds: [], forcedDescriptions: [], copySections: [], deleteSections: [], addWidget: false,
+  };
   const input = (over: Record<string, unknown> = {}) =>
-    ({ profileId: 'P', toLevel: 'afp' as const, targetTemplateId: 'TA', templateRootId: ROOT, dryRun: false, ...over });
+    ({ profileId: 'P', toLevel: 'afp' as const, targetTemplateId: 'TA', templateRootId: ROOT, dryRun: false,
+       decisions: NO_DECISIONS, ...over });
+  /** the decisions the preview would send untouched */
+  async function defaults(h: { deps: LevelChangeDeps }, over: Record<string, unknown> = {}) {
+    const dry = await runLevelChange(input({ dryRun: true, ...over }), h.deps);
+    return defaultDecisions(dry.plan as LevelChangePlan);
+  }
 
   it('refuses a template node as profile (it sits in the templates folder), writing nothing', async () => {
     const h = harness();
@@ -418,7 +493,7 @@ describe('runLevelChange', () => {
     expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
     h.opts.failAdd = false;
     h.calls.length = 0;
-    const o2 = await runLevelChange(input(), h.deps);
+    const o2 = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
     expect(h.w.nodes.get('p1')!.tags).toContain(NEW);
     expect(o2.success).toBe(true);
     expect(h.w.nodes.get('P')!.color).toBe(AFP);
@@ -427,8 +502,104 @@ describe('runLevelChange', () => {
   it('a section left with neither tag by an earlier run gets the target tag', async () => {
     const h = harness();
     h.w.nodes.get('p1')!.tags = [];
-    const o = await runLevelChange(input(), h.deps);
+    const o = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
     expect(o.success).toBe(true);
     expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
+  });
+
+  describe('decisions', () => {
+    const KEY = 'sec|fa-x|#111111';
+    const withoutTags = () => { const h = harness(); h.w.nodes.get('p1')!.tags = []; return h; };
+
+    it('dryRun false without decisions refuses and writes nothing', async () => {
+      const h = harness();
+      const o = await runLevelChange(input({ decisions: undefined }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.error).toContain('décisions');
+      expect(h.calls).toEqual([]);
+    });
+
+    it('a dry run ignores decisions and reports no ignored item', async () => {
+      const h = harness();
+      const o = await runLevelChange(input({ dryRun: true, decisions: undefined }), h.deps);
+      expect(o.success).toBe(true);
+      expect(o.ignored).toEqual([]);
+    });
+
+    it('an uncertain add without a decision is not written and is reported ignored', async () => {
+      const h = withoutTags();
+      const o = await runLevelChange(input(), h.deps);
+      expect(h.calls).not.toContain('add:p1');
+      expect(h.w.nodes.get('p1')!.tags).toEqual([]);
+      expect(o.ignored).toHaveLength(1);
+      expect(o.ignored[0]).toContain('non vu à l\'aperçu — ignoré');
+      expect(o.ignored[0]).toContain(NEW);
+      // the refused tag is not "remaining"
+      expect(o.remaining.some(r => r.includes('étiquettes'))).toBe(false);
+    });
+
+    it('an accepted uncertain add is written', async () => {
+      const h = withoutTags();
+      const o = await runLevelChange(input({ decisions: { ...NO_DECISIONS, acceptedTagAdds: [{ sectionKey: KEY, tag: NEW }] } }), h.deps);
+      expect(o).toMatchObject({ success: true, ignored: [] });
+      expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
+    });
+
+    it('clear swaps are applied with empty decisions', async () => {
+      const h = harness();
+      const o = await runLevelChange(input(), h.deps);
+      expect(o).toMatchObject({ success: true, ignored: [] });
+      expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
+    });
+
+    function handEdited() {
+      const h = harness();
+      h.w.nodes.get('p1')!.tags = [NEW];
+      h.w.nodes.get('p1')!.description = '<p>hand</p>';
+      return h;
+    }
+
+    it('a hand-edited description is left alone unless forced', async () => {
+      const h = handEdited();
+      const o = await runLevelChange(input(), h.deps);
+      expect(h.calls.some(c => c.startsWith('desc'))).toBe(false);
+      expect(h.w.nodes.get('p1')!.description).toBe('<p>hand</p>');
+      expect(o.remaining).toEqual([]);
+      expect(o.ignored).toEqual([]);
+    });
+
+    it('a forced description writes the target description', async () => {
+      const h = handEdited();
+      const o = await runLevelChange(input({ decisions: { ...NO_DECISIONS, forcedDescriptions: [KEY] } }), h.deps);
+      expect(o).toMatchObject({ success: true, remaining: [] });
+      expect(h.w.nodes.get('p1')!.description).toBe('<p>afp</p>');
+      expect(h.calls).toContain('desc:p1');
+    });
+
+    it('a forced description that does not land is reported', async () => {
+      const h = handEdited(); h.opts.dropWrites = true;
+      const o = await runLevelChange(input({ decisions: { ...NO_DECISIONS, forcedDescriptions: [KEY] } }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.remaining.some(r => r.includes('description non confirmée'))).toBe(true);
+    });
+
+    it('decisions naming no item of the live plan are ignored and reported', async () => {
+      const h = harness();
+      const o = await runLevelChange(input({
+        decisions: { ...NO_DECISIONS, acceptedTagAdds: [{ sectionKey: 'ghost|x|y', tag: 'z' }], forcedDescriptions: ['ghost2|x|y'] },
+      }), h.deps);
+      expect(o.success).toBe(true);
+      expect(o.ignored).toHaveLength(2);
+      expect(o.ignored.every(i => i.includes('décision sans objet — ignorée'))).toBe(true);
+      expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
+    });
+
+    it('everything refused: nothing written, colour still written when the rest holds', async () => {
+      const h = withoutTags();
+      h.w.nodes.get('p1')!.description = '<p>afp</p>';
+      const o = await runLevelChange(input(), h.deps);
+      expect(o.success).toBe(true);
+      expect(h.calls).toEqual(['color:P']);
+    });
   });
 });

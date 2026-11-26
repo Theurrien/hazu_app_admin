@@ -121,7 +121,7 @@ function isLocalStudent(personId: string): boolean {
 }
 
 function refusal(dryRun: boolean, error: string): LevelChangeOutcome {
-  return { success: false, dryRun, plan: null, applied: 0, remaining: [], error };
+  return { success: false, dryRun, plan: null, applied: 0, remaining: [], ignored: [], error };
 }
 
 function templateRootId(): string {

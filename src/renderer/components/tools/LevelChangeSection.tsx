@@ -89,7 +89,7 @@ function LevelChangeSection() {
       setPreview({
         studentId,
         templateId: tpl,
-        outcome: { success: false, dryRun: true, plan: null, applied: 0, remaining: [], error: errMsg(e) },
+        outcome: { success: false, dryRun: true, plan: null, applied: 0, remaining: [], ignored: [], error: errMsg(e) },
       });
     } finally {
       setPreviewing(false);
