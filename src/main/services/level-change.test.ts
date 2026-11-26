@@ -122,6 +122,36 @@ describe('buildPlan tags', () => {
   });
 });
 
+describe('buildPlan tag scope', () => {
+  it('unpaired tag only on an older version is not removed', () => {
+    const p = plan({
+      source: [sec('s', { tags: ['A'] })],
+      others: [[sec('o', { tags: ['A', 'hz-share-courseteacher-reader'] })]],
+      target: [sec('t', { tags: ['A'] })],
+      profile: [sec('p', { tags: ['A', 'hz-share-courseteacher-reader'] })],
+    });
+    expect(p.sections).toEqual([]);
+  });
+  it('family tag on source v3 with no target counterpart is removed', () => {
+    const k = 'hz-config-old-' + id20('S');
+    const p = plan({
+      source: [sec('s', { tags: [k] })],
+      target: [sec('t', { tags: [] })],
+      profile: [sec('p', { tags: [k] })],
+    });
+    expect(p.sections[0].removeTags).toEqual([k]);
+  });
+  it('never a second tag of a family the profile holds', () => {
+    const c = (x: string) => 'hz-config-carnet-' + id20(x);
+    const p = plan({
+      source: [sec('s', { tags: [] })],
+      target: [sec('t', { tags: [c('T')] })],
+      profile: [sec('p', { tags: [c('P')] })],
+    });
+    expect(p.sections).toEqual([]);
+  });
+});
+
 describe('buildPlan descriptions', () => {
   const mk = (pd: string, sd = '<p>S</p>', td = '<p>T</p>') => plan({
     source: [sec('s', { description: sd })],
@@ -174,9 +204,14 @@ describe('buildPlan structure', () => {
     const a = plan({ color: CFC, toLevel: 'afp' });
     expect(a.colorChange).toBe(true);
     expect(a.colorTo).toBe(AFP);
+    expect(a.colorFrom).toBe(CFC);
     const b = plan({ color: AFP, toLevel: 'afp' });
     expect(b.colorChange).toBe(false);
     expect(b.fromLevel).toBe('cfc');
+    const c = plan({ color: '#9ad9ea', toLevel: 'afp' });
+    expect(c.colorFrom).toBe('#9AD9EA');
+    expect(c.colorChange).toBe(false);
+    expect(c.fromLevel).toBe('cfc');
     expect(b.toLevel).toBe('afp');
   });
   it('templates listed', () => {

@@ -67,6 +67,7 @@ export function sectionKey(n: Pick<LcNode, 'title' | 'icon' | 'color'>): string 
   return `${stripTitle(n.title).toLowerCase()}|${n.icon ?? ''}|${(n.color ?? '').toLowerCase()}`;
 }
 
+// Removes whitespace between tags on purpose; the same normaliser is used for verification.
 export function normDesc(html: string): string {
   const s = (html ?? '').replace(/\s+/g, ' ').trim().replace(/>\s+</g, '><');
   return s === '' || s === EMPTY_DESCRIPTION ? EMPTY_DESCRIPTION : s;
@@ -109,12 +110,17 @@ function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[
       }
       // profile holds none of them (e.g. a per-student pointer): left alone
     } else if (!have.has(t)) {
-      add.add(t);
+      // never a second tag of a family the profile already holds (e.g. a per-student carnet)
+      const heldFamily = f !== null && P.tags.some(x => tagFamily(x) === f);
+      if (!heldFamily) add.add(t);
     }
   }
 
   const tgtFamilies = new Set(tgtDelta.map(tagFamily).filter((f): f is string => f !== null));
-  for (const s of srcDeltaAll) {
+  // Unpaired removals come from the source v3 section only: a tag found just on an older
+  // template version is a version difference, not a level difference.
+  const srcOnly = S.tags.filter(t => !tTags.has(t));
+  for (const s of srcOnly) {
     const f = tagFamily(s);
     if (f !== null && tgtFamilies.has(f)) continue; // paired: handled above
     if (have.has(s)) remove.add(s);
@@ -171,7 +177,7 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
   return {
     profileId: profile.id,
     fromLevel, toLevel,
-    colorFrom: LEVEL_COLORS[fromLevel],
+    colorFrom: (profile.color ?? '').toUpperCase(),
     colorTo,
     colorChange: (profile.color ?? '').toLowerCase() !== colorTo.toLowerCase(),
     templates: [
