@@ -275,10 +275,15 @@ export function visibleLines(lines: PairLine[], f: LineFilter, nameOf: (personId
   );
 }
 
-/** « Cocher les manquants »: adds every visible « Manquant » key. There is no shortcut for removals. */
+/** A tick names the line AND the status it had when ticked: a line whose status changes loses its tick. */
+export function tickId(line: PairLine): string {
+  return `${line.status}|${line.key}`;
+}
+
+/** « Cocher les manquants »: ticks every visible « Manquant » line. There is no shortcut for removals. */
 export function tickMissing(visible: PairLine[], ticked: Set<string>): Set<string> {
   const out = new Set(ticked);
-  for (const l of visible) if (l.status === 'missing') out.add(l.key);
+  for (const l of visible) if (l.status === 'missing') out.add(tickId(l));
   return out;
 }
 
@@ -292,10 +297,48 @@ export function confirmSummary(lines: PairLine[]): { adds: number; removals: Pai
   };
 }
 
-/** After a recompute: ticks of lines that vanished, or no longer have a box, are dropped. */
+/** After a recompute: ticks of lines that vanished, changed status, or no longer have a box are dropped. */
 export function keepTicks(ticked: Set<string>, lines: PairLine[]): Set<string> {
-  const boxed = new Set(lines.filter(hasBox).map((l) => l.key));
+  const boxed = new Set(lines.filter(hasBox).map(tickId));
   return new Set([...ticked].filter((k) => boxed.has(k)));
+}
+
+/** The selection: only lines the operator can see, ticked under their current status, with a box, not locked. */
+export function selectedLines(visible: PairLine[], ticked: Set<string>, isLocked: (l: PairLine) => boolean): PairLine[] {
+  return visible.filter((l) => ticked.has(tickId(l)) && hasBox(l) && !isLocked(l));
+}
+
+export type ConfirmCheck =
+  | { ok: true; lines: PairLine[] }
+  | { ok: false; reason: 'sync' | 'changed'; lines: PairLine[] };
+
+/**
+ * At « Confirmer »: the lines the modal showed, re-derived from the current check. Enqueue only when
+ * every shown line is still there with the same status, boxed and unlocked, and the sync is complete;
+ * otherwise `lines` is what is still valid, to show again.
+ */
+export function confirmCheck(
+  shown: PairLine[],
+  current: PairLine[],
+  isLocked: (l: PairLine) => boolean,
+  syncIncomplete: boolean,
+): ConfirmCheck {
+  if (syncIncomplete) return { ok: false, reason: 'sync', lines: [] };
+  const wanted = new Set(shown.map(tickId));
+  const lines = current.filter((l) => wanted.has(tickId(l)) && hasBox(l) && !isLocked(l));
+  if (lines.length > 0 && lines.length === wanted.size) return { ok: true, lines };
+  return { ok: false, reason: 'changed', lines };
+}
+
+/** At the archive confirmation: only persons still on the leaver list and not queued; none if the sync is incomplete. */
+export function plansToEnqueue<T extends { personId: string }>(
+  plans: T[],
+  leaverIds: ReadonlySet<string>,
+  pending: ReadonlySet<string>,
+  syncIncomplete: boolean,
+): T[] {
+  if (syncIncomplete) return [];
+  return plans.filter((p) => leaverIds.has(p.personId) && !pending.has(p.personId));
 }
 
 /**

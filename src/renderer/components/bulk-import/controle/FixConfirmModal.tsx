@@ -10,12 +10,14 @@ interface FixConfirmModalProps {
   lines: PairLine[] | null;
   nameOf: (personId: string) => string;
   roomTitleOf: (roomId: string) => string;
+  /** Why the list was shown again (it changed before « Confirmer »). */
+  notice?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }
 
 /** One confirmation for « Corriger la sélection »: counts, the removals by name, the company warning, S4's slowness. */
-export function FixConfirmModal({ lines, nameOf, roomTitleOf, onCancel, onConfirm }: FixConfirmModalProps) {
+export function FixConfirmModal({ lines, nameOf, roomTitleOf, notice, onCancel, onConfirm }: FixConfirmModalProps) {
   if (lines === null) return null;
   const { adds, removals, companyRemovals } = confirmSummary(lines);
   const total = adds + removals.length;
@@ -27,6 +29,7 @@ export function FixConfirmModal({ lines, nameOf, roomTitleOf, onCancel, onConfir
           <h2 className="text-lg font-semibold text-gray-900">Corriger la sélection ?</h2>
         </div>
         <div className="p-6 space-y-4 overflow-y-auto text-sm text-gray-700 leading-relaxed">
+          {notice && <p className="p-3 rounded bg-amber-50 border border-amber-200 text-amber-900">{notice}</p>}
           <ul className="list-disc pl-5 space-y-1">
             <li>
               <strong>{adds}</strong> ajout{adds === 1 ? '' : 's'} comme élève

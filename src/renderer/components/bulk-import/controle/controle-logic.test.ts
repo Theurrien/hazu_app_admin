@@ -17,6 +17,10 @@ import {
   checkInputFrom,
   leaverMatches,
   keepTicks,
+  tickId,
+  selectedLines,
+  confirmCheck,
+  plansToEnqueue,
   type ControleColumns,
   type LineFilter,
   type ResolvedForCheck,
@@ -300,9 +304,9 @@ describe('visibleLines', () => {
 });
 
 describe('tickMissing', () => {
-  it('adds every visible missing key, keeps existing ticks, ignores extra lines', () => {
-    const out = tickMissing(LINES, new Set(['a-extra']));
-    expect([...out].sort()).toEqual(['a-extra', 'a-miss', 'b-miss']);
+  it('adds every visible missing line, keeps existing ticks, ignores extra lines', () => {
+    const out = tickMissing(LINES, new Set([tickId(LINES[3])]));
+    expect([...out].sort()).toEqual(['extra|a-extra', 'missing|a-miss', 'missing|b-miss']);
   });
   it('does not change the input set', () => {
     const before = new Set<string>();
@@ -328,13 +332,78 @@ describe('confirmSummary', () => {
   });
 });
 
+describe('tickId', () => {
+  it('a tick names the line and its status', () => {
+    expect(tickId(LINES[1])).toBe('missing|b-miss');
+  });
+});
+
 describe('keepTicks', () => {
   it('drops ticks of lines that vanished or no longer have a box', () => {
-    const now = [
-      line({ key: 'x', personId: 'p', category: 'class', status: 'missing' }),
-      line({ key: 'y', personId: 'p', category: 'class', status: 'ok' }),
-    ];
-    expect([...keepTicks(new Set(['x', 'y', 'gone']), now)]).toEqual(['x']);
+    const x = line({ key: 'x', personId: 'p', category: 'class', status: 'missing' });
+    const y = line({ key: 'y', personId: 'p', category: 'class', status: 'ok' });
+    expect([...keepTicks(new Set([tickId(x), 'missing|y', 'missing|gone']), [x, y])]).toEqual(['missing|x']);
+  });
+  it('drops a tick whose line changed status: an add never becomes a removal', () => {
+    const before = line({ key: 'k', personId: 'p', category: 'class', status: 'missing' });
+    const after = { ...before, status: 'extra' as const };
+    expect(keepTicks(new Set([tickId(before)]), [after]).size).toBe(0);
+  });
+});
+
+describe('selectedLines', () => {
+  const ticked = new Set([tickId(LINES[1]), tickId(LINES[2]), tickId(LINES[3]), 'missing|c-unv']);
+  it('only visible, ticked, boxed, unlocked lines', () => {
+    const visible = [LINES[1], LINES[3], LINES[4]];
+    expect(selectedLines(visible, ticked, () => false).map((l) => l.key)).toEqual(['b-miss', 'a-extra']);
+  });
+  it('a hidden ticked line is never selected', () => {
+    expect(selectedLines([LINES[1]], ticked, () => false).map((l) => l.key)).toEqual(['b-miss']);
+  });
+  it('a locked line is never selected', () => {
+    expect(selectedLines([LINES[1], LINES[3]], ticked, (l) => l.key === 'b-miss').map((l) => l.key)).toEqual(['a-extra']);
+  });
+  it('a tick of another status does not select the line', () => {
+    expect(selectedLines([LINES[1]], new Set(['extra|b-miss']), () => false)).toEqual([]);
+  });
+});
+
+describe('confirmCheck', () => {
+  const shown = [LINES[1], LINES[3]];
+  it('ok when the same lines, same status, are still there and unlocked', () => {
+    const r = confirmCheck(shown, LINES, () => false, false);
+    expect(r.ok).toBe(true);
+    expect(r.lines.map((l) => l.key)).toEqual(['b-miss', 'a-extra']);
+  });
+  it('sync incomplete: nothing to enqueue', () => {
+    expect(confirmCheck(shown, LINES, () => false, true)).toEqual({ ok: false, reason: 'sync', lines: [] });
+  });
+  it('a line that vanished: changed, the rest kept', () => {
+    const r = confirmCheck(shown, [LINES[3]], () => false, false);
+    expect(r).toEqual({ ok: false, reason: 'changed', lines: [LINES[3]] });
+  });
+  it('a line whose status changed: changed, never enqueued under its new status', () => {
+    const now = [{ ...LINES[1], status: 'extra' as const }, LINES[3]];
+    const r = confirmCheck(shown, now, () => false, false);
+    expect(r.ok).toBe(false);
+    expect(r.lines.map((l) => l.key)).toEqual(['a-extra']);
+  });
+  it('a line locked meanwhile: changed', () => {
+    const r = confirmCheck(shown, LINES, (l) => l.key === 'a-extra', false);
+    expect(r).toEqual({ ok: false, reason: 'changed', lines: [LINES[1]] });
+  });
+  it('an empty selection is never ok', () => {
+    expect(confirmCheck([], LINES, () => false, false).ok).toBe(false);
+  });
+});
+
+describe('plansToEnqueue', () => {
+  const plans = [{ personId: 'pA' }, { personId: 'pB' }, { personId: 'pC' }];
+  it('only plans of persons still leavers and not already queued', () => {
+    expect(plansToEnqueue(plans, new Set(['pA', 'pB']), new Set(['pB']), false)).toEqual([{ personId: 'pA' }]);
+  });
+  it('nothing when the sync is incomplete', () => {
+    expect(plansToEnqueue(plans, new Set(['pA', 'pB', 'pC']), new Set(), true)).toEqual([]);
   });
 });
 

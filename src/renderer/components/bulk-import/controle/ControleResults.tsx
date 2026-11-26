@@ -11,9 +11,13 @@ import { LeaverSection, type ClassSelection } from '../PersonCheckResults';
 import { buildClassIdsOf, leaverCounts } from '../verify-logic';
 import {
   checkInputFrom,
+  confirmCheck,
   hasBox,
   keepTicks,
   leaverMatches,
+  plansToEnqueue,
+  selectedLines,
+  tickId,
   tickMissing,
   visibleLines,
   type LineFilter,
@@ -89,6 +93,8 @@ export function ControleResults(p: ControleResultsProps) {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<LineFilter>({ categories: [], statuses: [], search: '', showOk: false });
   const [confirmLines, setConfirmLines] = useState<PairLine[] | null>(null);
+  /** Shown in the modal (or above the table when it closed) when the list changed before « Confirmer ». */
+  const [notice, setNotice] = useState<string | null>(null);
   const loadRunRef = useRef(0);
   const enqueuedRef = useRef(false);
 
@@ -186,7 +192,8 @@ export function ControleResults(p: ControleResultsProps) {
   }, [tasks, load, ownTasks]);
 
   // ---- Selection ----
-  const selected = result ? result.lines.filter((l) => ticked.has(l.key) && hasBox(l) && !locked(l)) : [];
+  // Only what the operator sees: a ticked line hidden by a filter is never enqueued.
+  const selected = selectedLines(visible, ticked, locked);
   const selAdds = selected.filter((l) => l.status === 'missing').length;
   const selRemovals = selected.length - selAdds;
 
@@ -198,17 +205,51 @@ export function ControleResults(p: ControleResultsProps) {
       return next;
     });
 
+  // The confirm handlers await a sync-state read: they read the check as it is then, not as it was.
+  const latest = useRef({ result, locked, leavers: [] as HazuPerson[], archivePending: new Set<string>() });
+  latest.current.result = result;
+  latest.current.locked = locked;
+
   const askFix = () => {
     if (selected.length === 0) return;
     enqueuedRef.current = false;
+    setNotice(null);
     setConfirmLines(selected);
   };
 
-  const confirmFix = () => {
+  const confirmFix = async () => {
     if (enqueuedRef.current || !confirmLines) return; // a double click must not enqueue twice
     enqueuedRef.current = true;
+    const gen = generationRef.current;
+    let sync: SyncState;
+    try {
+      sync = await window.electronAPI.getControleSyncState();
+    } catch (e) {
+      if (gen !== generationRef.current) return;
+      enqueuedRef.current = false;
+      setNotice(`Lecture impossible : ${errMsg(e)}`);
+      return;
+    }
+    if (gen !== generationRef.current) return;
+    const now = latest.current;
+    const cc = confirmCheck(confirmLines, now.result?.lines ?? [], now.locked, sync.incomplete);
+    if (!cc.ok) {
+      enqueuedRef.current = false;
+      if (cc.reason === 'sync') {
+        setConfirmLines(null);
+        setData((d) => (d ? { ...d, sync } : d)); // the step now shows only the sync message
+      } else if (cc.lines.length === 0) {
+        setConfirmLines(null);
+        setNotice('La liste a changé — vérifiez à nouveau.');
+      } else {
+        setConfirmLines(cc.lines);
+        setNotice('La liste a changé — vérifiez à nouveau.');
+      }
+      return;
+    }
     const done = new Set<string>();
-    for (const f of fixesFor(confirmLines)) {
+    for (const l of cc.lines) done.add(tickId(l));
+    for (const f of fixesFor(cc.lines)) {
       const id = addRoleUpdateTask({
         personName: nameOf(f.personId),
         personId: f.personId,
@@ -218,9 +259,9 @@ export function ControleResults(p: ControleResultsProps) {
         newRole: f.newRole,
       });
       ownTasks.current.mine.add(id);
-      done.add(f.lineKey);
     }
     onTickedChange((prev) => new Set([...prev].filter((k) => !done.has(k))));
+    setNotice(null);
     setConfirmLines(null);
   };
 
@@ -296,11 +337,33 @@ export function ControleResults(p: ControleResultsProps) {
     }
   };
 
-  const confirmArchive = () => {
+  latest.current.leavers = leavers;
+  latest.current.archivePending = archivePending;
+
+  const confirmArchive = async () => {
     if (archiveEnqueuedRef.current) return;
     archiveEnqueuedRef.current = true;
-    for (const plan of plans) {
-      if (archivePending.has(plan.personId)) continue;
+    const gen = generationRef.current;
+    let sync: SyncState;
+    try {
+      sync = await window.electronAPI.getControleSyncState();
+    } catch (e) {
+      if (gen !== generationRef.current) return;
+      archiveEnqueuedRef.current = false;
+      setPlans([]);
+      setArchiveError(`Lecture impossible : ${errMsg(e)}`);
+      return;
+    }
+    if (gen !== generationRef.current) return;
+    const now = latest.current;
+    // Persons no longer on the leaver list (or already queued) are skipped.
+    const toEnqueue = plansToEnqueue(plans, new Set(now.leavers.map((l) => l.id)), now.archivePending, sync.incomplete);
+    if (sync.incomplete) {
+      setPlans([]);
+      setData((d) => (d ? { ...d, sync } : d));
+      return;
+    }
+    for (const plan of toEnqueue) {
       const id = addArchivePersonTask({ personId: plan.personId, displayName: plan.displayName, roomCount: plan.rooms.length });
       ownTasks.current.mine.add(id);
     }
@@ -394,6 +457,9 @@ export function ControleResults(p: ControleResultsProps) {
         </p>
       )}
       {error && <p className="text-sm text-red-700 bg-red-50 rounded px-3 py-2">{error}</p>}
+      {notice && confirmLines === null && (
+        <p className="p-3 rounded bg-amber-50 border border-amber-200 text-sm text-amber-900">{notice}</p>
+      )}
 
       <section className="bg-white rounded-lg" style={panel}>
         <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-800">
@@ -463,8 +529,8 @@ export function ControleResults(p: ControleResultsProps) {
                         type="checkbox"
                         aria-label="Sélectionner"
                         disabled={locked(l)}
-                        checked={ticked.has(l.key) && !locked(l)}
-                        onChange={() => toggleLine(l.key)}
+                        checked={ticked.has(tickId(l)) && !locked(l)}
+                        onChange={() => toggleLine(tickId(l))}
                       />
                     )}
                   </td>
@@ -539,10 +605,14 @@ export function ControleResults(p: ControleResultsProps) {
         lines={confirmLines}
         nameOf={nameOf}
         roomTitleOf={roomTitleOf}
-        onCancel={() => setConfirmLines(null)}
-        onConfirm={confirmFix}
+        notice={notice}
+        onCancel={() => {
+          setConfirmLines(null);
+          setNotice(null);
+        }}
+        onConfirm={() => void confirmFix()}
       />
-      <PersonArchiveConfirmModal plans={plans} onCancel={() => setPlans([])} onConfirm={confirmArchive} />
+      <PersonArchiveConfirmModal plans={plans} onCancel={() => setPlans([])} onConfirm={() => void confirmArchive()} />
     </div>
   );
 }
