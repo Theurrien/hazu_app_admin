@@ -106,6 +106,10 @@ export const IPC_CHANNELS = {
   FORMATION_OVERVIEW: 'formation:overview',
   FORMATION_DETAIL: 'formation:detail',
   FORMATION_STUDENT: 'formation:student',
+  CORRESPONDENCE_LIST: 'correspondence:list',
+  CORRESPONDENCE_SAVE: 'correspondence:save',
+  CORRESPONDENCE_DELETE: 'correspondence:delete',
+  CONTROLE_SYNC_STATE: 'controle:syncState',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

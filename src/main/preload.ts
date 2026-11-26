@@ -11,6 +11,7 @@ import type {
   Level, LevelChangeCandidates, LevelChangeOutcome, LevelChangeStudent,
 } from '../shared/level-change-types';
 import type { LevelChangeDecisions } from '../shared/level-change-decisions';
+import type { SavedLink, CorrCategory } from '../shared/correspondence';
 
 // Inline IPC channels to avoid module resolution issues in preload sandbox
 const IPC_CHANNELS = {
@@ -57,6 +58,10 @@ const IPC_CHANNELS = {
   FORMATION_OVERVIEW: 'formation:overview',
   FORMATION_DETAIL: 'formation:detail',
   FORMATION_STUDENT: 'formation:student',
+  CORRESPONDENCE_LIST: 'correspondence:list',
+  CORRESPONDENCE_SAVE: 'correspondence:save',
+  CORRESPONDENCE_DELETE: 'correspondence:delete',
+  CONTROLE_SYNC_STATE: 'controle:syncState',
   DISCREPANCIES_GET: 'discrepancies:get',
   TAG_HEAL_PLAN_GET: 'tagHeal:plan',
   TAG_HEAL: 'tagHeal:apply',
@@ -267,6 +272,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFormationStudent: (personId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.FORMATION_STUDENT, personId),
 
+  listCorrespondences: () => ipcRenderer.invoke(IPC_CHANNELS.CORRESPONDENCE_LIST),
+  saveCorrespondences: (links: SavedLink[]) => ipcRenderer.invoke(IPC_CHANNELS.CORRESPONDENCE_SAVE, links),
+  deleteCorrespondence: (category: CorrCategory, fileKey: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CORRESPONDENCE_DELETE, category, fileKey),
+  getControleSyncState: () => ipcRenderer.invoke(IPC_CHANNELS.CONTROLE_SYNC_STATE),
+
   // Event listeners
   onSyncProgress: (callback: (progress: any) => void) => {
     const subscription = (_event: any, progress: any) => callback(progress);
@@ -439,6 +450,10 @@ declare global {
       getFormationOverview: () => Promise<SchoolOverview>;
       getFormationDetail: (key: string, level: LevelCode | 'both', filters: FormationDetailFilters) => Promise<FormationDetail>;
       getFormationStudent: (personId: string) => Promise<FormationStudent | null>;
+      listCorrespondences: () => Promise<SavedLink[]>;
+      saveCorrespondences: (links: SavedLink[]) => Promise<void>;
+      deleteCorrespondence: (category: CorrCategory, fileKey: string) => Promise<void>;
+      getControleSyncState: () => Promise<{ incomplete: boolean; stale: boolean; lastSyncAt: number | null; message: string | null }>;
       onSyncProgress: (callback: (progress: any) => void) => () => void;
     };
   }

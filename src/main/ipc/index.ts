@@ -4,6 +4,8 @@ import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { query, run, get } from '../database';
 import { setApiConfig, getApiConfig, isConfigured, HazuApiConfig } from '../services/hazu-api/config';
 import { runFullSync, getSyncProgress } from '../services/sync.service';
+import { listCorrespondences, saveCorrespondences, deleteCorrespondence, controleSyncState } from '../services/correspondence.service';
+import type { SavedLink, CorrCategory } from '../../shared/correspondence';
 import { sendApiRequestList } from '../services/hazu-api/api';
 import {
   startFormationSync, getFormationSyncStatus, getFormationOverview, getFormationDetail, getFormationStudent,
@@ -283,6 +285,40 @@ export function registerIpcHandlers(): void {
       return await listArchivedPersons();
     } catch (error) {
       console.error('Person archive list error:', describeError(error));
+      throw error;
+    }
+  });
+
+  // Contrôle: saved links + sync state. Errors are logged without any file value (may be names).
+  ipcMain.handle(IPC_CHANNELS.CORRESPONDENCE_LIST, async (_event) => {
+    try {
+      return listCorrespondences();
+    } catch (error) {
+      console.error('Correspondence list error:', describeError(error));
+      throw error;
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.CORRESPONDENCE_SAVE, async (_event, links: SavedLink[]) => {
+    try {
+      return saveCorrespondences(links);
+    } catch (error) {
+      console.error('Correspondence save error:', describeError(error));
+      throw error;
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.CORRESPONDENCE_DELETE, async (_event, category: CorrCategory, fileKey: string) => {
+    try {
+      return deleteCorrespondence(category, fileKey);
+    } catch (error) {
+      console.error('Correspondence delete error:', describeError(error));
+      throw error;
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.CONTROLE_SYNC_STATE, async (_event) => {
+    try {
+      return controleSyncState();
+    } catch (error) {
+      console.error('Controle sync state error:', describeError(error));
       throw error;
     }
   });

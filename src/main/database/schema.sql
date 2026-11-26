@@ -309,3 +309,13 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('user_email', ''),
     ('user_display_name', ''),
     ('admin_password', 'hazu_app_ADMIN_password');
+
+-- Contrôle: saved links between spreadsheet values and Hazu persons / rooms (local only)
+CREATE TABLE IF NOT EXISTS file_correspondence (
+  category   TEXT NOT NULL CHECK (category IN ('student','class','enterprise','state')),
+  file_key   TEXT NOT NULL,
+  file_label TEXT NOT NULL,   -- the value as last written in the file, for display
+  hazu_id    TEXT,            -- NULL = ignored on purpose
+  decided_at INTEGER NOT NULL,
+  PRIMARY KEY (category, file_key)
+);

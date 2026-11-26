@@ -298,6 +298,22 @@ function runMigrations(): void {
     console.error('Migration error (admin_password):', error);
   }
 
+  // Migration: Contrôle — saved file ↔ Hazu links (local only).
+  try {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS file_correspondence (
+  category   TEXT NOT NULL CHECK (category IN ('student','class','enterprise','state')),
+  file_key   TEXT NOT NULL,
+  file_label TEXT NOT NULL,   -- the value as last written in the file, for display
+  hazu_id    TEXT,            -- NULL = ignored on purpose
+  decided_at INTEGER NOT NULL,
+  PRIMARY KEY (category, file_key)
+);
+`);
+  } catch (error) {
+    console.error('Migration error (file_correspondence):', error);
+  }
+
   // Migration: Missions formation overview — the old mission tables go, the formation tables
   // come (CREATE IF NOT EXISTS, status row seeded). Then a startup reset: a status left at
   // 'syncing' means the app was closed mid-run; that run is gone, its data untouched.
