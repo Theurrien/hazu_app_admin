@@ -10,16 +10,24 @@ import {
   sendApiRequestAddTagsChecked,
   sendApiRequestRemoveTagsChecked,
   sendApiRequestUpdateChecked,
+  sendApiRequestCreateFullChecked,
+  sendApiRequestRemoveChecked,
+  sendApiRequestGetAclInfoChecked,
+  sendApiRequestSetAclRoleChecked,
+  sendApiRequestRemoveUserChecked,
 } from './hazu-api/api';
 import { normalizeRow } from './formation/parse';
+import { resolveSelfUid, type AclEntry } from './formation/read';
+import { toAclRows, toCopyNode } from './level-change-wire';
+import type { CopyNode } from './level-change-copy';
+import type { LevelChangeDecisions } from '../../shared/level-change-decisions';
 import { setting, toError, toFailure } from './room-archive.service';
-import type { ApiFailure } from './room-archive';
+import { withRetry, type ApiFailure } from './room-archive';
 import { getSyncProgress } from './sync.service';
 import { withArchiveLock } from './archive-lock';
 import {
   LEVEL_COLORS,
   LcNode,
-  LevelChangeBaseDeps,
   LevelChangeDeps,
   isTemplateNode,
   stripTitle,
@@ -55,51 +63,44 @@ function toLcNode(raw: unknown): LcNode | null {
     : null;
 }
 
-function buildDeps(): LevelChangeBaseDeps {
+async function wrap<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    throw toFailure(e);
+  }
+}
+
+/** A null-only-on-404 read through `map`. */
+async function readMapped<T>(id: string, map: (raw: unknown) => T | null): Promise<T | null> {
+  try {
+    return map(await sendApiRequestReadChecked(id));
+  } catch (e) {
+    if (axios.isAxiosError(e) && e.response?.status === 404) return null;
+    throw toFailure(e);
+  }
+}
+
+/** A listing through `map`; the parent echo and rows the mapper rejects are dropped. */
+async function listMapped<T extends { id: string }>(parentId: string, map: (raw: unknown) => T | null): Promise<T[]> {
+  const out: T[] = [];
+  for (const raw of await wrap(() => sendApiRequestListChecked(parentId))) {
+    const n = map(raw);
+    if (n && n.id !== parentId) out.push(n);
+  }
+  return out;
+}
+
+function buildDeps(): LevelChangeDeps {
+  // Creates are authored by the app's admin account (as the room archive's creates are).
+  const authorId = setting('user_id');
+  const displayName = setting('user_display_name');
   return {
-    // null ONLY on a 404; anything else throws.
-    read: async (id) => {
-      try {
-        return toLcNode(await sendApiRequestReadChecked(id));
-      } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 404) return null;
-        throw toFailure(e);
-      }
-    },
-    // The parent echo and rows normalizeRow rejects are dropped.
-    list: async (parentId) => {
-      try {
-        const out: LcNode[] = [];
-        for (const raw of await sendApiRequestListChecked(parentId)) {
-          const n = toLcNode(raw);
-          if (n && n.id !== parentId) out.push(n);
-        }
-        return out;
-      } catch (e) {
-        throw toFailure(e);
-      }
-    },
-    updateDescription: async (id, html) => {
-      try {
-        await sendApiRequestUpdateChecked(id, { description: html });
-      } catch (e) {
-        throw toFailure(e);
-      }
-    },
-    updateColor: async (id, hex) => {
-      try {
-        await sendApiRequestUpdateChecked(id, { color: hex });
-      } catch (e) {
-        throw toFailure(e);
-      }
-    },
-    addTags: async (id, tags) => {
-      try {
-        await sendApiRequestAddTagsChecked(id, tags);
-      } catch (e) {
-        throw toFailure(e);
-      }
-    },
+    read: (id) => readMapped(id, toLcNode),
+    list: (parentId) => listMapped(parentId, toLcNode),
+    updateDescription: (id, html) => wrap(() => sendApiRequestUpdateChecked(id, { description: html })),
+    updateColor: (id, hex) => wrap(() => sendApiRequestUpdateChecked(id, { color: hex })),
+    addTags: (id, tags) => wrap(() => sendApiRequestAddTagsChecked(id, tags)),
     removeTags: async (id, tags) => {
       // The checked call returns its failure instead of throwing.
       const r = await sendApiRequestRemoveTagsChecked(id, tags);
@@ -112,13 +113,91 @@ function buildDeps(): LevelChangeBaseDeps {
         throw failure;
       }
     },
+    // Copy walk: full nodes (type, privacy, event.rolesSettings kept).
+    readFull: (id) => readMapped(id, toCopyNode),
+    listFull: (parentId) => listMapped(parentId, toCopyNode),
+    create: async (parentId: string, from: CopyNode) => {
+      if (!authorId) {
+        const failure: ApiFailure = { networkOrTimeout: false, message: "compte administrateur inconnu — synchronisez d'abord" };
+        throw failure;
+      }
+      return wrap(() =>
+        sendApiRequestCreateFullChecked({
+          parentId,
+          type: from.type,
+          title: from.title,
+          description: from.description,
+          icon: from.icon,
+          color: from.color,
+          privacy: from.privacy,
+          tags: from.tags,
+          authorId,
+          displayName,
+          rolesSettings: from.rolesSettings,
+        }),
+      );
+    },
+    remove: (id) => wrap(() => sendApiRequestRemoveChecked(id)),
+    acl: async (id) => toAclRows(await wrap(() => sendApiRequestGetAclInfoChecked(id))),
+    setRole: (itemId, principalId, role) => wrap(() => sendApiRequestSetAclRoleChecked(principalId, itemId, role)),
+    removeFromAcl: async (itemId, principalId) => {
+      const r = await sendApiRequestRemoveUserChecked(itemId, principalId);
+      if (!r.ok) {
+        const failure: ApiFailure = {
+          status: r.status,
+          networkOrTimeout: r.networkOrTimeout,
+          message: r.error ?? "échec du retrait de l'accès",
+        };
+        throw failure;
+      }
+    },
     sleep,
   };
+}
+
+/** Role-group id → role, from the last sync. */
+export function roleGroupMap(): Map<string, string> {
+  const rows = getDb().prepare('SELECT id, role FROM distribution_groups').all() as Array<{ id: string; role: string }>;
+  return new Map(rows.map((r) => [r.id, r.role]));
+}
+
+/** The identity tag value (`hz-config-userid-*`) stored as persons.email; a UID on some profiles, an e-mail on others. */
+function identityTag(personId: string): string | null {
+  const row = getDb().prepare('SELECT email FROM persons WHERE id = ?').get(personId) as { email: string | null } | undefined;
+  const v = (row?.email ?? '').trim();
+  return v || null;
+}
+
+/** The student's account id — the Missions rule (resolveSelfUid): a UID as is, an e-mail via the profile ACL. */
+export function resolveStudentId(personId: string, profileAcl: AclEntry[]): string | null {
+  return resolveSelfUid(identityTag(personId), profileAcl);
+}
+
+/** Reads the profile ACL only when the identity tag holds an e-mail. Unreadable → null (unresolved). */
+async function liveStudentId(personId: string): Promise<string | null> {
+  const tag = identityTag(personId);
+  if (!tag) return null;
+  if (!tag.includes('@')) return resolveStudentId(personId, []);
+  try {
+    const resp = await withRetry({ sleep }, () => wrap(() => sendApiRequestGetAclInfoChecked(personId)));
+    const entries = (resp as { data?: AclEntry[] } | null)?.data;
+    return resolveStudentId(personId, Array.isArray(entries) ? entries : []);
+  } catch (e) {
+    console.warn(`[level-change] profile=${personId} profile ACL unreadable, student id unresolved:`, toFailure(e).message);
+    return null;
+  }
 }
 
 /** The target must be a synced student; a template or any other node is never touched. */
 function isLocalStudent(personId: string): boolean {
   return !!getDb().prepare("SELECT id FROM persons WHERE id = ? AND person_type = 'student'").get(personId);
+}
+
+/** The decisions arrive over IPC: a malformed object is refused before anything is read. */
+function isDecisions(d: unknown): d is LevelChangeDecisions {
+  const o = d as Partial<LevelChangeDecisions> | null;
+  return !!o && Array.isArray(o.acceptedTagAdds) && Array.isArray(o.forcedDescriptions) &&
+    Array.isArray(o.copySections) && Array.isArray(o.deleteSections) && typeof o.addWidget === 'boolean';
 }
 
 function refusal(dryRun: boolean, error: string): LevelChangeOutcome {
@@ -148,16 +227,6 @@ export function listLevelChangeStudents(): LevelChangeStudent[] {
     color: r.color || null,
     level: levelOfColor(r.color),
   }));
-}
-
-// TODO(Task 5): the real copy/ACL/remove calls. Until then every one of them refuses, so a run that
-// reaches a copy or a delete fails it (the live read then decides: nothing confirmed, colour withheld).
-// Today the service sends no decisions, so an execute is refused before any write anyway.
-function pendingActionDeps(): Omit<LevelChangeDeps, keyof LevelChangeBaseDeps> {
-  const refuse = async (): Promise<never> => {
-    throw { networkOrTimeout: false, message: 'copie / suppression pas encore branchées' };
-  };
-  return { readFull: refuse, listFull: refuse, create: refuse, remove: refuse, acl: refuse, setRole: refuse, removeFromAcl: refuse };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -194,13 +263,18 @@ async function run(
   toLevel: Level,
   targetTemplateId: string,
   dryRun: boolean,
+  decisions?: LevelChangeDecisions,
 ): Promise<LevelChangeOutcome> {
   if (!isLocalStudent(personId)) return refusal(dryRun, 'profil introuvable');
   try {
+    // The student id matters only to copies (invite grants): resolved on an execute that asks for one.
+    const studentId = !dryRun && decisions && decisions.copySections.length > 0 ? await liveStudentId(personId) : null;
     return await runLevelChange(
-      // TODO(Task 5): role groups from distribution_groups, the resolved student id, the decisions
-      { profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun, roleGroups: new Map(), studentId: null },
-      { ...buildDeps(), ...pendingActionDeps() },
+      {
+        profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun,
+        decisions, roleGroups: roleGroupMap(), studentId,
+      },
+      buildDeps(),
     );
   } catch (e) {
     return refusal(dryRun, toFailure(e).message);
@@ -219,12 +293,14 @@ export async function executeLevelChange(
   personId: string,
   toLevel: Level,
   targetTemplateId: string,
+  decisions: LevelChangeDecisions,
 ): Promise<LevelChangeOutcome> {
+  if (!isDecisions(decisions)) return refusal(false, "décisions manquantes — rien n'a été écrit");
   if (!isLocalStudent(personId)) return refusal(false, 'profil introuvable');
   if (getSyncProgress().status === 'syncing') {
     return refusal(false, 'synchronisation en cours — réessayez ensuite');
   }
-  const outcome = await withArchiveLock(() => run(personId, toLevel, targetTemplateId, false));
+  const outcome = await withArchiveLock(() => run(personId, toLevel, targetTemplateId, false, decisions));
 
   // Local reconcile, in its own try/catch: a local failure cannot flip an API success.
   if (outcome.success && getSyncProgress().status !== 'syncing') {
@@ -236,7 +312,8 @@ export async function executeLevelChange(
   }
   console.log(
     `[level-change] profile=${personId} to=${toLevel} success=${outcome.success} ` +
-      `applied=${outcome.applied} remaining=${outcome.remaining.length}`,
+      `applied=${outcome.applied} remaining=${outcome.remaining.length} ignored=${outcome.ignored.length} ` +
+      `copies=${decisions.copySections.length} deletes=${decisions.deleteSections.length} widget=${decisions.addWidget}`,
   );
   return outcome;
 }

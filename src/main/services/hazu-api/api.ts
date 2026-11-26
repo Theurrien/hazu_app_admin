@@ -6,6 +6,7 @@ import axios from "axios";
 import { CreateOptions, UpdateOptions, ApiParametersPropagate, HazuEntity } from "./interfaces";
 import { getApiKey, getApiEndpoint } from "./config";
 import { describeError } from "./describe-error";
+import { buildCreateFullBody, createdIdOf, CreateFullOptions } from "./create-full";
 
 /**
  * Hazu accepts two header shapes and picks by key length. Exported so the S10 config probe
@@ -110,6 +111,19 @@ export const sendApiRequestCreateChecked = async (options: {
     timeout: 60_000,
   });
   return response.data;
+};
+
+// Checked full create for the level change copy: every field of the source (type, description,
+// icon, colour, privacy, tags, event.rolesSettings), body built by buildCreateFullBody. Returns the
+// new id; a 2xx without an id rejects (the caller's live re-list decides what landed). Rethrows.
+export const sendApiRequestCreateFullChecked = async (options: CreateFullOptions): Promise<string> => {
+  const response = await axios.post(`https://${getApiEndpoint()}/create`, buildCreateFullBody(options), {
+    headers: getAuthHeaders(),
+    timeout: 60_000,
+  });
+  const id = createdIdOf(response.data);
+  if (!id) throw new Error("création sans identifiant dans la réponse");
+  return id;
 };
 
 // Checked PUT /update for the level change: only the given keys go into the body, an empty
@@ -493,6 +507,23 @@ export const sendApiRequestUpdateRole = async (
   }
 };
 
+// Checked PUT /acl {userId, itemId, role} (same body as sendApiRequestUpdateRole, which swallows
+// errors). Rethrows the axios error; the caller's ACL read-back decides success.
+export const sendApiRequestSetAclRoleChecked = async (
+  userId: string,
+  itemId: string,
+  role: string,
+): Promise<void> => {
+  await axios.put(
+    `https://${getApiEndpoint()}/acl`,
+    { userId, itemId, role },
+    {
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      timeout: 60_000,
+    },
+  );
+};
+
 export const sendApiRequestRemoveUser = async (
   itemId: string,
   userId?: string,
@@ -557,6 +588,7 @@ export const sendApiRequestRemoveUserChecked = async (
         "Content-Type": "application/json",
       },
       data: body,
+      timeout: 60_000,
     });
     console.log("User removed successfully from item:", itemId);
     return { ok: true, networkOrTimeout: false };

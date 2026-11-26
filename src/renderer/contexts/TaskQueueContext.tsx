@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import type { Level } from '../../shared/level-change-types';
+import type { LevelChangeDecisions } from '../../shared/level-change-decisions';
 
 // Task type discriminated union
 export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags' | 'archiveRoom' | 'restoreRoom' | 'archivePerson' | 'restorePerson' | 'levelChange';
@@ -109,6 +110,8 @@ export interface LevelChangeTask extends BaseTask {
   displayName: string;
   toLevel: Level;
   targetTemplateId: string;
+  // What the operator ticked in the preview; the run re-plans live and applies only these.
+  decisions: LevelChangeDecisions;
   // Called once, when the change is confirmed.
   onDone?: () => void;
   // Called once each time the task ends in error.
@@ -348,7 +351,8 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         const outcome = await window.electronAPI.executeLevelChange(
           task.personId,
           task.toLevel,
-          task.targetTemplateId
+          task.targetTemplateId,
+          task.decisions
         );
 
         if (outcome.success) {

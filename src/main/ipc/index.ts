@@ -36,6 +36,7 @@ import {
   planLevelChange,
 } from '../services/level-change.service';
 import type { Level } from '../../shared/level-change-types';
+import type { LevelChangeDecisions } from '../../shared/level-change-decisions';
 import { validateApiConfig } from '../services/config-probe.service';
 import { completeAndStoreNewRoom } from '../services/room-completion.service';
 import { describeError } from '../services/hazu-api/describe-error';
@@ -323,8 +324,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.LEVEL_CHANGE_EXECUTE,
-    async (_event, personId: string, toLevel: Level, targetTemplateId: string) => {
-      return executeLevelChange(personId, toLevel, targetTemplateId);
+    async (_event, personId: string, toLevel: Level, targetTemplateId: string, decisions: LevelChangeDecisions) => {
+      return executeLevelChange(personId, toLevel, targetTemplateId, decisions);
     },
   );
 

@@ -4,6 +4,7 @@ import type {
   LevelChangeOutcome,
   LevelChangeStudent,
 } from '../../../shared/level-change-types';
+import { defaultDecisions } from '../../../shared/level-change-decisions';
 import { useTaskQueue } from '../../contexts/TaskQueueContext';
 import { eligibility, hasApplicableChange, levelLabel, searchStudents } from './level-change-logic';
 
@@ -102,7 +103,7 @@ function LevelChangeSection() {
   const canApply = previewCurrent && !preview!.outcome.error && hasChange && !queued;
 
   const apply = () => {
-    if (!selected || !candidates || !canApply) return;
+    if (!selected || !candidates || !canApply || !plan) return;
     setQueued(true);
     setApplyFailed(false);
     addLevelChangeTask({
@@ -110,6 +111,8 @@ function LevelChangeSection() {
       displayName: selected.displayName,
       toLevel: candidates.toLevel,
       targetTemplateId: templateId,
+      // TODO(Task 6): the operator's own choices from the preview; until then the defaults.
+      decisions: defaultDecisions(plan),
       onDone: () => {
         void loadStudents();
         if (selectedRef.current === selected.id) {
