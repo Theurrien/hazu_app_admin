@@ -19,6 +19,9 @@ const STATUS: Record<RoomResolution['kind'], string> = {
   open: 'à résoudre',
 };
 
+/** Stable default for `firstIds`, so the list memo does not rerun on every render. */
+const NO_IDS: string[] = [];
+
 interface PickerProps {
   candidates: RoomCandidate[];
   /** Preselected room (the suggestion, or the current link); nothing is saved until « Confirmer ». */
@@ -32,7 +35,7 @@ interface PickerProps {
 }
 
 /** Searchable dropdown of one type's rooms, with « Confirmer » and « Ignorer (pas dans Hazu) ». */
-export function RoomPicker({ candidates, initialId, firstIds = [], busy, onConfirm, onIgnore, onCancel }: PickerProps) {
+export function RoomPicker({ candidates, initialId, firstIds = NO_IDS, busy, onConfirm, onIgnore, onCancel }: PickerProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(initialId);
 

@@ -67,9 +67,15 @@ describe('columnsReady', () => {
     expect(columnsReady({ firstName: 'P', class: 'C' })).toEqual({ ok: false, reason: msg });
     expect(columnsReady({ lastName: 'N', class: 'C' })).toEqual({ ok: false, reason: msg });
   });
-  it('accepts a lone first name when e-mail or full name carries the identity', () => {
-    expect(columnsReady({ firstName: 'P', email: 'E', class: 'C' })).toEqual({ ok: true });
+  it('wants first and last name together even beside an e-mail', () => {
+    const msg = 'Prénom et nom vont ensemble.';
+    expect(columnsReady({ firstName: 'P', email: 'E', class: 'C' })).toEqual({ ok: false, reason: msg });
+    expect(columnsReady({ lastName: 'N', email: 'E', class: 'C' })).toEqual({ ok: false, reason: msg });
+    expect(columnsReady({ firstName: 'P', lastName: 'N', email: 'E', class: 'C' })).toEqual({ ok: true });
+  });
+  it('accepts a lone first or last name when the full name is used instead', () => {
     expect(columnsReady({ lastName: 'N', fullName: 'F', class: 'C' })).toEqual({ ok: true });
+    expect(columnsReady({ firstName: 'P', fullName: 'F', email: 'E', class: 'C' })).toEqual({ ok: true });
   });
   it('wants at least one room column', () => {
     expect(columnsReady({ email: 'E' })).toEqual({
@@ -434,7 +440,8 @@ describe('checkInputFrom', () => {
     { id: 's1', room_type: 'state' },
     { id: 'k1', room_type: 'cie' },
   ];
-  const input = checkInputFrom(resolved, cells, ['class'], rooms, []);
+  const students = [{ id: 'pA' }, { id: 'pB' }];
+  const input = checkInputFrom(resolved, cells, ['class'], rooms, [], students);
 
   it('keeps only rows resolved to a person, with their cells', () => {
     expect(input.rows).toEqual([
@@ -443,8 +450,12 @@ describe('checkInputFrom', () => {
     ]);
   });
   it('a row resolved to a person but without cells is still a row (nothing checked)', () => {
-    const i = checkInputFrom(resolved, new Map(), ['class'], rooms, []);
+    const i = checkInputFrom(resolved, new Map(), ['class'], rooms, [], students);
     expect(i.rows.map((r) => r.personId)).toEqual(['pA', 'pB']);
+  });
+  it('drops a row whose person is no longer a local student at reload', () => {
+    const i = checkInputFrom(resolved, cells, ['class'], rooms, [], [{ id: 'pA' }]);
+    expect(i.rows.map((r) => r.personId)).toEqual(['pA']);
   });
   it('cellOf resolves through roomKey, ignored stays ignored', () => {
     expect(input.cellOf('class', 'cui 2a')).toEqual({ kind: 'room', roomId: 'c1' });
@@ -461,7 +472,7 @@ describe('checkInputFrom', () => {
     const i = checkInputFrom(resolved, cells, ['class'], rooms, [
       { person_id: 'pA', room_id: 'c1', role: 'student' },
       { person_id: 'pB', room_id: 'c1', role: 'student' },
-    ]);
+    ], students);
     const r = crossCheck(i);
     expect(r.lines.map((l) => [l.personId, l.status])).toEqual([
       ['pA', 'ok'],
@@ -484,5 +495,11 @@ describe('leaverMatches', () => {
       { kind: 'matched', rowIndex: 3, personId: 'pB', by: 'name' },
       { kind: 'unknown', rowIndex: 4 },
     ]);
+  });
+  it('a row still to check keeps its candidates, so they are never leavers', () => {
+    const m = leaverMatches(
+      new Map<number, StudentResolution>([[2, { kind: 'check', candidateIds: ['pA', 'pB'], reason: 'conflict' }]]),
+    );
+    expect(m).toEqual([{ kind: 'check', rowIndex: 2, candidateIds: ['pA', 'pB'], reason: 'conflict' }]);
   });
 });

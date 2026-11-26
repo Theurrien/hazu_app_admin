@@ -1178,8 +1178,10 @@ are never candidates for the class column.
 **Three steps.**
 1. **Colonnes** — map identity (e-mail and/or first + last name or full name) and at least one of
    class, company, canton (mapping keys `ctlFirstName`, `ctlLastName`, `ctlFullName`, `ctlEmail`,
-   `ctlClass`, `ctlCompany`, `ctlCanton`). A column mapped twice or no room column disables
-   « Continuer » with the reason (`columnsReady`).
+   `ctlClass`, `ctlCompany`, `ctlCanton`). A column cannot be mapped twice: the mapping dropdown
+   greys out a mapping already used. No identity, a first name without a last name (or the reverse,
+   even beside an e-mail — the full name replaces both), or no room column disables « Continuer »
+   with the reason (`columnsReady`).
 2. **Correspondances** — one panel per category (students, classes, companies, cantons) with an
    « n à résoudre » counter; « Contrôler » opens when every counter is 0 (an « ignoré » value counts
    as resolved).
@@ -1203,8 +1205,14 @@ saved; « à vérifier » and unknown rows are resolved by hand and the decision
 - **Collisions.** A saved student link is applied only when the row does not contradict it: if the
   row's e-mail exactly hits **another** person, or the link was found by name and both sides carry a
   different real address, the row goes to « à vérifier » (saved person and the e-mail's person as
-  candidates). Rows with no e-mail that share a name key get no saved link and their decisions are
-  not saved (the key cannot tell them apart); a name match shared by such rows is « à vérifier ».
+  candidates). A name key shared by two or more file rows is never used, for lookup or save, whether
+  the rows have an e-mail or not (it cannot tell them apart): a row with an e-mail still uses its
+  `email:` key, a row without one gets no saved link and its decision is not saved; a name match
+  shared by such rows is « à vérifier ».
+- **« Ignoré » is re-decided when the matcher finds someone.** A saved student « ignoré » holds only
+  while `matchRows` finds nobody for the row; when it now matches a person or has candidates, the row
+  goes to « à vérifier » (conflict) with them — an ignored row names nobody, so keeping it would list
+  that student as a leaver. A row still « à vérifier » keeps its candidates off the leaver list.
 - **Changing the file** resets mappings, results and ticks (`resetForNewFile`) — never the saved links.
 
 **The check** ([cross-check.ts](src/shared/cross-check.ts), `crossCheck`). Per student row whose
@@ -1216,8 +1224,8 @@ student is resolved, per mapped category, with the group truth of the last sync
   **En trop** (fix: remove);
 - **No removal on a guess.** A value that is « ignoré », or names a room of another type, is **non
   vérifiable**, and then **no « En trop » is proposed for that category of that student** — the right
-  room is unknown, so no other room can be called wrong. A row whose student is ignored or unresolved
-  is not checked.
+  room is unknown, so no other room can be called wrong. A row whose student is ignored, unresolved,
+  or no longer a local student at reload is not checked.
 - « En trop » is proposed for every category, always unticked (a student may legitimately be in
   several classes); for company and canton the line also carries « Hazu : n entreprises / n cantons »
   when he holds more than one. Two rows resolving to one student are both checked, excess is computed

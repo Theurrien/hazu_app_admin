@@ -117,6 +117,17 @@ describe('resolveStudents', () => {
     const m = resolveStudents(rows, students, [link('student', `name:${nameKey('Zed Qux')}`, null)]);
     expect(m.get(0)?.res).toEqual({ kind: 'ignored' });
   });
+  it('saved null whose row the matcher matches → conflict, the operator re-decides', () => {
+    const rows = [{ rowIndex: 0, email: 'ana@example.invalid', fullName: 'Ana Bé' }];
+    const m = resolveStudents(rows, students, [link('student', 'email:ana@example.invalid', null)]);
+    expect(m.get(0)?.res).toEqual({ kind: 'check', candidateIds: ['p1'], reason: 'conflict' });
+  });
+  it('saved null whose row the matcher sends to check → conflict with those candidates', () => {
+    const twins = [person('p3', 'Ana Bé'), person('p4', 'Ana Bé')];
+    const rows = [{ rowIndex: 0, fullName: 'Ana Bé' }];
+    const m = resolveStudents(rows, twins, [link('student', `name:${nameKey('Ana Bé')}`, null)]);
+    expect(m.get(0)?.res).toEqual({ kind: 'check', candidateIds: ['p3', 'p4'], reason: 'conflict' });
+  });
   it('saved link contradicted by the e-mail → conflict', () => {
     const rows = [{ rowIndex: 0, email: 'Carl@Example.invalid', fullName: 'Ana Bé' }];
     const m = resolveStudents(rows, students, [link('student', `name:${nameKey('Ana Bé')}`, 'p1')]);

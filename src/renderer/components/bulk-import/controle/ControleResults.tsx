@@ -142,7 +142,7 @@ export function ControleResults(p: ControleResultsProps) {
 
   // ---- The check ----
   const result = useMemo(
-    () => (data ? crossCheck(checkInputFrom(resolved, cells, categories, data.rooms, data.assignments)) : null),
+    () => (data ? crossCheck(checkInputFrom(resolved, cells, categories, data.rooms, data.assignments, data.students)) : null),
     [data, resolved, cells, categories],
   );
 
@@ -367,6 +367,11 @@ export function ControleResults(p: ControleResultsProps) {
       const id = addArchivePersonTask({ personId: plan.personId, displayName: plan.displayName, roomCount: plan.rooms.length });
       ownTasks.current.mine.add(id);
     }
+    // Fewer enqueued than the modal showed: say so, as the fix confirmation does.
+    const dropped = plans.length - toEnqueue.length;
+    if (toEnqueue.length === 0) setNotice('La liste a changé — vérifiez à nouveau.');
+    else if (dropped > 0) setNotice(`${dropped} élève(s) ne sont plus absents — non archivés.`);
+    else setNotice(null);
     setPlans([]);
     setLeaverTicked(new Set());
   };
@@ -452,7 +457,7 @@ export function ControleResults(p: ControleResultsProps) {
       {data.sync.stale && (
         <p className="p-3 rounded bg-amber-50 border border-amber-200 text-sm text-amber-900">
           La dernière synchronisation date de plus de 24 h
-          {data.sync.lastSyncAt !== null ? ` (${formatArchivedAt(data.sync.lastSyncAt)})` : " ou n'a jamais eu lieu"} :
+          {data.sync.lastSyncAt !== null && ` (${formatArchivedAt(data.sync.lastSyncAt)})`} :
           les salles de Hazu peuvent avoir changé depuis. Synchronisez avant de corriger si possible.
         </p>
       )}

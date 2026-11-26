@@ -124,7 +124,7 @@ export function resolveStudents(
   const known = new Set(students.map((s) => s.id));
   const matches = new Map(matchRows(rows, students).map((m) => [m.rowIndex, m]));
 
-  // Rows without an e-mail that share a name key cannot be told apart by it.
+  // Rows that share a name key cannot be told apart by it: it is never used, with or without an e-mail.
   const nameCount = new Map<string, number>();
   for (const r of rows) {
     const n = rowNameKey(r);
@@ -144,8 +144,14 @@ export function resolveStudents(
     let res: StudentResolution | null = null;
     if (hitKey !== undefined && link === null) res = { kind: 'stale' };
     else if (link) {
-      if (link.hazuId === null) res = { kind: 'ignored' };
-      else if (!known.has(link.hazuId)) res = { kind: 'stale' };
+      if (link.hazuId === null) {
+        // « Ignoré » holds only while the matcher finds nobody: a row it now places is re-decided,
+        // never left to name nobody (which would list that student as a leaver).
+        const m = matches.get(row.rowIndex);
+        if (m?.kind === 'matched') res = { kind: 'check', candidateIds: [m.personId], reason: 'conflict' };
+        else if (m?.kind === 'check') res = { kind: 'check', candidateIds: m.candidateIds, reason: 'conflict' };
+        else res = { kind: 'ignored' };
+      } else if (!known.has(link.hazuId)) res = { kind: 'stale' };
       else {
         const linked = students.find((s) => s.id === link.hazuId);
         const others =

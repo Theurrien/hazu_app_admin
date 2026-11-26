@@ -45,11 +45,11 @@ export function controleColumns(mappings: Record<string, ColumnMapping>): Contro
 }
 
 export function columnsReady(c: ControleColumns): { ok: true } | { ok: false; reason: string } {
-  const named = !!c.fullName || !!c.email;
   if (!c.email && !c.fullName && !c.firstName && !c.lastName) {
     return { ok: false, reason: 'Choisissez une colonne e-mail ou nom.' };
   }
-  if (!named && (!c.firstName || !c.lastName)) {
+  // A lone first or last name is half a name, even beside an e-mail; the full name replaces both.
+  if (!c.fullName && (!!c.firstName || !!c.lastName) && !(c.firstName && c.lastName)) {
     return { ok: false, reason: 'Prénom et nom vont ensemble.' };
   }
   if (!c.class && !c.company && !c.canton) {
@@ -207,7 +207,8 @@ export interface ResolvedForCheck {
 const CHECKED_TYPES: ReadonlySet<string> = new Set<RoomCategory>(['class', 'enterprise', 'state']);
 
 /**
- * The cross-check input: rows whose student resolves to a person (ignored rows are not checked),
+ * The cross-check input: rows whose student resolves to a person who is still a local student
+ * (ignored rows and persons gone since are not checked),
  * cells looked up by `roomKey` in step 2's resolutions, and the category of every local room of the
  * three checked types — category folders and CIE rooms left out, so naming one is « non vérifiable ».
  */
@@ -217,11 +218,14 @@ export function checkInputFrom(
   mapped: RoomCategory[],
   rooms: Array<{ id: string; room_type: string }>,
   assignments: Array<{ person_id: string; room_id: string; role: string }>,
+  students: ReadonlyArray<{ id: string }>,
 ): CheckInput {
+  // A person who is no longer a local student at reload is not checked (no line, no fix).
+  const studentIds = new Set(students.map((s) => s.id));
   const rows: CheckRow[] = [];
   for (const [rowIndex, res] of [...resolved.students].sort((a, b) => a[0] - b[0])) {
     const personId = isResolved(res) ? resolvedId(res) : null;
-    if (personId === null) continue;
+    if (personId === null || !studentIds.has(personId)) continue;
     rows.push({ rowIndex, personId, cells: cells.get(rowIndex) ?? {} });
   }
   const roomCategory = new Map<string, RoomCategory>();
@@ -342,12 +346,18 @@ export function plansToEnqueue<T extends { personId: string }>(
 }
 
 /**
- * Student resolutions as the matches `findLeavers` reads: a row resolved to a person is present; an
- * ignored row is « unknown » (it names nobody, and Verify's warning about such rows applies).
+ * Student resolutions as the matches `findLeavers` reads: a row resolved to a person is present; a
+ * row still to check keeps its candidates (never leavers while undecided); an ignored row is
+ * « unknown » (it names nobody, and Verify's warning about such rows applies).
  */
 export function leaverMatches(students: Map<number, StudentResolution>): RowMatch[] {
   const out: RowMatch[] = [];
   for (const [rowIndex, res] of [...students].sort((a, b) => a[0] - b[0])) {
+    if (res.kind === 'check') {
+      // Undecided: its candidates are not leavers until the operator decides.
+      out.push({ kind: 'check', rowIndex, candidateIds: res.candidateIds, reason: res.reason });
+      continue;
+    }
     const personId = isResolved(res) ? resolvedId(res) : null;
     out.push(personId === null ? { kind: 'unknown', rowIndex } : { kind: 'matched', rowIndex, personId, by: 'name' });
   }
