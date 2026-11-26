@@ -866,9 +866,58 @@ ensuite »); a sync cannot start during it. On **full success only**, in its own
 while a sync runs), `persons.color` is updated so Missions, Matrix and Persons show the new level
 without a sync. Nothing else changes locally.
 
+### Operator decisions (copy, delete, widget, uncertain items)
+The level delta above is applied on its own. What the app cannot know is left to the operator, in
+the preview, and **only uncertain items have a box**:
+- **Tags** — a template tag whose family is absent on the profile (the add is a guess): box, ticked.
+  A target-only tag with no id stays certain, no box.
+- **Descriptions** — « modifiée à la main »: box, **unticked**, « remplacer quand même ».
+- **Copier** — a template-only section (profile has no counterpart): ticked by default.
+- **Supprimer** — a profile-only section: **unticked**; ticking and applying opens a confirmation
+  with the count of what goes with it (« au moins N » when the count is partial, « contenu inconnu »
+  when it could not be read).
+- **Widget** — ticked when needed. Detected by `student_app.html` in the profile description
+  (`isWidgetPresent`); an empty description takes the template's, otherwise it is appended.
+
+**Decisions are positive lists** keyed by section key (+ tag / id), in
+[level-change-decisions.ts](src/shared/level-change-decisions.ts) (`defaultDecisions`). The run
+**re-plans live** and applies only what is both listed and still in the plan. An item the preview
+never showed reads « non vu à l'aperçu — ignoré » — an unticked item reads the same, positive lists
+cannot tell them apart; a decision whose object no longer exists, « décision sans objet — ignorée ».
+A delete happens only if the node is **still a direct child, still profile-only and unchanged**
+since the preview (else « section modifiée depuis l'aperçu »). **Refusals** before any write:
+decisions missing or malformed; copies ticked while no role groups are synced (« groupes de rôle
+inconnus — synchronisez d'abord »).
+
+**Run order**: section writes → verify → (only if confirmed) copies with ACL alignment, deletes and
+widget, each independent of the others → **colour last, only when everything is confirmed**.
+
+**Copy** (`copySection`): tags, `rolesSettings`, privacy and type are kept; layout, interaction and
+module are not (as the Maintenance copy). No blind resend after a timeout: the profile is re-listed
+(up to 3×) and a node that landed is adopted. A partial copy, or a privacy/type mismatch, is
+**removed** (« copie incomplète — supprimée, à refaire »); a duplicate is swept (« doublon de la copie
+supprimé », a note, not a failure).
+
+**Access on a copied node** (`planAclFix`): the `hz-share-…` invite tag raises the student to its
+role, never lowers; the student's own row is never removed or set otherwise. Role groups
+(`groupId` in `distribution_groups`) stay **only** where `hz-share-{role}-{aclRole}` names them, at
+that role; the others are removed. Owner groups and other persons are untouched. Rows are classified
+by `groupId`, **not `isGroup`** (the S6 trap again), and an empty principal is never written. The
+student's id is the `hz-config-userid` UID, or an e-mail resolved through the profile ACL
+(`description` → `authorId`), also without the `isGroup` filter.
+
+**Known limitation:** a copy kept with unconfirmed access is named in `remaining`
+(« … à corriger à la main (une nouvelle exécution ne le refait pas) »). A re-run does not re-check
+it, and will then write the colour.
+
+**Unverified until the live run:** the `/create` id field and copy fidelity (`rolesSettings`, privacy,
+type); `PUT`/`DELETE /acl` with a role group's `authorId`; whether item ACLs list role groups as one
+row per group.
+
 ### Non-goals
-No class or role move (the result says: move the student in Matrix by hand), no copy, no delete,
-no formation change (CUI ↔ RES ↔ DHI — the icon stays).
+No class or role move (the result says: move the student in Matrix by hand), no copy of layout,
+interaction or module, no formation change (CUI ↔ RES ↔ DHI — the icon stays). Copy and delete
+exist only as the operator's explicit, previewed choice (above).
 
 ### Files
 - [level-change.ts](src/main/services/level-change.ts) — **pure core**, all IO injected (`read`,
@@ -878,15 +927,26 @@ no formation change (CUI ↔ RES ↔ DHI — the icon stays).
 - [level-change.service.ts](src/main/services/level-change.service.ts) — **thin IO layer**:
   `listLevelChangeStudents` (local), `levelChangeCandidates`, `planLevelChange`,
   `executeLevelChange`, the reconcile above. Logs carry profile ids only.
+- [level-change-copy.ts](src/main/services/level-change-copy.ts) — pure: `copySection`, `planAclFix`,
+  `inviteRole`, `shareRoles`, `PARTIAL_COPY_PROBLEM`. Tests beside it.
+- [level-change-extra.ts](src/main/services/level-change-extra.ts) — pure: `countDescendants`,
+  `removeConfirmed`, `deleteSection`, `widgetDescription`. Tests beside it.
+- [level-change-wire.ts](src/main/services/level-change-wire.ts) — API response → typed rows
+  (`toCopyNode`, `toAclRows`, `studentIdFromAcl`), `copiesRefusal`. Tests beside it.
 - [hazu-api/api.ts](src/main/services/hazu-api/api.ts) — `sendApiRequestUpdateChecked` (the
-  original update swallows errors).
-- [shared/level-change-types.ts](src/shared/level-change-types.ts) — plan, outcome, candidates.
+  original update swallows errors); [hazu-api/create-full.ts](src/main/services/hazu-api/create-full.ts)
+  — the checked create used by the copy.
+- [shared/level-change-types.ts](src/shared/level-change-types.ts) — plan, outcome, candidates;
+  [shared/level-change-decisions.ts](src/shared/level-change-decisions.ts) — decisions, defaults,
+  widget detection.
 - IPC `LEVEL_CHANGE_STUDENTS`, `LEVEL_CHANGE_CANDIDATES`, `LEVEL_CHANGE_PLAN`,
   `LEVEL_CHANGE_EXECUTE`; the apply is one Task Queue task (`levelChange`, in
   [TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx)).
 - [LevelChangeSection.tsx](src/renderer/components/tools/LevelChangeSection.tsx) and
   `level-change-logic.ts` (+ test) — student search (two letters minimum; not-eligible students
   greyed with the reason), target level and template dropdown, « Aperçu », « Appliquer ».
+  `LevelChangeActions.tsx` holds the copy / delete / widget boxes, `DeleteSectionsConfirmModal.tsx`
+  the delete confirmation (count / « au moins N » / « contenu inconnu »).
 - Like Missions and the archives, **develop and test against a scratch userData copy**, never the
   real DB: the change writes to the live Hazu.
 
@@ -1586,14 +1646,19 @@ installer, run the acceptance run again on Windows before calling it working.
     Archive → Personnes (record tags on the folder), the student is in no role group, holds no class
     tag → Restaurer → profile back under its category, folder gone → Dashboard sync → the student is
     back, with no rooms.
-7e. Outils → Changement de niveau (scratch userData copy): pick a test student in CFC, target AFP →
-    Aperçu → Appliquer → compare the profile's sections with « M- Apprenti CUI AFP v3 » in Hazu
-    (tags, the three Mandats descriptions, the student's own carnet tag intact, colour) → Missions
-    shows AFP → switch back to CFC the same way. Check that the three Mandats descriptions
-    (entreprise, CIE, école) read back equal to the AFP template after the change — if Hazu rewrites
-    the HTML on save, the run reports « description non confirmée »: report it. Do one deliberate
-    stop-and-re-run (e.g. cut the network after the first section, then retry the task) and check
-    the re-run finishes the change.
+7e. Outils → Changement de niveau (**scratch userData copy**, never the real DB): pick the test
+    student in AFP, target CFC (then the other way) → Aperçu → check the boxes: copy « Boîte de
+    guidance » and « Learning FSRS » ticked, delete « Navigation » unticked (tick it: the
+    confirmation shows the count first), widget ticked → Appliquer → compare the profile's sections
+    with the CFC v3 template (tags, descriptions, the student's own carnet tag intact, colour).
+    Then read the **copied sections' ACL** before and after: the student is admin on « Learning
+    FSRS », role groups appear only as the share tags say, owner groups are intact. Check that
+    « copie incomplète » does not appear, and look at the copied sections' view. Missions shows the
+    new level. Check that the Mandats descriptions read back equal to the template — if Hazu
+    rewrites the HTML on save, the run reports « description non confirmée »: report it. Do one
+    deliberate stop-and-re-run (cut the network after the first section, retry the task) and check
+    it finishes the change. The unverified points listed under « Operator decisions » are what this
+    run settles.
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel).
    Verify: with a file missing one student, map a name column, choose the class → that student is
    listed as a leaver; misspell a name in the file → the row lands in « À vérifier », not on the
