@@ -10,6 +10,7 @@ import {
   roomCandidates,
   distinctRoomValues,
   applyStudentOverrides,
+  roomLabel,
   type ControleColumns,
 } from './controle-logic';
 import { resolveRoomValues, type RoomCategory, type RoomResolution, type StudentResolution } from '../../../../shared/correspondence';
@@ -188,6 +189,28 @@ describe('roomCandidates', () => {
   });
   it('gives null when the parent is not a local room', () => {
     expect(roomCandidates(rooms, 'enterprise')).toEqual([{ id: 'r2', title: 'Hôtel Exemple', parentTitle: null }]);
+  });
+  it('gives null when the parent title is empty', () => {
+    const r = [
+      { id: 'p', title: '', room_type: 'state', parent_id: null },
+      { id: 'c', title: 'Canton Exemple', room_type: 'state', parent_id: 'p' },
+    ];
+    expect(roomCandidates(r, 'state', new Set(['p']))).toEqual([{ id: 'c', title: 'Canton Exemple', parentTitle: null }]);
+  });
+});
+
+describe('roomLabel', () => {
+  it('a twin differing only in case or spacing carries its parent', () => {
+    const all = [
+      { id: 'a', title: 'CUI 2A', parentTitle: 'Dossier A' },
+      { id: 'b', title: 'cui  2a', parentTitle: 'Dossier B' },
+    ];
+    expect(roomLabel(all[0], all)).toBe('CUI 2A — Dossier A');
+    expect(roomLabel(all[1], all)).toBe('cui  2a — Dossier B');
+  });
+  it('a room without twin shows its title only', () => {
+    const all = [{ id: 'a', title: 'CUI 2A', parentTitle: 'Dossier A' }, { id: 'b', title: 'CUI 2B', parentTitle: null }];
+    expect(roomLabel(all[0], all)).toBe('CUI 2A');
   });
 });
 

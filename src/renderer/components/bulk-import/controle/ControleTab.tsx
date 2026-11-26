@@ -103,6 +103,7 @@ export function ControleTab({ fileData }: ControleTabProps) {
   useEffect(() => {
     generationRef.current += 1;
     setState(resetForNewFile());
+    setData(null);
     setOverrides(new Map());
     setResolved(null);
     setBusy(false);
@@ -262,7 +263,7 @@ export function ControleTab({ fileData }: ControleTabProps) {
   };
 
   const goToCheck = () => {
-    if (!allResolved || !studentRes || !data) return;
+    if (!allResolved || !studentRes || !data || loading) return;
     const rooms: ResolvedForCheck['rooms'] = {};
     for (const c of categories) rooms[c] = roomRes[c];
     setResolved({
@@ -347,7 +348,7 @@ export function ControleTab({ fileData }: ControleTabProps) {
             <button type="button" className={secondary} onClick={() => setState((prev) => ({ ...prev, step: 1 }))}>
               Retour
             </button>
-            <button type="button" disabled={!allResolved || busy} onClick={goToCheck} className={primary}>
+            <button type="button" disabled={!allResolved || busy || loading} onClick={goToCheck} className={primary}>
               Contrôler
             </button>
             {data && !allResolved && (

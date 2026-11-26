@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import type { CorrCategory, RoomCandidate, RoomCategory, SavedLink } from '../../../../shared/correspondence';
 import type { HazuPerson } from '../../../../shared/person-match';
-import { CATEGORY_TITLE, RoomPicker, roomLabel } from './RoomCorrespondencePanel';
+import { CATEGORY_TITLE, RoomPicker } from './RoomCorrespondencePanel';
+import { roomLabel } from './controle-logic';
 import { StudentPicker } from './StudentCorrespondencePanel';
 
 const ORDER: CorrCategory[] = ['student', 'class', 'enterprise', 'state'];

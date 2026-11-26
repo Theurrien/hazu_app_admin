@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { isResolved, resolvedId, type RoomCandidate, type RoomCategory, type RoomResolution } from '../../../../shared/correspondence';
 import { normalizeName } from '../../../../shared/person-match';
+import { roomLabel } from './controle-logic';
 
 const panel = { border: '1px solid var(--hazu-border)' };
 
@@ -17,12 +18,6 @@ const STATUS: Record<RoomResolution['kind'], string> = {
   stale: 'lien périmé',
   open: 'à résoudre',
 };
-
-/** Title shown in a list: twins (same title) carry their parent folder so they can be told apart. */
-export function roomLabel(c: RoomCandidate, all: RoomCandidate[]): string {
-  const twin = all.some((o) => o.id !== c.id && o.title === c.title);
-  return twin ? `${c.title} — ${c.parentTitle ?? 'dossier inconnu'}` : c.title;
-}
 
 interface PickerProps {
   candidates: RoomCandidate[];

@@ -147,7 +147,14 @@ export function roomCandidates(
   const titleOf = new Map(rooms.map((r) => [r.id, r.title]));
   return rooms
     .filter((r) => r.room_type === type && !categoryIds.has(r.id))
-    .map((r) => ({ id: r.id, title: r.title, parentTitle: (r.parent_id && titleOf.get(r.parent_id)) ?? null }));
+    .map((r) => ({ id: r.id, title: r.title, parentTitle: (r.parent_id && titleOf.get(r.parent_id)) || null }));
+}
+
+/** Title shown in a list: twins (same `roomKey`) carry their parent folder so they can be told apart. */
+export function roomLabel(c: RoomCandidate, all: RoomCandidate[]): string {
+  const key = roomKey(c.title);
+  const twin = all.some((o) => o.id !== c.id && roomKey(o.title) === key);
+  return twin ? `${c.title} — ${c.parentTitle ?? 'dossier inconnu'}` : c.title;
 }
 
 /** The distinct values of one room column, one per `roomKey`, first spelling kept, in file order. */
