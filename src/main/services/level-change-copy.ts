@@ -210,7 +210,47 @@ export function groupRoleProblem(m: Pick<MismatchedGroup, 'role' | 'current' | '
   return `rôle du groupe ${m.role} à ajuster à la main sur « ${nodeTitle} » : mettre ${m.want} (actuellement ${m.current})`;
 }
 
-export interface CopyResult { ok: boolean; newId: string | null; problems: string[] }
+export interface CopyResult {
+  ok: boolean; newId: string | null; problems: string[];
+  /** informational, never a failure (e.g. empty role groups, which no read can confirm) */
+  notes?: string[];
+}
+
+/**
+ * Empty role groups (no members) leave no entry in an item's ACL, so no read sees them, yet they stay
+ * attached: a member joining later gets access. For each of the student's room groups with no entry on
+ * the node: no share tag for its role → detached (unverifiable: nothing to read back); named by a share
+ * tag → its role cannot be read, noted for a check. Groups with entries are the access check's (R12).
+ */
+async function detachEmptyGroups(
+  deps: CopyDeps, nodeId: string, title: string, tags: string[], roomGroups: Map<string, string>,
+): Promise<string[]> {
+  if (roomGroups.size === 0) return [];
+  let rows: AclRow[];
+  try {
+    rows = await withRetry(deps, () => deps.acl(nodeId));
+  } catch {
+    return [`« ${title} » : groupes sans membres non vérifiés (accès illisible)`];
+  }
+  const seen = new Set(rows.map(r => r.groupId).filter((g): g is string => !!g));
+  const shares = shareRoles(tags);
+  const notes: string[] = [];
+  for (const [g, role] of roomGroups) {
+    if (seen.has(g)) continue;
+    const want = shares.get(role);
+    if (want !== undefined) {
+      notes.push(`« ${title} » : groupe ${role} sans membres — rôle non vérifiable, à contrôler dans Hazu (${want} attendu)`);
+      continue;
+    }
+    try {
+      await withRetry(deps, () => deps.detachGroup(nodeId, g));
+      notes.push(`« ${title} » : groupe ${role} sans membres détaché — non vérifiable (aucune entrée à relire)`);
+    } catch {
+      notes.push(`« ${title} » : groupe ${role} sans membres — détachement non confirmé, à vérifier dans Hazu`);
+    }
+  }
+  return notes;
+}
 
 /** Re-list the parent up to 3 times (750 ms apart) for a node matching `from` that is not excluded. */
 async function findLanded(
@@ -361,6 +401,8 @@ async function alignAcl(
 export async function copySection(
   templateSectionId: string, profileId: string, deps: CopyDeps,
   roleGroups: Map<string, string>, studentId: string | null,
+  /** the role groups of the student's rooms (last sync), to catch empty ones no ACL read shows */
+  roomGroups: Map<string, string> = new Map(),
 ): Promise<CopyResult> {
   const fail = (problem: string, newId: string | null = null): CopyResult => ({ ok: false, newId, problems: [problem] });
 
@@ -419,10 +461,13 @@ export async function copySection(
   }
 
   const problems: string[] = [];
+  const emptyNotes: string[] = [];
   for (const c of copies) {
+    // before the access check: it removes groups with members, which this step must not mistake for empty
+    emptyNotes.push(...await detachEmptyGroups(deps, c.id, c.node.title, c.node.tags, roomGroups));
     const a = await alignAcl(deps, c, roleGroups, studentId);
     for (const m of a.mismatched) problems.push(groupRoleProblem(m, c.node.title));
     if (!a.confirmed) problems.push(`accès non confirmés : « ${c.node.title} »`);
   }
-  return { ok: problems.length === 0 && !extrasStuck, newId: topId, problems: [...notes, ...problems] };
+  return { ok: problems.length === 0 && !extrasStuck, newId: topId, problems: [...notes, ...problems], notes: emptyNotes };
 }
