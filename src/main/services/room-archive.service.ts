@@ -61,7 +61,7 @@ export function safeTags(raw: string | null | undefined): string[] {
 }
 
 // Wrap an axios error into the shape the core's retry logic reads.
-function toFailure(e: unknown): ApiFailure {
+export function toFailure(e: unknown): ApiFailure {
   if (e && typeof e === 'object' && !axios.isAxiosError(e) && 'message' in e && 'networkOrTimeout' in e) {
     return e as ApiFailure;
   }

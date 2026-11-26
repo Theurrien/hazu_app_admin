@@ -46,3 +46,18 @@ export interface LevelChangeOutcome {
   /** refusal / abort reason, nothing written */
   error?: string;
 }
+
+export interface LevelChangeStudent {
+  id: string;
+  displayName: string;
+  icon: string | null;
+  color: string | null;
+  level: Level | null;
+}
+
+export interface LevelChangeCandidates {
+  currentLevel: Level;
+  toLevel: Level;
+  templates: TemplateRef[];
+  preselectedId: string | null;
+}

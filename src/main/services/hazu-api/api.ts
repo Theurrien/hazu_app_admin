@@ -112,6 +112,22 @@ export const sendApiRequestCreateChecked = async (options: {
   return response.data;
 };
 
+// Checked PUT /update for the level change: only the given keys go into the body, an empty
+// description is sent as given, a colour is upper-cased. Rethrows the axios error.
+export const sendApiRequestUpdateChecked = async (
+  id: string,
+  body: { description?: string; color?: string },
+): Promise<void> => {
+  const payload: Record<string, string> = {};
+  if (body.description !== undefined) payload.description = body.description;
+  if (body.color !== undefined) payload.color = body.color.toUpperCase();
+  await axios.put(`https://${getApiEndpoint()}/update`, payload, {
+    headers: getAuthHeaders(),
+    params: { id },
+    timeout: 60_000,
+  });
+};
+
 export const sendApiRequestRemoveChecked = async (id: string): Promise<void> => {
   await axios.delete(`https://${getApiEndpoint()}/remove`, {
     headers: getAuthHeaders(),

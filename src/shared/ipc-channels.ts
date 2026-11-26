@@ -79,6 +79,12 @@ export const IPC_CHANNELS = {
   ARCHIVE_PERSON_EXECUTE: 'archive:person:execute',
   ARCHIVE_PERSON_RESTORE_EXECUTE: 'archive:person:restoreExecute',
 
+  // Level change (CFC <-> AFP)
+  LEVEL_CHANGE_STUDENTS: 'levelChange:students',
+  LEVEL_CHANGE_CANDIDATES: 'levelChange:candidates',
+  LEVEL_CHANGE_PLAN: 'levelChange:plan',
+  LEVEL_CHANGE_EXECUTE: 'levelChange:execute',
+
   // Webhooks
   WEBHOOK_UPDATE_USER_ROLE: 'webhook:updateUserRole',
   WEBHOOK_CREATE_ROOM: 'webhook:createRoom',
