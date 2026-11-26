@@ -10,6 +10,7 @@ import SettingsPage from './pages/SettingsPage';
 import DiscrepanciesPage from './pages/DiscrepanciesPage';
 import FormationPage from './pages/FormationPage';
 import ArchivePage from './pages/ArchivePage';
+import ToolsPage from './pages/ToolsPage';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { AppModeProvider, useAppMode } from './contexts/AppModeContext';
 import { TaskQueuePanel } from './components/TaskQueuePanel';
@@ -94,6 +95,8 @@ function AppShell() {
         return <FormationPage />;
       case 'archive':
         return <ArchivePage />;
+      case 'tools':
+        return <ToolsPage />;
       case 'discrepancies':
         return <DiscrepanciesPage />;
       case 'settings':
