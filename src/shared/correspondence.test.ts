@@ -103,8 +103,9 @@ describe('resolveStudents', () => {
   });
   it('a row with e-mail and name resolves through the name link alone', () => {
     const rows = [{ rowIndex: 0, email: 'new@example.invalid', fullName: 'Zed Qux' }];
-    const m = resolveStudents(rows, students, [link('student', `name:${nameKey('Zed Qux')}`, 'p2')]);
-    expect(m.get(0)?.res).toEqual({ kind: 'saved', personId: 'p2' });
+    const all = [...students, person('p9', 'Zed Qux')];
+    const m = resolveStudents(rows, all, [link('student', `name:${nameKey('Zed Qux')}`, 'p9')]);
+    expect(m.get(0)?.res).toEqual({ kind: 'saved', personId: 'p9' });
   });
   it('saved person no longer a student → stale', () => {
     const rows = [{ rowIndex: 0, fullName: 'Zed Qux' }];
@@ -138,6 +139,38 @@ describe('resolveStudents', () => {
       expect(m.get(i)?.saveKey).toBeNull();
       expect(m.get(i)?.res.kind).toBe('check');
     }
+  });
+});
+
+describe('tightened saved-link matching', () => {
+  const students = [person('p1', 'Ana Bé', 'ana@example.invalid'), person('p2', 'Uid Holder', 'a1b2c3d4')];
+  const nk = `name:${nameKey('Ana Bé')}`;
+  it('a name shared by a row with e-mail and one without takes no name link', () => {
+    const rows = [
+      { rowIndex: 0, email: 'ana@example.invalid', fullName: 'Ana Bé' },
+      { rowIndex: 1, fullName: 'Ana Bé' },
+    ];
+    const m = resolveStudents(rows, students, [link('student', nk, 'p1')]);
+    expect(m.get(1)?.saveKey).toBeNull();
+    expect(m.get(0)?.saveKey).toBe('email:ana@example.invalid');
+    expect(m.get(1)?.res.kind).not.toBe('saved');
+    expect(m.get(0)?.res).toEqual({ kind: 'matched', personId: 'p1' });
+  });
+  it('name link with a different valid e-mail → conflict', () => {
+    const rows = [{ rowIndex: 0, email: 'other@example.invalid', fullName: 'Ana Bé' }];
+    const m = resolveStudents(rows, students, [link('student', nk, 'p1')]);
+    expect(m.get(0)?.res).toEqual({ kind: 'check', candidateIds: ['p1'], reason: 'conflict' });
+  });
+  it('linked person with a UID instead of an e-mail does not conflict', () => {
+    const rows = [{ rowIndex: 0, email: 'other@example.invalid', fullName: 'Uid Holder' }];
+    const m = resolveStudents(rows, students, [link('student', `name:${nameKey('Uid Holder')}`, 'p2')]);
+    expect(m.get(0)?.res).toEqual({ kind: 'saved', personId: 'p2' });
+  });
+  it('room keys: stored key normalised, NFD equals NFC', () => {
+    const rooms = [room('r1', 'X')];
+    const m = resolveRoomValues('class', ['cui 2a'], rooms, [link('class', 'CUI  2A ', 'r1')], none);
+    expect(m.get('cui 2a')).toEqual({ kind: 'saved', hazuId: 'r1' });
+    expect(roomKey('E\u0301cully')).toBe(roomKey('\u00c9cully'));
   });
 });
 

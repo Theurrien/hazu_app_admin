@@ -40,7 +40,7 @@ export type StudentResolution =
 
 /** Trim, collapse spaces, lower case. Accents are kept. */
 export function roomKey(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+  return value.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function rowNameKey(p: SheetPerson): string {
@@ -59,7 +59,10 @@ export function studentKeys(p: SheetPerson): string[] {
 
 function linkMap(saved: SavedLink[], category: CorrCategory): Map<string, SavedLink> {
   const m = new Map<string, SavedLink>();
-  for (const l of saved) if (l.category === category) m.set(l.fileKey, l);
+  for (const l of saved) {
+    if (l.category !== category) continue;
+    m.set(category === 'student' ? l.fileKey : roomKey(l.fileKey), l);
+  }
   return m;
 }
 
@@ -113,7 +116,6 @@ export function resolveStudents(
   // Rows without an e-mail that share a name key cannot be told apart by it.
   const nameCount = new Map<string, number>();
   for (const r of rows) {
-    if (cleanEmail(r.email) !== '') continue;
     const n = rowNameKey(r);
     if (n !== '') nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
   }
@@ -121,23 +123,28 @@ export function resolveStudents(
   const out = new Map<number, { res: StudentResolution; saveKey: string | null }>();
   for (const row of rows) {
     const email = cleanEmail(row.email);
-    const collides = email === '' && (nameCount.get(rowNameKey(row)) ?? 0) > 1;
+    const collides = (nameCount.get(rowNameKey(row)) ?? 0) > 1;
     const keys = studentKeys(row).filter((k) => !(collides && k.startsWith('name:')));
     const saveKey = keys[0] ?? null;
 
     // The first defined link in key order wins, even when it is stale.
-    const link = keys.map((k) => links.get(k)).find((l) => l !== undefined);
+    const hitKey = keys.find((k) => links.has(k));
+    const link = hitKey === undefined ? undefined : links.get(hitKey);
     let res: StudentResolution | null = null;
     if (link) {
       if (link.hazuId === null) res = { kind: 'ignored' };
       else if (!known.has(link.hazuId)) res = { kind: 'stale' };
       else {
+        const linked = students.find((s) => s.id === link.hazuId);
         const others =
           email === ''
             ? []
             : students.filter((s) => s.id !== link.hazuId && cleanEmail(s.email) === email);
+        const linkedEmail = cleanEmail(linked?.email);
+        // Found by name only, and both sides carry a real address that differs: the name is not enough.
+        const differs = hitKey!.startsWith('name:') && email !== '' && linkedEmail !== '' && linkedEmail !== email;
         res =
-          others.length > 0
+          others.length > 0 || differs
             ? { kind: 'check', candidateIds: [link.hazuId, ...others.map((s) => s.id)], reason: 'conflict' }
             : { kind: 'saved', personId: link.hazuId };
       }
