@@ -17,6 +17,7 @@ export async function countDescendants(
   id: string,
   list: (id: string) => Promise<LcNode[]>,
   budget: { remaining: number },
+  sleep?: (ms: number) => Promise<void>,
 ): Promise<{ total: number | null; exact: boolean }> {
   let total = 0;
   let exact = true;
@@ -24,7 +25,7 @@ export async function countDescendants(
 
   async function walk(parent: string, depth: number): Promise<boolean> {
     let kids: LcNode[];
-    try { kids = await list(parent); } catch { exact = false; return false; }
+    try { kids = sleep ? await withRetry({ sleep }, () => list(parent)) : await list(parent); } catch { exact = false; return false; }
     if (depth > MAX_DEPTH) { if (kids.length > 0) exact = false; return true; }
     for (const k of kids) {
       if (seen.has(k.id)) continue;
@@ -39,6 +40,34 @@ export async function countDescendants(
 
   if (!(await walk(id, 1))) return { total: null, exact: false };
   return { total, exact };
+}
+
+
+/**
+ * Remove a node, then confirm it is gone: the parent's listing no longer holds it AND a read of the
+ * node answers null (404 only). An empty or truncated listing is never proof of absence; a status
+ * code is not either. Shared with the copy walk.
+ */
+export async function removeConfirmed(
+  deps: {
+    sleep(ms: number): Promise<void>;
+    remove(id: string): Promise<void>;
+    list(parentId: string): Promise<{ id: string }[]>;
+    read(id: string): Promise<unknown | null>;
+  },
+  parentId: string,
+  id: string,
+): Promise<boolean> {
+  try { await withRetry(deps, () => deps.remove(id)); } catch { /* the live read decides */ }
+  for (let i = 0; i < VERIFY_READS; i++) {
+    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+    try {
+      const kids = await withRetry(deps, () => deps.list(parentId));
+      if (kids.some(c => c.id === id)) continue;
+      if ((await withRetry(deps, () => deps.read(id))) === null) return true;
+    } catch { /* retried */ }
+  }
+  return false;
 }
 
 /**
@@ -63,18 +92,14 @@ export async function deleteSection(
   if (live.parentId !== profileId) {
     return { ok: false, problem: 'section non supprimée : elle n’est plus directement dans le profil' };
   }
+  if (sectionKey(live) !== item.sectionKey) {
+    return { ok: false, problem: 'section modifiée depuis l\'aperçu' };
+  }
   if (targetKeys.has(sectionKey(live))) {
     return { ok: false, problem: 'section non supprimée : elle existe aussi dans le modèle cible' };
   }
 
-  try { await withRetry(deps, () => deps.remove(item.sectionId)); } catch { /* the listing decides */ }
-  for (let i = 0; i < VERIFY_READS; i++) {
-    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
-    try {
-      const kids = await withRetry(deps, () => deps.list(profileId));
-      if (!kids.some(c => c.id === item.sectionId)) return { ok: true, problem: null };
-    } catch { /* retried */ }
-  }
+  if (await removeConfirmed(deps, profileId, item.sectionId)) return { ok: true, problem: null };
   return { ok: false, problem: 'suppression non confirmée : la section est toujours présente' };
 }
 

@@ -8,6 +8,7 @@
 import { ApiFailure, withRetry } from './room-archive';
 import { isRetryableError, backoffMs } from './role-write';
 import { sectionKey } from './level-change';
+import { removeConfirmed } from './level-change-extra';
 
 export interface CopyNode {
   id: string;
@@ -177,15 +178,8 @@ async function countSubtree(deps: CopyDeps, id: string, depth: number, seen: Set
 
 /** Remove, then confirm by listing the parent that the node is gone (a 404 on retry proves nothing). */
 async function removeVerified(deps: CopyDeps, parentId: string, id: string): Promise<boolean> {
-  try { await withRetry(deps, () => deps.remove(id)); } catch { /* the listing decides */ }
-  for (let i = 0; i < VERIFY_READS; i++) {
-    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
-    try {
-      const kids = await withRetry(deps, () => deps.listFull(parentId));
-      if (!kids.some(c => c.id === id)) return true;
-    } catch { /* retried */ }
-  }
-  return false;
+  return removeConfirmed(
+    { sleep: deps.sleep, remove: deps.remove, list: deps.listFull, read: deps.readFull }, parentId, id);
 }
 
 async function alignAcl(

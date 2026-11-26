@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { countDescendants, deleteSection, widgetDescription } from './level-change-extra';
-import type { LcNode } from './level-change';
+import { sectionKey, type LcNode } from './level-change';
 
 const node = (id: string, parentId: string | null, title = id): LcNode =>
   ({ id, parentId, title, description: '', tags: [], icon: 'i', color: '#000' });
@@ -44,14 +44,14 @@ describe('countDescendants', () => {
 });
 
 describe('deleteSection', () => {
-  const item = { sectionKey: 'k', sectionId: 'sec' };
-  function mk(over: { live?: LcNode | null; removeFails?: boolean; goneAfterFail?: boolean; stays?: boolean } = {}) {
+  const item = { sectionKey: sectionKey(node('sec', 'P', 'Extra')), sectionId: 'sec' };
+  function mk(over: { live?: LcNode | null; removeFails?: boolean; goneAfterFail?: boolean; stays?: boolean; readLies?: boolean; emptyList?: boolean } = {}) {
     let removed = false;
     const calls: string[] = [];
     const live = over.live === undefined ? node('sec', 'P', 'Extra') : over.live;
     const deps = {
-      read: async () => (removed ? null : live),
-      list: async (): Promise<LcNode[]> => (removed || !live ? [] : [live]),
+      read: async () => (removed && !over.readLies ? null : live),
+      list: async (): Promise<LcNode[]> => (removed || !live || over.emptyList ? [] : [live]),
       sleep: async () => {},
       remove: async (id: string) => {
         calls.push(id);
@@ -75,7 +75,6 @@ describe('deleteSection', () => {
   });
   it('key now in targetKeys: not removed', async () => {
     const live = node('sec', 'P', 'Extra');
-    const { sectionKey } = await import('./level-change');
     const { deps, calls } = mk({ live });
     const r = await deleteSection('P', item, new Set([sectionKey(live)]), deps);
     expect(r.ok).toBe(false);
@@ -90,6 +89,16 @@ describe('deleteSection', () => {
     const r = await deleteSection('P', item, new Set(), deps);
     expect(r.ok).toBe(false);
     expect(r.problem).toBeTruthy();
+  });
+  it('key changed since the preview: not removed', async () => {
+    const { deps, calls } = mk({ live: node('sec', 'P', 'Renamed') });
+    const r = await deleteSection('P', { sectionKey: 'old|i|#000', sectionId: 'sec' }, new Set(), deps);
+    expect(r).toEqual({ ok: false, problem: 'section modifiée depuis l\'aperçu' });
+    expect(calls).toEqual([]);
+  });
+  it('empty listing is not proof: node still readable => not ok', async () => {
+    const { deps } = mk({ emptyList: true, stays: true });
+    expect((await deleteSection('P', item, new Set(), deps)).ok).toBe(false);
   });
   it('already gone before removal: ok, no write', async () => {
     const { deps, calls } = mk({ live: null });
