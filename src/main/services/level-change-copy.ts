@@ -109,7 +109,29 @@ export function aclMatches(
 
 export interface CopyResult { ok: boolean; newId: string | null; problems: string[] }
 
-/** Create `from` under `parentId` once; `exclude` = ids that must never be adopted as the landed node. */
+/** Re-list the parent up to 3 times (750 ms apart) for a node matching `from` that is not excluded. */
+async function findLanded(
+  deps: CopyDeps, parentId: string, from: CopyNode, exclude: Set<string>,
+): Promise<string | null> {
+  const key = sectionKey(from);
+  for (let i = 0; i < VERIFY_READS; i++) {
+    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+    try {
+      const children = await withRetry(deps, () => deps.listFull(parentId));
+      const landed = children.find(c => !exclude.has(c.id) && sectionKey(c) === key);
+      if (landed) return landed.id;
+    } catch {
+      // an unreadable listing is retried within the same budget
+    }
+  }
+  return null;
+}
+
+/**
+ * Create `from` under `parentId` once; `exclude` = ids that must never be adopted as the landed node.
+ * After a transient failure — including the last one — the parent is re-listed (3 reads, riding out
+ * cache lag) and a landed node adopted before anything is resent or the failure is rethrown.
+ */
 async function createOnce(
   deps: CopyDeps, parentId: string, from: CopyNode, exclude: Set<string>,
 ): Promise<string> {
@@ -118,12 +140,11 @@ async function createOnce(
       return await deps.create(parentId, from);
     } catch (e) {
       const f = e as Partial<ApiFailure>;
-      if (!isRetryableError(f?.status, f?.networkOrTimeout === true) || attempt + 1 >= MAX_ATTEMPTS) throw e;
-      await deps.sleep(backoffMs(attempt));
-      const children = await withRetry(deps, () => deps.listFull(parentId));
-      const key = sectionKey(from);
-      const landed = children.find(c => !exclude.has(c.id) && sectionKey(c) === key);
-      if (landed) return landed.id;
+      if (!isRetryableError(f?.status, f?.networkOrTimeout === true)) throw e;
+      if (attempt + 1 < MAX_ATTEMPTS) await deps.sleep(backoffMs(attempt));
+      const landed = await findLanded(deps, parentId, from, exclude);
+      if (landed) return landed;
+      if (attempt + 1 >= MAX_ATTEMPTS) throw e;
     }
   }
 }
@@ -151,6 +172,19 @@ async function countSubtree(deps: CopyDeps, id: string, depth: number, seen: Set
   let n = 1;
   for (const k of kids) n += await countSubtree(deps, k.id, depth + 1, seen);
   return n;
+}
+
+/** Remove, then confirm by listing the parent that the node is gone (a 404 on retry proves nothing). */
+async function removeVerified(deps: CopyDeps, parentId: string, id: string): Promise<boolean> {
+  try { await withRetry(deps, () => deps.remove(id)); } catch { /* the listing decides */ }
+  for (let i = 0; i < VERIFY_READS; i++) {
+    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+    try {
+      const kids = await withRetry(deps, () => deps.listFull(parentId));
+      if (!kids.some(c => c.id === id)) return true;
+    } catch { /* retried */ }
+  }
+  return false;
 }
 
 async function alignAcl(
@@ -213,16 +247,32 @@ export async function copySection(
     complete = false;
   }
 
+  const key = sectionKey(template);
+  const freshOf = async (): Promise<string[]> => {
+    const kids = await withRetry(deps, () => deps.listFull(profileId));
+    return kids.filter(c => !before.some(o => o.id === c.id) && sectionKey(c) === key).map(c => c.id);
+  };
+
   if (!complete) {
-    if (topId) {
-      try {
-        await withRetry(deps, () => deps.remove(topId as string));
-        return fail(PARTIAL_COPY_PROBLEM);
-      } catch {
-        return fail(`${PARTIAL_COPY_PROBLEM} (suppression échouée)`, topId);
-      }
+    // A create that failed finally may still have landed: sweep every fresh node of this key.
+    const victims = new Set<string>(topId ? [topId] : []);
+    try { for (const id of await freshOf()) victims.add(id); } catch { /* nothing more known */ }
+    let stuck = false;
+    for (const id of victims) if (!(await removeVerified(deps, profileId, id))) stuck = true;
+    return stuck ? fail(`${PARTIAL_COPY_PROBLEM} (suppression échouée)`, topId) : fail(PARTIAL_COPY_PROBLEM);
+  }
+
+  const notes: string[] = [];
+  let extrasStuck = false;
+  try {
+    const extras = (await freshOf()).filter(id => id !== topId);
+    for (const id of extras) {
+      if (await removeVerified(deps, profileId, id)) notes.push('doublon de la copie supprimé');
+      else { extrasStuck = true; notes.push('doublon de la copie non supprimé'); }
     }
-    return fail(PARTIAL_COPY_PROBLEM);
+  } catch {
+    extrasStuck = true;
+    notes.push('doublons possibles non vérifiés');
   }
 
   const problems: string[] = [];
@@ -231,5 +281,5 @@ export async function copySection(
       problems.push(`accès non confirmés : « ${c.node.title} »`);
     }
   }
-  return { ok: problems.length === 0, newId: topId, problems };
+  return { ok: problems.length === 0 && !extrasStuck, newId: topId, problems: [...notes, ...problems] };
 }

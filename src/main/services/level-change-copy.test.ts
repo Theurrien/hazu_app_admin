@@ -65,11 +65,14 @@ function world() {
   const acls = new Map<string, AclRow[]>();
   let n = 0;
   const log = { creates: 0, setRole: [] as string[], removeAcl: [] as string[], removed: [] as string[] };
-  const fail: { createTitle?: string; mode?: '4xx' | 'timeout-landed'; once: Set<string> } = { once: new Set() };
+  const fail: { createTitle?: string; mode?: '4xx' | 'timeout-landed'; once: Set<string>; alwaysTimeout?: string; lag: number } = { once: new Set(), lag: 0 };
   const ignoreAcl = { on: false };
   const deps: CopyDeps = {
     async readFull(id) { return nodes.get(id) ?? null; },
-    async listFull(p) { return [...nodes.values()].filter(x => x.parentId === p); },
+    async listFull(p) {
+      if (p === 'prof' && fail.lag > 0) { fail.lag--; return [...nodes.values()].filter(x => x.parentId === p && !x.id.startsWith('new-')); }
+      return [...nodes.values()].filter(x => x.parentId === p);
+    },
     async create(parentId, from) {
       log.creates++;
       const doCreate = () => {
@@ -78,6 +81,10 @@ function world() {
         acls.set(id, [row(S, 'reader'), row('a-st', 'reader', true, 'g-st'), row('own', 'owner', true, 'g-owner')]);
         return id;
       };
+      if (fail.alwaysTimeout === from.title) {
+        if (log.creates === 1) doCreate();
+        throw { networkOrTimeout: true, message: 'timeout' };
+      }
       if (fail.createTitle === from.title && !fail.once.has(from.title)) {
         fail.once.add(from.title);
         if (fail.mode === '4xx') throw { status: 400, networkOrTimeout: false, message: 'bad' };
@@ -186,5 +193,53 @@ describe('copySection', () => {
     expect(r.ok).toBe(false);
     expect(r.problems.some(p => p.includes('Learning FSRS'))).toBe(true);
     expect(w.nodes.has(r.newId!)).toBe(true);
+  });
+
+  it('every create times out, the first landed but is visible only late: adopted, one node, no orphan', async () => {
+    const w = world();
+    w.fail.alwaysTimeout = 'Learning FSRS';
+    w.fail.lag = 4; // snapshot + first attempt's 3 re-lists blind; the second attempt's first re-list sees it
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(true);
+    expect(w.log.creates).toBe(2 + 2); // 2 top attempts + child + grandchild
+    expect([...w.nodes.values()].filter(x => x.parentId === 'prof').length).toBe(1);
+  });
+
+  it('every create times out, the landed node never shows during re-lists: swept and removed', async () => {
+    const w = world();
+    w.fail.alwaysTimeout = 'Learning FSRS';
+    w.fail.lag = 10; // snapshot + 3 attempts x 3 re-lists; the final sweep sees it
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(false);
+    expect(r.problems).toEqual(['copie incomplète — supprimée, à refaire']);
+    expect(w.log.removed.length).toBe(1);
+    expect([...w.nodes.values()].filter(x => x.parentId === 'prof')).toEqual([]);
+  });
+
+  it('a lagging listing: first re-list misses, second finds, no resend', async () => {
+    const w = world();
+    w.fail.createTitle = 'Learning FSRS'; w.fail.mode = 'timeout-landed';
+    w.fail.lag = 2; // the initial snapshot read is call 1 (consumes one lag), re-list 1 misses, re-list 2 finds
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(true);
+    expect(w.log.creates).toBe(3);
+    expect([...w.nodes.values()].filter(x => x.parentId === 'prof').length).toBe(1);
+  });
+
+  it('a duplicate fresh node of the same key is removed after the copy', async () => {
+    const w = world();
+    const orig = w.deps.create;
+    let done = false;
+    w.deps.create = async (p, f) => {
+      const id = await orig(p, f);
+      if (!done && f.id === 't-sec') {
+        done = true;
+        w.nodes.set('stray', { ...f, id: 'stray', parentId: p });
+      }
+      return id;
+    };
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(w.nodes.has('stray')).toBe(false);
+    expect(r.problems).toContain('doublon de la copie supprimé');
   });
 });
