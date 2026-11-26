@@ -101,6 +101,17 @@ describe('buildPlan tags', () => {
     });
     expect(p.sections).toEqual([]);
   });
+  it('counterparts exist, profile holds no tag of the family: target added', () => {
+    const sk = (x: string) => fam + id20(x);
+    const p = plan({
+      source: [sec('s', { tags: ['A', sk('S')] })],
+      target: [sec('t', { tags: ['A', sk('T')] })],
+      profile: [sec('p', { tags: ['A'] })],
+    });
+    expect(p.sections).toHaveLength(1);
+    expect(p.sections[0].addTags).toEqual([sk('T')]);
+    expect(p.sections[0].removeTags).toEqual([]);
+  });
   it('unpaired add and remove', () => {
     const p = plan({
       source: [sec('s', { tags: ['hz-config-y'] })],
@@ -199,6 +210,7 @@ describe('buildPlan structure', () => {
     });
     expect(p.profileOnly).toEqual(['ProfOnly']);
     expect(p.templateOnly).toEqual(['TplOnly']);
+    expect(p.noSourceCounterpart).toEqual(['Both']);
     expect(p.sections).toEqual([]);
   });
   it('colour', () => {
@@ -246,6 +258,7 @@ describe('runLevelChange', () => {
 
   function harness(w = world(), opts: {
     failList?: string; dropWrites?: boolean; failWrites?: boolean; mangleDesc?: boolean; noColor?: boolean;
+    failAdd?: boolean;
   } = {}) {
     const calls: string[] = [];
     const get = (id: string) => w.nodes.get(id)!;
@@ -263,6 +276,7 @@ describe('runLevelChange', () => {
       async updateColor(id, hex) { calls.push('color:' + id); if (!opts.noColor) get(id).color = hex; },
       async addTags(id, tags) {
         calls.push('add:' + id);
+        if (opts.failAdd) throw { status: 400, networkOrTimeout: false, message: 'refusé' };
         if (!opts.dropWrites) get(id).tags.push(...tags.filter(t => !get(id).tags.includes(t)));
         if (opts.failWrites) throw { status: 500, networkOrTimeout: false, message: 'boom' };
       },
@@ -272,7 +286,7 @@ describe('runLevelChange', () => {
       },
       async sleep() {},
     };
-    return { w, deps, calls };
+    return { w, deps, calls, opts };
   }
   const input = (over: Record<string, unknown> = {}) =>
     ({ profileId: 'P', toLevel: 'afp' as const, targetTemplateId: 'TA', templateRootId: ROOT, dryRun: false, ...over });
@@ -329,7 +343,7 @@ describe('runLevelChange', () => {
     const h = harness();
     const o = await runLevelChange(input(), h.deps);
     expect(o).toMatchObject({ success: true, applied: 2, remaining: [] });
-    expect(h.calls).toEqual(['rm:p1', 'add:p1', 'desc:p1', 'color:P']);
+    expect(h.calls).toEqual(['add:p1', 'rm:p1', 'desc:p1', 'color:P']);
     expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
     expect(h.w.nodes.get('P')!.color).toBe(AFP);
   });
@@ -388,5 +402,26 @@ describe('runLevelChange', () => {
     expect(o).toMatchObject({ success: true, applied: 1 });
     expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
     expect(h.calls).toContain('add:p1');
+  });
+
+  it('partial swap: a failed addition is completed by the re-run, never reported done without it', async () => {
+    const h = harness(world(), { failAdd: true });
+    const o1 = await runLevelChange(input(), h.deps);
+    expect(o1.success).toBe(false);
+    expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+    h.opts.failAdd = false;
+    h.calls.length = 0;
+    const o2 = await runLevelChange(input(), h.deps);
+    expect(h.w.nodes.get('p1')!.tags).toContain(NEW);
+    expect(o2.success).toBe(true);
+    expect(h.w.nodes.get('P')!.color).toBe(AFP);
+  });
+
+  it('a section left with neither tag by an earlier run gets the target tag', async () => {
+    const h = harness();
+    h.w.nodes.get('p1')!.tags = [];
+    const o = await runLevelChange(input(), h.deps);
+    expect(o.success).toBe(true);
+    expect(h.w.nodes.get('p1')!.tags).toEqual([NEW]);
   });
 });

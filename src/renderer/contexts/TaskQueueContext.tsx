@@ -111,6 +111,8 @@ export interface LevelChangeTask extends BaseTask {
   targetTemplateId: string;
   // Called once, when the change is confirmed.
   onDone?: () => void;
+  // Called once each time the task ends in error.
+  onError?: () => void;
 }
 
 export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask | ArchiveRoomTask | RestoreRoomTask | ArchivePersonTask | RestorePersonTask | LevelChangeTask;
@@ -359,6 +361,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
           setTasks((prev) =>
             prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
           );
+          try { task.onError?.(); } catch { /* a callback failure cannot change the result */ }
         }
       } else if (nextTask.type === 'restorePerson') {
         const task = nextTask as RestorePersonTask;
@@ -383,6 +386,9 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
       if (nextTask.type === 'roleUpdate') (nextTask as RoleUpdateTask).onError?.();
       if (nextTask.type === 'createRoom') (nextTask as CreateRoomTask).onError?.();
       if (nextTask.type === 'createPerson') (nextTask as CreatePersonTask).onError?.();
+      if (nextTask.type === 'levelChange') {
+        try { (nextTask as LevelChangeTask).onError?.(); } catch { /* cannot change the result */ }
+      }
     }
 
     processingRef.current = false;

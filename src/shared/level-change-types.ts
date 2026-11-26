@@ -33,6 +33,8 @@ export interface LevelChangePlan {
   /** section titles */
   profileOnly: string[];
   templateOnly: string[];
+  /** section titles present in profile and target but not in the source v3 — not changed */
+  noSourceCounterpart: string[];
 }
 
 export interface LevelChangeOutcome {

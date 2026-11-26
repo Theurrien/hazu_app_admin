@@ -124,8 +124,11 @@ equal. The same normaliser is used to verify.
     from the target, and target tags missing from the source.
   - **Swap**: a delta tag of the source (on any current-level template version) that the
     profile carries is removed and replaced by the target's tag of the same family. If the
-    profile does not carry the source's tag, that family is left alone: nothing is added.
-    This is what keeps the per-student `hz-config-carnet-{id}` intact. The template carries a
+    profile carries another tag of that family (not the source's), the family is left alone:
+    nothing is added. If it carries no tag of the family at all, the target's tag is added
+    (amended 2026-11-26, final review: a run whose removal landed and whose addition did not must
+    be finished by the re-run, not reported done). Writes add before they remove, so a swap
+    stopped half-way leaves both tags. This is what keeps the per-student `hz-config-carnet-{id}` intact. The template carries a
     different carnet id, so the student's own one is not "on the template" and is never touched,
     and the target's carnet id is never added beside it.
   - A target delta tag with no family counterpart in the source is added. A source delta tag

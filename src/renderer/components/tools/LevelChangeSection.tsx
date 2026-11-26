@@ -5,7 +5,7 @@ import type {
   LevelChangeStudent,
 } from '../../../shared/level-change-types';
 import { useTaskQueue } from '../../contexts/TaskQueueContext';
-import { eligibility, levelLabel, searchStudents } from './level-change-logic';
+import { eligibility, hasApplicableChange, levelLabel, searchStudents } from './level-change-logic';
 
 const panel = { border: '1px solid var(--hazu-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -29,6 +29,7 @@ function LevelChangeSection() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [queued, setQueued] = useState(false);
+  const [applyFailed, setApplyFailed] = useState(false);
   // The student the answers on screen must belong to; late answers for another one are dropped.
   const selectedRef = useRef<string | null>(null);
 
@@ -55,6 +56,7 @@ function LevelChangeSection() {
     setTemplateId('');
     setPreview(null);
     setQueued(false);
+    setApplyFailed(false);
     try {
       const c = await window.electronAPI.getLevelChangeCandidates(s.id);
       if (selectedRef.current !== s.id) return;
@@ -77,6 +79,7 @@ function LevelChangeSection() {
     const tpl = templateId;
     setPreviewing(true);
     setPreview(null);
+    setApplyFailed(false);
     try {
       const outcome = await window.electronAPI.planLevelChange(studentId, candidates.toLevel, tpl);
       if (selectedRef.current !== studentId) return;
@@ -95,12 +98,13 @@ function LevelChangeSection() {
 
   const plan = preview?.outcome.plan ?? null;
   const previewCurrent = !!preview && !!selected && preview.studentId === selected.id && preview.templateId === templateId;
-  const hasChange = !!plan && (plan.sections.length > 0 || plan.colorChange);
+  const hasChange = hasApplicableChange(plan);
   const canApply = previewCurrent && !preview!.outcome.error && hasChange && !queued;
 
   const apply = () => {
     if (!selected || !candidates || !canApply) return;
     setQueued(true);
+    setApplyFailed(false);
     addLevelChangeTask({
       personId: selected.id,
       displayName: selected.displayName,
@@ -115,6 +119,12 @@ function LevelChangeSection() {
           setPreview(null);
           setTemplateId('');
           setQueued(false);
+        }
+      },
+      onError: () => {
+        if (selectedRef.current === selected.id) {
+          setQueued(false);
+          setApplyFailed(true);
         }
       },
     });
@@ -213,6 +223,9 @@ function LevelChangeSection() {
                   Appliquer
                 </button>
               </div>
+              {applyFailed && (
+                <p className="text-sm text-red-600">Échec — voir la file des tâches, puis refaire l'aperçu.</p>
+              )}
             </>
           )}
 
@@ -230,7 +243,7 @@ function LevelChangeSection() {
                     </ul>
                   </div>
 
-                  {plan.sections.length === 0 && !plan.colorChange && (
+                  {!hasChange && (
                     <p className="text-gray-600">Aucun changement à appliquer.</p>
                   )}
 
@@ -260,6 +273,13 @@ function LevelChangeSection() {
                     <p>
                       <span className="font-medium">Sections seulement dans le modèle : </span>
                       {plan.templateOnly.join(', ')}
+                    </p>
+                  )}
+
+                  {plan.noSourceCounterpart.length > 0 && (
+                    <p>
+                      <span className="font-medium">Sections sans équivalent dans le modèle actuel — non changées : </span>
+                      {plan.noSourceCounterpart.join(', ')}
                     </p>
                   )}
 

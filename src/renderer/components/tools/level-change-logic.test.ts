@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { searchStudents, eligibility, levelLabel } from './level-change-logic';
-import type { LevelChangeStudent } from '../../../shared/level-change-types';
+import { searchStudents, eligibility, levelLabel, hasApplicableChange } from './level-change-logic';
+import type { LevelChangePlan, LevelChangeStudent, SectionChange } from '../../../shared/level-change-types';
 
 const st = (id: string, displayName: string, level: 'cfc' | 'afp' | null): LevelChangeStudent => ({
   id,
@@ -38,5 +38,28 @@ describe('levelLabel', () => {
   it('upper-cases', () => {
     expect(levelLabel('cfc')).toBe('CFC');
     expect(levelLabel('afp')).toBe('AFP');
+  });
+});
+
+describe('hasApplicableChange', () => {
+  const sc = (over: Partial<SectionChange> = {}): SectionChange => ({
+    sectionId: 's', title: 'S', description: null, descriptionKept: false, addTags: [], removeTags: [], ...over,
+  });
+  const pl = (sections: SectionChange[], colorChange = false): LevelChangePlan => ({
+    profileId: 'P', fromLevel: 'cfc', toLevel: 'afp', colorFrom: '#1A237E', colorTo: '#9AD9EA', colorChange,
+    templates: [], sections, profileOnly: [], templateOnly: [], noSourceCounterpart: [],
+  });
+  it('null plan or nothing to do', () => {
+    expect(hasApplicableChange(null)).toBe(false);
+    expect(hasApplicableChange(pl([]))).toBe(false);
+  });
+  it('a section with only descriptionKept is not a change', () => {
+    expect(hasApplicableChange(pl([sc({ descriptionKept: true })]))).toBe(false);
+  });
+  it('tags, description or colour are', () => {
+    expect(hasApplicableChange(pl([sc({ addTags: ['x'] })]))).toBe(true);
+    expect(hasApplicableChange(pl([sc({ removeTags: ['x'] })]))).toBe(true);
+    expect(hasApplicableChange(pl([sc({ description: { from: 'a', to: 'b' } })]))).toBe(true);
+    expect(hasApplicableChange(pl([sc({ descriptionKept: true })], true))).toBe(true);
   });
 });

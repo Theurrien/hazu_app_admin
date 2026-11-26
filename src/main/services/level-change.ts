@@ -92,6 +92,10 @@ function sectionMap(children: LcNode[]): Map<string, LcNode> {
   return m;
 }
 
+function holdsFamily(P: LcNode, f: string | null): boolean {
+  return f !== null && P.tags.some(x => tagFamily(x) === f);
+}
+
 function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[]; remove: string[] } {
   const have = new Set(P.tags);
   const sTags = new Set(S.tags);
@@ -109,12 +113,15 @@ function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[
       if (held.length > 0) {
         if (!have.has(t)) add.add(t);
         held.forEach(h => remove.add(h));
+      } else if (!have.has(t) && !holdsFamily(P, f)) {
+        // no tag of the family at all (e.g. an earlier run removed the source tag and the
+        // addition never landed): the target tag is added
+        add.add(t);
       }
-      // profile holds none of them (e.g. a per-student pointer): left alone
+      // otherwise the profile holds another tag of the family (e.g. a per-student pointer): left alone
     } else if (!have.has(t)) {
       // never a second tag of a family the profile already holds (e.g. a per-student carnet)
-      const heldFamily = f !== null && P.tags.some(x => tagFamily(x) === f);
-      if (!heldFamily) add.add(t);
+      if (!holdsFamily(P, f)) add.add(t);
     }
   }
 
@@ -141,12 +148,13 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
   const sections: SectionChange[] = [];
   const templateOnly: string[] = [];
   const profileOnly: string[] = [];
+  const noSourceCounterpart: string[] = [];
 
   for (const [key, T] of tgt) {
     const P = prof.get(key);
     if (!P) { templateOnly.push(stripTitle(T.title)); continue; }
     const S = src.get(key);
-    if (!S) continue;
+    if (!S) { noSourceCounterpart.push(stripTitle(P.title)); continue; }
     const SA = [S, ...others.map(m => m.get(key)).filter((n): n is LcNode => !!n)];
 
     const { add, remove } = planTags(P, T, S, SA);
@@ -187,7 +195,7 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
       { id: input.source.ref.id, title: stripTitle(input.source.ref.title), role: 'source' },
       ...input.sourceOthers.map(t => ({ id: t.ref.id, title: stripTitle(t.ref.title), role: 'source-other' as const })),
     ],
-    sections, profileOnly, templateOnly,
+    sections, profileOnly, templateOnly, noSourceCounterpart,
   };
 }
 
@@ -284,8 +292,10 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     const attempt = async (fn: () => Promise<void>) => {
       try { await withRetry(deps, fn); } catch { /* verified below */ }
     };
-    if (c.removeTags.length) await attempt(() => deps.removeTags(c.sectionId, c.removeTags));
+    // Add before remove: a swap stopped half-way then leaves both tags, which the next plan
+    // finishes by removing; the reverse would leave neither.
     if (c.addTags.length) await attempt(() => deps.addTags(c.sectionId, c.addTags));
+    if (c.removeTags.length) await attempt(() => deps.removeTags(c.sectionId, c.removeTags));
     if (c.description) await attempt(() => deps.updateDescription(c.sectionId, c.description!.to));
   }
 

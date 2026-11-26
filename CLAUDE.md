@@ -824,8 +824,9 @@ Never « make the profile equal the template »: the profile may carry its own t
 descriptions. Sections are matched as direct children on title + icon + colour (case-insensitive,
 HTML stripped). Per matched section:
 - **Tags.** A tag's *family* is the tag minus its trailing 20-character id. A template tag whose id
-  differs between the levels is **swapped** (source removed, target added) only when the profile
-  carries the source's tag. Unpaired source tags are removed only when they sit on the **source v3**
+  differs between the levels is **swapped** (source removed, target added) when the profile
+  carries the source's tag; when it carries no tag of that family at all (e.g. a run whose removal
+  landed but whose addition did not), the target tag is added. Unpaired source tags are removed only when they sit on the **source v3**
   and not on the target; a target tag whose family has no source counterpart is added only when the
   profile holds no tag of that family. **A tag that is not on the template is never touched** — this
   keeps the per-student `hz-config-carnet-{id}` intact (the target's carnet id is never added beside
@@ -834,7 +835,10 @@ HTML stripped). Per matched section:
   current-level template version (HTML whitespace normalised). Otherwise it was edited for this
   student: reported « modifiée à la main — non changée » and left alone.
 - Sections found on one side only are listed in the preview and left alone (no copy, no delete);
-  title, description, tags and icon of the profile itself stay as they are.
+  so is a section in profile and target with no counterpart in the source v3 (`noSourceCounterpart`,
+  « Sections sans équivalent dans le modèle actuel — non changées »). Title, description, tags and
+  icon of the profile itself stay as they are. A section only « modifiée à la main » writes nothing,
+  and does not enable « Appliquer » (`hasApplicableChange`).
 
 ### Guards
 Only a **local `persons` student row** is accepted; a node tagged as a student template is refused
@@ -843,13 +847,16 @@ local colour is shown in the preview); neither CFC nor AFP refuses, nothing writ
 already at the target level is a finishing run.
 
 ### Order and success rule
-Section writes (tags, then description; transient 5xx / network / timeout retried with `backoffMs`,
+Section writes (tags — **add before remove**, so a swap stopped half-way leaves both tags and the
+next plan only removes — then description; transient 5xx / network / timeout retried with `backoffMs`,
 4xx fails fast) → **verify by re-listing** the profile's children (3 reads, 750 ms apart) →
 **colour last** → verify. **The live read decides, not the status code**: a write whose status
 failed but whose change shows counts as done, a 2xx that does not show does not. If the sections
 are not confirmed the colour is **not written** and `remaining` says so; otherwise `remaining`
 names what is left (including an unconfirmed colour). A stopped run leaves the old level showing;
-**re-running finishes it** — every step reads live first and skips what is done.
+**re-running finishes it** — every step reads live first and skips what is done. A failed task
+re-enables « Appliquer » (the task's `onError`) with « Échec — voir la file des tâches, puis refaire
+l'aperçu. ».
 
 ### Lock and local reconcile
 `executeLevelChange` holds [archive-lock.ts](src/main/services/archive-lock.ts)
@@ -1581,7 +1588,11 @@ installer, run the acceptance run again on Windows before calling it working.
 7e. Outils → Changement de niveau (scratch userData copy): pick a test student in CFC, target AFP →
     Aperçu → Appliquer → compare the profile's sections with « M- Apprenti CUI AFP v3 » in Hazu
     (tags, the three Mandats descriptions, the student's own carnet tag intact, colour) → Missions
-    shows AFP → switch back to CFC the same way.
+    shows AFP → switch back to CFC the same way. Check that the three Mandats descriptions
+    (entreprise, CIE, école) read back equal to the AFP template after the change — if Hazu rewrites
+    the HTML on save, the run reports « description non confirmée »: report it. Do one deliberate
+    stop-and-re-run (e.g. cut the network after the first section, then retry the task) and check
+    the re-run finishes the change.
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel).
    Verify: with a file missing one student, map a name column, choose the class → that student is
    listed as a leaver; misspell a name in the file → the row lands in « À vérifier », not on the

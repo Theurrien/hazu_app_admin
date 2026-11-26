@@ -1,4 +1,4 @@
-import type { Level, LevelChangeStudent } from '../../../shared/level-change-types';
+import type { Level, LevelChangePlan, LevelChangeStudent } from '../../../shared/level-change-types';
 import { normalizeName } from '../../../shared/person-match';
 
 /** Fewer than 2 characters → nothing; otherwise every query word must occur in the name. */
@@ -20,4 +20,11 @@ export function eligibility(s: LevelChangeStudent): { ok: true; toLevel: Level }
 
 export function levelLabel(l: Level): 'CFC' | 'AFP' {
   return l === 'cfc' ? 'CFC' : 'AFP';
+}
+
+/** Something « Appliquer » would write: colour, or a section with tags or a description.
+ *  A section only listed as « modifiée à la main » (descriptionKept) writes nothing. */
+export function hasApplicableChange(plan: LevelChangePlan | null): boolean {
+  if (!plan) return false;
+  return plan.colorChange || plan.sections.some((s) => !!s.description || s.addTags.length > 0 || s.removeTags.length > 0);
 }
