@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import type { Level } from '../../shared/level-change-types';
+import type { Level, LevelChangeOutcome } from '../../shared/level-change-types';
+import type { LevelChangeDecisions } from '../../shared/level-change-decisions';
 
 // Task type discriminated union
 export type TaskType = 'roleUpdate' | 'createRoom' | 'createPerson' | 'healTag' | 'revokeOrphanAccess' | 'pruneDeadTags' | 'archiveRoom' | 'restoreRoom' | 'archivePerson' | 'restorePerson' | 'levelChange';
@@ -109,10 +110,15 @@ export interface LevelChangeTask extends BaseTask {
   displayName: string;
   toLevel: Level;
   targetTemplateId: string;
-  // Called once, when the change is confirmed.
-  onDone?: () => void;
-  // Called once each time the task ends in error.
-  onError?: () => void;
+  // What the operator ticked in the preview; the run re-plans live and applies only these.
+  decisions: LevelChangeDecisions;
+  // Set when the run settles: how many items were ignored / noted (the lines are shown in Outils).
+  ignoredCount?: number;
+  notesCount?: number;
+  // Called once, when the change is confirmed, with the outcome (ignored items and notes included).
+  onDone?: (outcome: LevelChangeOutcome) => void;
+  // Called once each time the task ends in error: the outcome, or null when the call itself threw.
+  onError?: (outcome: LevelChangeOutcome | null, message?: string) => void;
 }
 
 export type Task = RoleUpdateTask | CreateRoomTask | CreatePersonTask | HealTagTask | RevokeOrphanAccessTask | PruneDeadTagsTask | ArchiveRoomTask | RestoreRoomTask | ArchivePersonTask | RestorePersonTask | LevelChangeTask;
@@ -348,20 +354,22 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
         const outcome = await window.electronAPI.executeLevelChange(
           task.personId,
           task.toLevel,
-          task.targetTemplateId
+          task.targetTemplateId,
+          task.decisions
         );
 
+        const counts = { ignoredCount: outcome.ignored.length, notesCount: (outcome.notes ?? []).length };
         if (outcome.success) {
           setTasks((prev) =>
-            prev.map((t) => (t.id === task.id ? { ...t, status: 'success' as const } : t))
+            prev.map((t) => (t.id === task.id ? { ...t, ...counts, status: 'success' as const } : t))
           );
-          try { task.onDone?.(); } catch { /* a callback failure cannot flip the result */ }
+          try { task.onDone?.(outcome); } catch { /* a callback failure cannot flip the result */ }
         } else {
           const error = outcome.error ?? (outcome.remaining.join(' · ') || 'Échec');
           setTasks((prev) =>
-            prev.map((t) => (t.id === task.id ? { ...t, status: 'error' as const, error } : t))
+            prev.map((t) => (t.id === task.id ? { ...t, ...counts, status: 'error' as const, error } : t))
           );
-          try { task.onError?.(); } catch { /* a callback failure cannot change the result */ }
+          try { task.onError?.(outcome); } catch { /* a callback failure cannot change the result */ }
         }
       } else if (nextTask.type === 'restorePerson') {
         const task = nextTask as RestorePersonTask;
@@ -387,7 +395,7 @@ export function TaskQueueProvider({ children }: { children: React.ReactNode }) {
       if (nextTask.type === 'createRoom') (nextTask as CreateRoomTask).onError?.();
       if (nextTask.type === 'createPerson') (nextTask as CreatePersonTask).onError?.();
       if (nextTask.type === 'levelChange') {
-        try { (nextTask as LevelChangeTask).onError?.(); } catch { /* cannot change the result */ }
+        try { (nextTask as LevelChangeTask).onError?.(null, errorMessage); } catch { /* cannot change the result */ }
       }
     }
 

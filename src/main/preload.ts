@@ -10,6 +10,7 @@ import type {
 import type {
   Level, LevelChangeCandidates, LevelChangeOutcome, LevelChangeStudent,
 } from '../shared/level-change-types';
+import type { LevelChangeDecisions } from '../shared/level-change-decisions';
 
 // Inline IPC channels to avoid module resolution issues in preload sandbox
 const IPC_CHANNELS = {
@@ -213,8 +214,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLevelChangeCandidates: (personId: string) => ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_CANDIDATES, personId),
   planLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_PLAN, personId, toLevel, targetTemplateId),
-  executeLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_EXECUTE, personId, toLevel, targetTemplateId),
+  executeLevelChange: (personId: string, toLevel: Level, targetTemplateId: string, decisions: LevelChangeDecisions) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LEVEL_CHANGE_EXECUTE, personId, toLevel, targetTemplateId, decisions),
 
   // Distribution Groups
   getDistributionGroup: (roomId: string, role: string) =>
@@ -409,7 +410,9 @@ declare global {
       getLevelChangeStudents: () => Promise<LevelChangeStudent[]>;
       getLevelChangeCandidates: (personId: string) => Promise<LevelChangeCandidates>;
       planLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) => Promise<LevelChangeOutcome>;
-      executeLevelChange: (personId: string, toLevel: Level, targetTemplateId: string) => Promise<LevelChangeOutcome>;
+      executeLevelChange: (
+        personId: string, toLevel: Level, targetTemplateId: string, decisions: LevelChangeDecisions,
+      ) => Promise<LevelChangeOutcome>;
       getDistributionGroup: (roomId: string, role: string) => Promise<{ id: string } | undefined>;
       createPerson: (params: {
         sourceId: string;

@@ -5,7 +5,11 @@
 // templates do not differ on, and any tag specific to the student, is never touched.
 
 import type { Level, LevelChangeOutcome, LevelChangePlan, SectionChange } from '../../shared/level-change-types';
+import { isWidgetPresent, type LevelChangeDecisions } from '../../shared/level-change-decisions';
 import { withRetry, failureMessage } from './room-archive';
+// Runtime cycle with these two modules is safe: each only calls the other's functions at call time.
+import { copySection, type CopyDeps } from './level-change-copy';
+import { countDescendants, deleteSection, widgetDescription } from './level-change-extra';
 
 export interface LcNode {
   id: string;
@@ -101,7 +105,7 @@ function holdsFamily(P: LcNode, f: string | null): boolean {
   return f !== null && P.tags.some(x => tagFamily(x) === f);
 }
 
-function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[]; remove: string[] } {
+function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[]; remove: string[]; uncertain: string[] } {
   const have = new Set(P.tags);
   const sTags = new Set(S.tags);
   const tTags = new Set(T.tags);
@@ -109,6 +113,8 @@ function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[
   const srcDeltaAll = [...new Set(SA.flatMap(n => n.tags))].filter(t => !tTags.has(t));
   const add = new Set<string>();
   const remove = new Set<string>();
+  // family-absent adds: the tag points at the template's object, not one of the student's
+  const uncertain = new Set<string>();
 
   for (const t of tgtDelta) {
     const f = tagFamily(t);
@@ -122,11 +128,15 @@ function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[
         // no tag of the family at all (e.g. an earlier run removed the source tag and the
         // addition never landed): the target tag is added
         add.add(t);
+        uncertain.add(t);
       }
       // otherwise the profile holds another tag of the family (e.g. a per-student pointer): left alone
     } else if (!have.has(t)) {
       // never a second tag of a family the profile already holds (e.g. a per-student carnet)
-      if (!holdsFamily(P, f)) add.add(t);
+      if (!holdsFamily(P, f)) {
+        add.add(t);
+        if (f !== null) uncertain.add(t); // an id-less tag only on the target stays certain
+      }
     }
   }
 
@@ -139,7 +149,7 @@ function planTags(P: LcNode, T: LcNode, S: LcNode, SA: LcNode[]): { add: string[
     if (f !== null && tgtFamilies.has(f)) continue; // paired: handled above
     if (have.has(s)) remove.add(s);
   }
-  return { add: [...add], remove: [...remove] };
+  return { add: [...add], remove: [...remove], uncertain: [...uncertain] };
 }
 
 export function buildPlan(input: PlanInput): LevelChangePlan {
@@ -151,21 +161,25 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
   const others = input.sourceOthers.map(t => sectionMap(t.children));
 
   const sections: SectionChange[] = [];
-  const templateOnly: string[] = [];
-  const profileOnly: string[] = [];
+  const templateOnlyItems: LevelChangePlan['templateOnlyItems'] = [];
+  const profileOnlyItems: LevelChangePlan['profileOnlyItems'] = [];
   const noSourceCounterpart: string[] = [];
 
   for (const [key, T] of tgt) {
     const P = prof.get(key);
-    if (!P) { templateOnly.push(stripTitle(T.title)); continue; }
+    if (!P) {
+      templateOnlyItems.push({ sectionKey: key, title: stripTitle(T.title), templateSectionId: T.id });
+      continue;
+    }
     const S = src.get(key);
     if (!S) { noSourceCounterpart.push(stripTitle(P.title)); continue; }
     const SA = [S, ...others.map(m => m.get(key)).filter((n): n is LcNode => !!n)];
 
-    const { add, remove } = planTags(P, T, S, SA);
+    const { add, remove, uncertain } = planTags(P, T, S, SA);
 
     let description: SectionChange['description'] = null;
     let descriptionKept = false;
+    let keptTargetDescription: string | null = null;
     const sD = normDesc(S.description);
     const tD = normDesc(T.description);
     if (sD !== tD) {
@@ -175,18 +189,23 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
           description = { from: P.description, to: tD === EMPTY_DESCRIPTION ? EMPTY_DESCRIPTION : T.description };
         } else {
           descriptionKept = true;
+          keptTargetDescription = tD === EMPTY_DESCRIPTION ? EMPTY_DESCRIPTION : T.description;
         }
       }
     }
 
     if (description || descriptionKept || add.length || remove.length) {
       sections.push({
-        sectionId: P.id, title: stripTitle(P.title), description, descriptionKept,
-        addTags: add, removeTags: remove,
+        sectionId: P.id, sectionKey: key, title: stripTitle(P.title), description, descriptionKept,
+        addTags: add, removeTags: remove, uncertainTags: uncertain, keptTargetDescription,
       });
     }
   }
-  for (const [key, P] of prof) if (!tgt.has(key)) profileOnly.push(stripTitle(P.title));
+  for (const [key, P] of prof) {
+    if (tgt.has(key)) continue;
+    // descendants are counted by a later step
+    profileOnlyItems.push({ sectionKey: key, title: stripTitle(P.title), sectionId: P.id, descendants: null, descendantsExact: false });
+  }
 
   const colorTo = LEVEL_COLORS[toLevel];
   return {
@@ -200,14 +219,19 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
       { id: input.source.ref.id, title: stripTitle(input.source.ref.title), role: 'source' },
       ...input.sourceOthers.map(t => ({ id: t.ref.id, title: stripTitle(t.ref.title), role: 'source-other' as const })),
     ],
-    sections, profileOnly, templateOnly, noSourceCounterpart,
+    sections, noSourceCounterpart,
+    templateOnlyItems, profileOnlyItems,
+    widget: {
+      needed: isWidgetPresent(input.target.ref.description) && !isWidgetPresent(profile.description),
+      profileEmpty: normDesc(profile.description) === EMPTY_DESCRIPTION,
+    },
   };
 }
 
 // ---------------------------------------------------------------------------------------------
 // Orchestrator. All IO injected. The live read decides, never the status code.
 
-export interface LevelChangeDeps {
+export interface LevelChangeBaseDeps {
   /** null only on 404 */
   read(id: string): Promise<LcNode | null>;
   /** throws on failure; parent echo removed */
@@ -219,32 +243,202 @@ export interface LevelChangeDeps {
   sleep(ms: number): Promise<void>;
 }
 
+/** One deps object: the section/colour writes, the copy walk (with access) and the delete. */
+export type LevelChangeDeps = LevelChangeBaseDeps & CopyDeps & { remove(id: string): Promise<void> };
+
 export interface LevelChangeInput {
   profileId: string;
   toLevel: Level;
   targetTemplateId: string;
   templateRootId: string;
   dryRun: boolean;
+  /** required when dryRun is false; a dry run ignores it */
+  decisions?: LevelChangeDecisions;
+  /** role-group groupId → role (from distribution_groups), for the access alignment of copies */
+  roleGroups: Map<string, string>;
+  /** the student's account id; null = identity unresolved (invite grants then stay unconfirmed) */
+  studentId: string | null;
 }
 
 const VERIFY_READS = 3;
 const VERIFY_DELAY_MS = 750;
 
-function sectionConfirmation(c: SectionChange, live: LcNode | undefined): { tags: boolean; description: boolean } {
+/** What this run actually writes to one section, after the decisions. */
+interface Write { sectionId: string; title: string; addTags: string[]; removeTags: string[]; descriptionTo: string | null }
+
+function sectionConfirmation(c: Write, live: LcNode | undefined): { tags: boolean; description: boolean } {
   if (!live) return { tags: false, description: false };
   const tags = c.addTags.every(t => live.tags.includes(t)) && c.removeTags.every(t => !live.tags.includes(t));
-  const description = !c.description || normDesc(live.description) === normDesc(c.description.to);
+  const description = c.descriptionTo === null || normDesc(live.description) === normDesc(c.descriptionTo);
   return { tags, description };
+}
+
+/** Shown for an item the operator did not tick, or that the preview never showed. */
+export const NOT_TICKED = "non coché ou non vu à l'aperçu — ignoré";
+
+/**
+ * A section's display title for a report line: from the live plan when it still knows the key,
+ * else the title part of the key (lower-cased, as in the key).
+ */
+function titleOf(plan: LevelChangePlan, key: string): string {
+  const known = plan.sections.find(s => s.sectionKey === key)
+    ?? plan.templateOnlyItems.find(s => s.sectionKey === key)
+    ?? plan.profileOnlyItems.find(s => s.sectionKey === key);
+  if (known) return known.title;
+  const i = key.indexOf('|');
+  return i < 0 ? key : key.slice(0, i);
+}
+
+/** Apply the decisions to the live plan: what is written, and what is skipped or without object. */
+function applyDecisions(plan: LevelChangePlan, d: LevelChangeDecisions): { writes: Write[]; ignored: string[] } {
+  const writes: Write[] = [];
+  const ignored: string[] = [];
+  const accepted = new Set(d.acceptedTagAdds.map(a => `${a.sectionKey}\u0000${a.tag}`));
+  const forced = new Set(d.forcedDescriptions);
+  const seenTags = new Set<string>();
+  const seenForceable = new Set<string>();
+
+  for (const c of plan.sections) {
+    const uncertain = new Set(c.uncertainTags);
+    const addTags: string[] = [];
+    for (const t of c.addTags) {
+      if (!uncertain.has(t)) { addTags.push(t); continue; }
+      const k = `${c.sectionKey}\u0000${t}`;
+      seenTags.add(k);
+      if (accepted.has(k)) addTags.push(t);
+      else ignored.push(`« ${c.title} » : étiquette ${t} — ${NOT_TICKED}`);
+    }
+    let descriptionTo: string | null = c.description ? c.description.to : null;
+    if (c.descriptionKept && c.keptTargetDescription !== null) {
+      seenForceable.add(c.sectionKey);
+      if (forced.has(c.sectionKey)) descriptionTo = c.keptTargetDescription;
+    }
+    if (addTags.length || c.removeTags.length || descriptionTo !== null) {
+      writes.push({ sectionId: c.sectionId, title: c.title, addTags, removeTags: c.removeTags, descriptionTo });
+    }
+  }
+  for (const a of d.acceptedTagAdds) {
+    if (!seenTags.has(`${a.sectionKey}\u0000${a.tag}`)) ignored.push(`« ${titleOf(plan, a.sectionKey)} » : étiquette ${a.tag} — décision sans objet — ignorée`);
+  }
+  for (const k of d.forcedDescriptions) {
+    if (!seenForceable.has(k)) ignored.push(`« ${titleOf(plan, k)} » : description — décision sans objet — ignorée`);
+  }
+  return { writes, ignored };
+}
+
+/** The actions this run takes after the section writes, chosen from the live plan. */
+interface Actions {
+  copies: LevelChangePlan['templateOnlyItems'];
+  deletes: LevelChangePlan['profileOnlyItems'];
+  widget: boolean;
+}
+
+/** Only what the live plan still holds AND the operator ticked; everything else is reported. */
+function selectActions(plan: LevelChangePlan, d: LevelChangeDecisions): { actions: Actions; ignored: string[] } {
+  const ignored: string[] = [];
+  const tick = new Set(d.copySections);
+  const copies = plan.templateOnlyItems.filter(i => tick.has(i.sectionKey));
+  for (const i of plan.templateOnlyItems) {
+    if (!tick.has(i.sectionKey)) ignored.push(`« ${i.title} » : copie — ${NOT_TICKED}`);
+  }
+  const live = new Set(plan.templateOnlyItems.map(i => i.sectionKey));
+  for (const k of new Set(d.copySections)) {
+    if (!live.has(k)) ignored.push(`« ${titleOf(plan, k)} » : copie — décision sans objet — ignorée`);
+  }
+  // a delete needs both the key and the id of a live profile-only section: never another one
+  const deletes: Actions['deletes'] = [];
+  for (const x of d.deleteSections) {
+    const item = plan.profileOnlyItems.find(i => i.sectionKey === x.sectionKey && i.sectionId === x.sectionId);
+    if (!item) ignored.push(`« ${titleOf(plan, x.sectionKey)} » : suppression — décision sans objet — ignorée`);
+    else if (!deletes.includes(item)) deletes.push(item);
+  }
+  let widget = false;
+  if (plan.widget.needed) {
+    if (d.addWidget) widget = true;
+    else ignored.push(`widget : ${NOT_TICKED}`);
+  } else if (d.addWidget) {
+    ignored.push('widget : décision sans objet — ignorée');
+  }
+  return { actions: { copies, deletes, widget }, ignored };
+}
+
+const DUPLICATE_REMOVED_NOTE = 'doublon de la copie supprimé';
+const ACCESS_PROBLEM = /^accès non confirmés : « (.*) »$/;
+/**
+ * The copy is kept with its access unconfirmed. A re-run does not repair it: the section then
+ * exists in the profile, is no longer template-only, and existing sections' access is out of scope.
+ */
+function accessLine(sectionTitle: string, nodeTitle: string): string {
+  const node = nodeTitle !== sectionTitle ? ` (élément « ${nodeTitle} »)` : '';
+  return `accès non confirmé sur « ${sectionTitle} »${node} — à corriger à la main (une nouvelle exécution ne le refait pas)`;
+}
+
+const hasActions = (a: Actions) => a.copies.length > 0 || a.deletes.length > 0 || a.widget;
+
+/**
+ * Copies (+ access), deletes, widget — independent of each other, so all are attempted; each is
+ * confirmed by its own live read. `applied` counts the confirmed ones.
+ */
+async function runActions(
+  a: Actions, ctx: {
+    profile: LcNode; targetRootDescription: string; targetKeys: Set<string>;
+    roleGroups: Map<string, string>; studentId: string | null;
+  }, deps: LevelChangeDeps,
+): Promise<{ applied: number; remaining: string[]; notes: string[] }> {
+  const remaining: string[] = [];
+  const notes: string[] = [];
+  let applied = 0;
+  const profileId = ctx.profile.id;
+
+  for (const c of a.copies) {
+    const r = await copySection(c.templateSectionId, profileId, deps, ctx.roleGroups, ctx.studentId);
+    const failures: string[] = [];
+    for (const p of r.problems) {
+      const access = ACCESS_PROBLEM.exec(p);
+      if (p === DUPLICATE_REMOVED_NOTE) notes.push(`« ${c.title} » : ${p}`); // informational, never a failure
+      else if (r.ok) notes.push(`« ${c.title} » : ${p}`);
+      else if (access) failures.push(accessLine(c.title, access[1]));
+      else failures.push(`« ${c.title} » : ${p}`);
+    }
+    if (r.ok) { applied++; continue; }
+    remaining.push(...(failures.length ? failures : [`« ${c.title} » : copie non confirmée`]));
+  }
+
+  for (const x of a.deletes) {
+    const r = await deleteSection(profileId, x, ctx.targetKeys, deps);
+    if (r.ok) applied++;
+    else remaining.push(`« ${x.title} » : ${r.problem ?? 'suppression non confirmée'}`);
+  }
+
+  if (a.widget) {
+    // Built from the plan-time profile description: valid because no earlier step writes the profile's own description.
+    const html = widgetDescription(ctx.profile.description, ctx.targetRootDescription);
+    try { await withRetry(deps, () => deps.updateDescription(profileId, html)); } catch { /* verified below */ }
+    let ok = false;
+    for (let i = 0; i < VERIFY_READS && !ok; i++) {
+      if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+      try {
+        const p = await withRetry(deps, () => deps.read(profileId));
+        ok = !!p && isWidgetPresent(p.description);
+      } catch { /* retry */ }
+    }
+    if (ok) applied++; else remaining.push('widget non confirmé dans la description du profil');
+  }
+  return { applied, remaining, notes };
 }
 
 export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeDeps): Promise<LevelChangeOutcome> {
   const refuse = (error: string, plan: LevelChangePlan | null = null): LevelChangeOutcome =>
-    ({ success: false, dryRun: input.dryRun, plan, applied: 0, remaining: [], error });
+    ({ success: false, dryRun: input.dryRun, plan, applied: 0, remaining: [], ignored: [], error });
   const EMPTY = "liste vide — rien n'a été écrit";
+  if (!input.dryRun && !input.decisions) return refuse("décisions manquantes — rien n'a été écrit");
 
   let plan: LevelChangePlan;
+  let profile: LcNode | null;
+  let targetRef: LcNode | undefined;
+  let targetChildren: LcNode[] | null;
   try {
-    const profile = await withRetry(deps, () => deps.read(input.profileId));
+    profile = await withRetry(deps, () => deps.read(input.profileId));
     if (!profile) return refuse('profil introuvable');
     // A template is recognised by where it sits, not by its tag: every student profile is a copy
     // of a template and carries hz-config-profile-student too (measured: all synced students).
@@ -255,7 +449,7 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     const rootChildren = await withRetry(deps, () => deps.list(input.templateRootId));
     const templates = studentTemplates(input.templateRootId, rootChildren);
     const targets = templatesFor(templates, profile.icon, input.toLevel);
-    const targetRef = targets.find(t => t.id === input.targetTemplateId);
+    targetRef = targets.find(t => t.id === input.targetTemplateId);
     if (!targetRef) return refuse('modèle cible invalide pour ce profil');
 
     const fromTemplates = templatesFor(templates, profile.icon, otherLevel(input.toLevel));
@@ -269,7 +463,7 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
       return kids.length === 0 ? null : kids;
     };
     const profileChildren = await listNonEmpty(profile.id);
-    const targetChildren = await listNonEmpty(targetRef.id);
+    targetChildren = await listNonEmpty(targetRef.id);
     const sourceChildren = await listNonEmpty(sourceRef.id);
     const otherChildren: Array<LcNode[] | null> = [];
     for (const o of otherRefs) otherChildren.push(await listNonEmpty(o.id));
@@ -287,11 +481,25 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     return refuse(`lecture impossible : ${failureMessage(e)} — rien n'a été écrit`);
   }
 
-  if (input.dryRun) return { success: true, dryRun: true, plan, applied: 0, remaining: [] };
+  if (input.dryRun) {
+    // Shown before a delete is ticked: one budget for all sections, never smaller than the truth.
+    const budget = { remaining: 500 };
+    for (const item of plan.profileOnlyItems) {
+      // strict listing: an unexpected response shape throws instead of counting as « 0 »
+      const r = await countDescendants(item.sectionId, deps.listFull, budget, deps.sleep);
+      item.descendants = r.total;
+      item.descendantsExact = r.exact;
+    }
+    return { success: true, dryRun: true, plan, applied: 0, remaining: [], ignored: [] };
+  }
 
-  const changes = plan.sections.filter(s => s.description || s.addTags.length || s.removeTags.length);
-  if (changes.length === 0 && !plan.colorChange) {
-    return { success: true, dryRun: false, plan, applied: 0, remaining: [] };
+  const decided = applyDecisions(plan, input.decisions!);
+  const changes = decided.writes;
+  const selected = selectActions(plan, input.decisions!);
+  const actions = selected.actions;
+  const ignored = [...decided.ignored, ...selected.ignored];
+  if (changes.length === 0 && !hasActions(actions) && !plan.colorChange) {
+    return { success: true, dryRun: false, plan, applied: 0, remaining: [], ignored };
   }
 
   // Write sections: failures are kept, not fatal — only the live read decides.
@@ -303,12 +511,12 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     // finishes by removing; the reverse would leave neither.
     if (c.addTags.length) await attempt(() => deps.addTags(c.sectionId, c.addTags));
     if (c.removeTags.length) await attempt(() => deps.removeTags(c.sectionId, c.removeTags));
-    if (c.description) await attempt(() => deps.updateDescription(c.sectionId, c.description!.to));
+    if (c.descriptionTo !== null) await attempt(() => deps.updateDescription(c.sectionId, c.descriptionTo!));
   }
 
   // Verify sections against the re-listed profile.
   let lastLive: LcNode[] = [];
-  let sectionsOk = false;
+  let sectionsOk = changes.length === 0; // nothing written: nothing to confirm
   for (let i = 0; i < VERIFY_READS && !sectionsOk; i++) {
     if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
     try {
@@ -329,8 +537,23 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     if (!r.description) remaining.push(`« ${c.title} » : description non confirmée`);
   }
   if (!sectionsOk) {
+    if (hasActions(actions)) remaining.push('actions supplémentaires non faites — sections non confirmées');
     if (plan.colorChange) remaining.push('couleur du profil non modifiée — sections non confirmées');
-    return { success: false, dryRun: false, plan, applied, remaining };
+    return { success: false, dryRun: false, plan, applied, remaining, ignored };
+  }
+
+  // Copies, deletes and widget, each confirmed by its own read; any failure withholds the colour.
+  const acted = await runActions(actions, {
+    profile: profile!, targetRootDescription: targetRef!.description,
+    targetKeys: new Set(targetChildren!.map(sectionKey)),
+    roleGroups: input.roleGroups, studentId: input.studentId,
+  }, deps);
+  applied += acted.applied;
+  const notes = acted.notes;
+  if (acted.remaining.length > 0) {
+    remaining.push(...acted.remaining);
+    if (plan.colorChange) remaining.push('couleur du profil non modifiée — étapes précédentes non confirmées');
+    return { success: false, dryRun: false, plan, applied, remaining, ignored, notes };
   }
 
   // Colour last: it is what marks the profile as changed, so it only moves once every section holds.
@@ -346,5 +569,5 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     }
     if (colorOk) applied++; else remaining.push('couleur du profil non confirmée');
   }
-  return { success: remaining.length === 0, dryRun: false, plan, applied, remaining };
+  return { success: remaining.length === 0, dryRun: false, plan, applied, remaining, ignored, notes };
 }
