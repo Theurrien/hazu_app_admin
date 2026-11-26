@@ -11,8 +11,18 @@ import {
   distinctRoomValues,
   applyStudentOverrides,
   roomLabel,
+  visibleLines,
+  tickMissing,
+  confirmSummary,
+  checkInputFrom,
+  leaverMatches,
+  keepTicks,
   type ControleColumns,
+  type LineFilter,
+  type ResolvedForCheck,
 } from './controle-logic';
+import type { PairLine } from '../../../../shared/cross-check';
+import { crossCheck } from '../../../../shared/cross-check';
 import { resolveRoomValues, type RoomCategory, type RoomResolution, type StudentResolution } from '../../../../shared/correspondence';
 
 describe('controleColumns', () => {
@@ -241,5 +251,169 @@ describe('applyStudentOverrides', () => {
     expect(out.get(1)).toEqual({ res: { kind: 'ignored' }, saveKey: null });
     expect(out.get(2)).toEqual(res.get(2));
     expect(res.get(1)!.res.kind).toBe('unknown'); // input untouched
+  });
+});
+
+// ---- Step 3 ----
+
+const line = (over: Partial<PairLine> & Pick<PairLine, 'key' | 'personId' | 'status' | 'category'>): PairLine => ({
+  rowIndexes: [0],
+  fileValue: 'v',
+  roomId: 'r',
+  ...over,
+});
+
+const NAMES: Record<string, string> = { pB: 'Exemple Bruno', pA: 'Exemple Alice', pC: 'Exemple Chloé' };
+const nameOf = (id: string) => NAMES[id] ?? '';
+const allFilter: LineFilter = { categories: [], statuses: [], search: '', showOk: false };
+
+const LINES: PairLine[] = [
+  line({ key: 'b-ok', personId: 'pB', category: 'class', status: 'ok' }),
+  line({ key: 'b-miss', personId: 'pB', category: 'class', status: 'missing' }),
+  line({ key: 'a-miss', personId: 'pA', category: 'enterprise', status: 'missing' }),
+  line({ key: 'a-extra', personId: 'pA', category: 'enterprise', status: 'extra', fileValue: null }),
+  line({ key: 'c-unv', personId: 'pC', category: 'state', status: 'unverifiable', roomId: null }),
+  line({ key: 'c-role', personId: 'pC', category: 'class', status: 'other-role', hazuRole: 'companymentor' }),
+];
+
+describe('visibleLines', () => {
+  it('hides OK lines and groups by student name, file order kept inside a student', () => {
+    expect(visibleLines(LINES, allFilter, nameOf).map((l) => l.key)).toEqual(['a-miss', 'a-extra', 'b-miss', 'c-unv', 'c-role']);
+  });
+  it('shows OK lines with showOk', () => {
+    expect(visibleLines(LINES, { ...allFilter, showOk: true }, nameOf).map((l) => l.key)).toContain('b-ok');
+  });
+  it('filters by category', () => {
+    expect(visibleLines(LINES, { ...allFilter, categories: ['class'] }, nameOf).map((l) => l.key)).toEqual(['b-miss', 'c-role']);
+  });
+  it('filters by status', () => {
+    expect(visibleLines(LINES, { ...allFilter, statuses: ['missing'] }, nameOf).map((l) => l.key)).toEqual(['a-miss', 'b-miss']);
+  });
+  it('a status filter never shows OK lines unless showOk', () => {
+    expect(visibleLines(LINES, { ...allFilter, statuses: ['ok'] }, nameOf)).toEqual([]);
+    expect(visibleLines(LINES, { ...allFilter, statuses: ['ok'], showOk: true }, nameOf).map((l) => l.key)).toEqual(['b-ok']);
+  });
+  it('searches the student name, accents and case ignored', () => {
+    expect(visibleLines(LINES, { ...allFilter, search: 'CHLOE' }, nameOf).map((l) => l.key)).toEqual(['c-unv', 'c-role']);
+    expect(visibleLines(LINES, { ...allFilter, search: '  ' }, nameOf)).toHaveLength(5);
+  });
+});
+
+describe('tickMissing', () => {
+  it('adds every visible missing key, keeps existing ticks, ignores extra lines', () => {
+    const out = tickMissing(LINES, new Set(['a-extra']));
+    expect([...out].sort()).toEqual(['a-extra', 'a-miss', 'b-miss']);
+  });
+  it('does not change the input set', () => {
+    const before = new Set<string>();
+    tickMissing(LINES, before);
+    expect(before.size).toBe(0);
+  });
+  it('never ticks an extra line', () => {
+    expect(tickMissing([LINES[3]], new Set()).size).toBe(0);
+  });
+});
+
+describe('confirmSummary', () => {
+  it('counts adds, lists removals, counts company removals only', () => {
+    const extraState = line({ key: 's-extra', personId: 'pB', category: 'state', status: 'extra', fileValue: null });
+    const extraClass = line({ key: 'k-extra', personId: 'pB', category: 'class', status: 'extra', fileValue: null });
+    const s = confirmSummary([LINES[1], LINES[2], LINES[3], extraState, extraClass, LINES[4]]);
+    expect(s.adds).toBe(2);
+    expect(s.removals.map((l) => l.key)).toEqual(['a-extra', 's-extra', 'k-extra']);
+    expect(s.companyRemovals).toBe(1);
+  });
+  it('is empty for no lines', () => {
+    expect(confirmSummary([])).toEqual({ adds: 0, removals: [], companyRemovals: 0 });
+  });
+});
+
+describe('keepTicks', () => {
+  it('drops ticks of lines that vanished or no longer have a box', () => {
+    const now = [
+      line({ key: 'x', personId: 'p', category: 'class', status: 'missing' }),
+      line({ key: 'y', personId: 'p', category: 'class', status: 'ok' }),
+    ];
+    expect([...keepTicks(new Set(['x', 'y', 'gone']), now)]).toEqual(['x']);
+  });
+});
+
+describe('checkInputFrom', () => {
+  const resolved: ResolvedForCheck = {
+    students: new Map<number, StudentResolution>([
+      [0, { kind: 'matched', personId: 'pA' }],
+      [1, { kind: 'saved', personId: 'pB' }],
+      [2, { kind: 'ignored' }],
+    ]),
+    rooms: {
+      class: new Map<string, RoomResolution>([
+        ['cui 2a', { kind: 'exact', hazuId: 'c1' }],
+        ['vieille', { kind: 'ignored' }],
+      ]),
+    },
+    categoryIds: new Set(['cat']),
+  };
+  const cells = new Map<number, Partial<Record<RoomCategory, string>>>([
+    [0, { class: 'CUI  2A' }],
+    [1, { class: 'Vieille' }],
+    [2, { class: 'CUI 2A' }],
+  ]);
+  const rooms = [
+    { id: 'cat', room_type: 'class' },
+    { id: 'c1', room_type: 'class' },
+    { id: 'e1', room_type: 'enterprise' },
+    { id: 's1', room_type: 'state' },
+    { id: 'k1', room_type: 'cie' },
+  ];
+  const input = checkInputFrom(resolved, cells, ['class'], rooms, []);
+
+  it('keeps only rows resolved to a person, with their cells', () => {
+    expect(input.rows).toEqual([
+      { rowIndex: 0, personId: 'pA', cells: { class: 'CUI  2A' } },
+      { rowIndex: 1, personId: 'pB', cells: { class: 'Vieille' } },
+    ]);
+  });
+  it('a row resolved to a person but without cells is still a row (nothing checked)', () => {
+    const i = checkInputFrom(resolved, new Map(), ['class'], rooms, []);
+    expect(i.rows.map((r) => r.personId)).toEqual(['pA', 'pB']);
+  });
+  it('cellOf resolves through roomKey, ignored stays ignored', () => {
+    expect(input.cellOf('class', 'cui 2a')).toEqual({ kind: 'room', roomId: 'c1' });
+    expect(input.cellOf('class', 'Vieille')).toEqual({ kind: 'ignored' });
+  });
+  it('roomCategory covers class, enterprise and state, never a category folder or a CIE room', () => {
+    expect([...input.roomCategory.entries()]).toEqual([
+      ['c1', 'class'],
+      ['e1', 'enterprise'],
+      ['s1', 'state'],
+    ]);
+  });
+  it('feeds crossCheck end to end', () => {
+    const i = checkInputFrom(resolved, cells, ['class'], rooms, [
+      { person_id: 'pA', room_id: 'c1', role: 'student' },
+      { person_id: 'pB', room_id: 'c1', role: 'student' },
+    ]);
+    const r = crossCheck(i);
+    expect(r.lines.map((l) => [l.personId, l.status])).toEqual([
+      ['pA', 'ok'],
+      ['pB', 'unverifiable'],
+    ]);
+  });
+});
+
+describe('leaverMatches', () => {
+  it('rows resolved to a person are present; ignored rows are unknown', () => {
+    const m = leaverMatches(
+      new Map<number, StudentResolution>([
+        [0, { kind: 'matched', personId: 'pA' }],
+        [3, { kind: 'saved', personId: 'pB' }],
+        [4, { kind: 'ignored' }],
+      ]),
+    );
+    expect(m).toEqual([
+      { kind: 'matched', rowIndex: 0, personId: 'pA', by: 'name' },
+      { kind: 'matched', rowIndex: 3, personId: 'pB', by: 'name' },
+      { kind: 'unknown', rowIndex: 4 },
+    ]);
   });
 });

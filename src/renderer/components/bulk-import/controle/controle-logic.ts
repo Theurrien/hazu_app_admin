@@ -1,8 +1,9 @@
 /**
- * Contrôle, steps 1 and 2 — pure decisions about the column mapping and the sheet rows. No IO, no React.
+ * Contrôle, steps 1 to 3 — pure decisions about the column mapping and the sheet rows. No IO, no React.
  */
-import type { SheetPerson } from '../../../../shared/person-match';
-import { isResolved, roomKey } from '../../../../shared/correspondence';
+import { normalizeName, type RowMatch, type SheetPerson } from '../../../../shared/person-match';
+import { isResolved, resolvedId, roomKey } from '../../../../shared/correspondence';
+import type { CheckInput, CheckRow, PairLine, PairStatus } from '../../../../shared/cross-check';
 import type {
   CorrCategory,
   RoomCandidate,
@@ -199,4 +200,113 @@ export interface ResolvedForCheck {
   rooms: Partial<Record<RoomCategory, Map<string, RoomResolution>>>;
   /** Category folder ids: never a room to check against (empty when root_hazu_id is unknown). */
   categoryIds: Set<string>;
+}
+
+// ---- Step 3: the check ----
+
+const CHECKED_TYPES: ReadonlySet<string> = new Set<RoomCategory>(['class', 'enterprise', 'state']);
+
+/**
+ * The cross-check input: rows whose student resolves to a person (ignored rows are not checked),
+ * cells looked up by `roomKey` in step 2's resolutions, and the category of every local room of the
+ * three checked types — category folders and CIE rooms left out, so naming one is « non vérifiable ».
+ */
+export function checkInputFrom(
+  resolved: ResolvedForCheck,
+  cells: Map<number, Partial<Record<RoomCategory, string>>>,
+  mapped: RoomCategory[],
+  rooms: Array<{ id: string; room_type: string }>,
+  assignments: Array<{ person_id: string; room_id: string; role: string }>,
+): CheckInput {
+  const rows: CheckRow[] = [];
+  for (const [rowIndex, res] of [...resolved.students].sort((a, b) => a[0] - b[0])) {
+    const personId = isResolved(res) ? resolvedId(res) : null;
+    if (personId === null) continue;
+    rows.push({ rowIndex, personId, cells: cells.get(rowIndex) ?? {} });
+  }
+  const roomCategory = new Map<string, RoomCategory>();
+  for (const r of rooms) {
+    if (CHECKED_TYPES.has(r.room_type) && !resolved.categoryIds.has(r.id)) roomCategory.set(r.id, r.room_type as RoomCategory);
+  }
+  return {
+    rows,
+    mapped,
+    // Step 3 is only reached with every value resolved; anything else is treated as ignored (unverifiable).
+    cellOf: (category, value) => {
+      const res = resolved.rooms[category]?.get(roomKey(value));
+      const roomId = res && isResolved(res) ? resolvedId(res) : null;
+      return roomId === null ? { kind: 'ignored' } : { kind: 'room', roomId };
+    },
+    roomCategory,
+    assignments,
+  };
+}
+
+/** Only « Manquant » and « En trop » lines have a box. */
+export function hasBox(line: PairLine): boolean {
+  return line.status === 'missing' || line.status === 'extra';
+}
+
+export interface LineFilter {
+  /** Empty = every category. */
+  categories: RoomCategory[];
+  /** Empty = every status. */
+  statuses: PairStatus[];
+  search: string;
+  showOk: boolean;
+}
+
+/** The lines to show: no OK line unless `showOk`; grouped by student name, check order kept inside a student. */
+export function visibleLines(lines: PairLine[], f: LineFilter, nameOf: (personId: string) => string): PairLine[] {
+  const q = normalizeName(f.search);
+  const shown = lines.filter(
+    (l) =>
+      (l.status !== 'ok' || f.showOk) &&
+      (f.categories.length === 0 || f.categories.includes(l.category)) &&
+      (f.statuses.length === 0 || f.statuses.includes(l.status)) &&
+      (q === '' || normalizeName(nameOf(l.personId)).includes(q)),
+  );
+  const order = new Map(lines.map((l, i) => [l.key, i]));
+  return shown.sort(
+    (a, b) =>
+      nameOf(a.personId).localeCompare(nameOf(b.personId), 'fr') ||
+      a.personId.localeCompare(b.personId) ||
+      order.get(a.key)! - order.get(b.key)!,
+  );
+}
+
+/** « Cocher les manquants »: adds every visible « Manquant » key. There is no shortcut for removals. */
+export function tickMissing(visible: PairLine[], ticked: Set<string>): Set<string> {
+  const out = new Set(ticked);
+  for (const l of visible) if (l.status === 'missing') out.add(l.key);
+  return out;
+}
+
+/** What the confirmation shows: additions, the removal lines, and how many removals are companies. */
+export function confirmSummary(lines: PairLine[]): { adds: number; removals: PairLine[]; companyRemovals: number } {
+  const removals = lines.filter((l) => l.status === 'extra');
+  return {
+    adds: lines.filter((l) => l.status === 'missing').length,
+    removals,
+    companyRemovals: removals.filter((l) => l.category === 'enterprise').length,
+  };
+}
+
+/** After a recompute: ticks of lines that vanished, or no longer have a box, are dropped. */
+export function keepTicks(ticked: Set<string>, lines: PairLine[]): Set<string> {
+  const boxed = new Set(lines.filter(hasBox).map((l) => l.key));
+  return new Set([...ticked].filter((k) => boxed.has(k)));
+}
+
+/**
+ * Student resolutions as the matches `findLeavers` reads: a row resolved to a person is present; an
+ * ignored row is « unknown » (it names nobody, and Verify's warning about such rows applies).
+ */
+export function leaverMatches(students: Map<number, StudentResolution>): RowMatch[] {
+  const out: RowMatch[] = [];
+  for (const [rowIndex, res] of [...students].sort((a, b) => a[0] - b[0])) {
+    const personId = isResolved(res) ? resolvedId(res) : null;
+    out.push(personId === null ? { kind: 'unknown', rowIndex } : { kind: 'matched', rowIndex, personId, by: 'name' });
+  }
+  return out;
 }

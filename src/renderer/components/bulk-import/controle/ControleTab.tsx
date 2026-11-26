@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   isResolved,
   resolveRoomValues,
@@ -28,6 +28,7 @@ import {
   type ControleState,
   type ResolvedForCheck,
 } from './controle-logic';
+import { ControleResults } from './ControleResults';
 import { RoomCorrespondencePanel } from './RoomCorrespondencePanel';
 import { SavedCorrespondencesDrawer } from './SavedCorrespondencesDrawer';
 import { StudentCorrespondencePanel } from './StudentCorrespondencePanel';
@@ -89,6 +90,8 @@ export function ControleTab({ fileData }: ControleTabProps) {
   const [state, setState] = useState<ControleState>(resetForNewFile);
   // Bumped on every file change; discards loads and saves that finish after the file changed.
   const generationRef = useRef(0);
+  /** Step 3's own Task Queue tasks; see ControleResults. */
+  const ownTasks = useRef({ mine: new Set<string>(), handled: new Set<string>() });
 
   const [data, setData] = useState<StepData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,6 +105,7 @@ export function ControleTab({ fileData }: ControleTabProps) {
 
   useEffect(() => {
     generationRef.current += 1;
+    ownTasks.current = { mine: new Set(), handled: new Set() };
     setState(resetForNewFile());
     setData(null);
     setOverrides(new Map());
@@ -175,6 +179,15 @@ export function ControleTab({ fileData }: ControleTabProps) {
   const openStudents = studentRes ? openCount([...studentRes.values()].map((v) => v.res)) : 0;
   const allResolved =
     !!data && !!studentRes && openStudents === 0 && categories.every((c) => openRooms(c) === 0);
+
+  // Leavers need a name column, as in Verify (an e-mail alone may name a profile whose identity tag holds a UID).
+  const nameMapped = !!columns.fullName || (!!columns.firstName && !!columns.lastName);
+
+  /** Stable: step 3 calls it from an effect after every recompute. */
+  const setTicked = useCallback(
+    (update: (prev: Set<string>) => Set<string>) => setState((prev) => ({ ...prev, ticked: update(prev.ticked) })),
+    [],
+  );
 
   const handleMappingChange = (header: string, mapping: ColumnMapping | null) => {
     setOverrides(new Map()); // overrides are per row of the old identity columns
@@ -358,15 +371,19 @@ export function ControleTab({ fileData }: ControleTabProps) {
         </>
       )}
 
-      {state.step === 3 && (
-        <>
-          <p className="text-sm text-gray-500">
-            Résultats — à venir{resolved ? ` (${resolved.students.size} lignes)` : ''}
-          </p>
-          <button type="button" className={secondary} onClick={() => setState((prev) => ({ ...prev, step: 2 }))}>
-            Retour
-          </button>
-        </>
+      {state.step === 3 && resolved && checked && (
+        <ControleResults
+          resolved={resolved}
+          cells={checked.cells}
+          categories={categories}
+          nameMapped={nameMapped}
+          droppedRows={fileData.rows.length - checked.sheet.length}
+          generationRef={generationRef}
+          ticked={state.ticked}
+          onTickedChange={setTicked}
+          ownTasks={ownTasks}
+          onBack={() => setState((prev) => ({ ...prev, step: 2 }))}
+        />
       )}
 
       {drawerOpen && data && (
