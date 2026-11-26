@@ -91,7 +91,7 @@ label stays the same.
   the student's, so on an incomplete subtree the run deletes its own fresh copy and fails, naming it.
   A re-run then copies it again. After a create that times out, the profile is re-listed and the
   section matched by key **before** any resend, never a blind resend.
-- **Uncertain items with no decision are skipped and reported** (« non vu à l'aperçu — ignoré »),
+- **Uncertain items with no decision are skipped and reported** (« non coché ou non vu à l'aperçu — ignoré », ruling R5 as updated in the final review),
   never applied at their default: nothing is written that the operator did not see.
 - **A family-absent add keeps its box in a finishing run**, ticked by default. Unticking it is the
   operator's explicit choice. Tags without a trailing id that appear only on the target stay
