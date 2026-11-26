@@ -208,14 +208,14 @@ describe('buildPlan structure', () => {
     });
     expect(p.sections).toEqual([]);
   });
-  it('profileOnly, templateOnly, no source counterpart', () => {
+  it('profile-only, template-only, no source counterpart', () => {
     const p = plan({
       source: [],
       target: [node({ id: 't1', title: 'Both' }), node({ id: 't2', title: 'TplOnly' })],
       profile: [node({ id: 'p1', title: 'Both' }), node({ id: 'p2', title: 'ProfOnly' })],
     });
-    expect(p.profileOnly).toEqual(['ProfOnly']);
-    expect(p.templateOnly).toEqual(['TplOnly']);
+    expect(p.profileOnlyItems.map(i => i.title)).toEqual(['ProfOnly']);
+    expect(p.templateOnlyItems.map(i => i.title)).toEqual(['TplOnly']);
     expect(p.noSourceCounterpart).toEqual(['Both']);
     expect(p.sections).toEqual([]);
   });
@@ -287,8 +287,6 @@ describe('buildPlan decision additions', () => {
     expect(p.profileOnlyItems).toEqual([
       { sectionKey: 'profonly|fa-x|#111111', title: 'ProfOnly', sectionId: 'p2', descendants: null, descendantsExact: false },
     ]);
-    expect(p.profileOnly).toEqual(['ProfOnly']);
-    expect(p.templateOnly).toEqual(['TplOnly']);
   });
   it('widget: needed unless the profile holds student_app.html; profileEmpty on empty descriptions', () => {
     const W = '<p>x</p><iframe src="https://h.example/student_app.html"></iframe>';
@@ -356,13 +354,13 @@ describe('runLevelChange', () => {
       async setRole(item: string, principal: string, role: string) {
         calls.push('acl:' + item);
         const rows = acl.get(item) ?? [];
-        const r = rows.find(x => x.authorId === principal);
+        const r = rows.find(x => x.authorId === principal && x.groupId === null);
         if (r) r.role = role; else rows.push({ authorId: principal, groupId: null, isGroup: false, role });
         acl.set(item, rows);
       },
-      async removeFromAcl(item: string, principal: string) {
-        calls.push('acl:' + item);
-        acl.set(item, (acl.get(item) ?? []).filter(x => x.authorId !== principal));
+      async detachGroup(item: string, groupId: string) {
+        calls.push('detach:' + item + ':' + groupId);
+        acl.set(item, (acl.get(item) ?? []).filter(x => x.groupId !== groupId));
       },
     };
   }
@@ -580,7 +578,7 @@ describe('runLevelChange', () => {
       expect(h.calls).not.toContain('add:p1');
       expect(h.w.nodes.get('p1')!.tags).toEqual([]);
       expect(o.ignored).toHaveLength(1);
-      expect(o.ignored[0]).toContain('non vu à l\'aperçu — ignoré');
+      expect(o.ignored[0]).toContain('non coché ou non vu à l\'aperçu — ignoré');
       expect(o.ignored[0]).toContain(NEW);
       // the refused tag is not "remaining"
       expect(o.remaining.some(r => r.includes('étiquettes'))).toBe(false);
@@ -668,9 +666,11 @@ describe('runLevelChange', () => {
       put(node({ id: 'p2a', title: 'Travail' }), 'p2');
       put(node({ id: 'p2b', title: 'Note' }), 'p2a');
       w.acl = new Map([['P', [
+        // one row per group member (authorId = the member, groupId = the granting group)
         { authorId: 'stu', groupId: null, isGroup: false, role: 'reader' },
-        { authorId: 'grpM', groupId: 'gM', isGroup: true, role: 'reader' },
-        { authorId: 'grpT', groupId: 'gT', isGroup: true, role: 'editor' },
+        { authorId: 'm1', groupId: 'gM', isGroup: true, role: 'editor' },
+        { authorId: 'm2', groupId: 'gM', isGroup: true, role: 'editor' },
+        { authorId: 't1', groupId: 'gT', isGroup: true, role: 'editor' },
         { authorId: 'own', groupId: 'gO', isGroup: true, role: 'owner' },
       ]]]);
       return w;
@@ -688,6 +688,14 @@ describe('runLevelChange', () => {
       expect(o.plan?.templateOnlyItems.map(i => i.sectionKey)).toEqual([BOX_KEY]);
       expect(o.plan?.widget.needed).toBe(true);
       expect(h.calls).toEqual([]);
+    });
+
+    it('dry run: an empty profile-only section shows « contenu inconnu » (null), not an exact 0', async () => {
+      const w = richWorld();
+      w.kids.set('p2', []);
+      const h = harness(w);
+      const o = await runLevelChange(input({ dryRun: true }), h.deps);
+      expect(o.plan?.profileOnlyItems[0]).toMatchObject({ descendants: null, descendantsExact: false });
     });
 
     it('full run: sections → creates → access → remove → description → colour', async () => {
@@ -711,13 +719,32 @@ describe('runLevelChange', () => {
       expect(h.w.kids.get(copy)).toHaveLength(1);
       expect(h.w.nodes.has('p2')).toBe(false);
       expect(h.w.nodes.get('P')!.description).toBe(WIDGET);
-      // access: student raised to editor, mentor group set to editor, teacher group removed, owner kept
+      // access: student raised to editor, mentor group (right share role) untouched, teacher group
+      // detached by its groupId, owner kept; the child (no share tag) loses both role groups
       expect(h.w.acl!.get(copy)).toEqual([
         { authorId: 'stu', groupId: null, isGroup: false, role: 'editor' },
-        { authorId: 'grpM', groupId: 'gM', isGroup: true, role: 'editor' },
+        { authorId: 'm1', groupId: 'gM', isGroup: true, role: 'editor' },
+        { authorId: 'm2', groupId: 'gM', isGroup: true, role: 'editor' },
         { authorId: 'own', groupId: 'gO', isGroup: true, role: 'owner' },
       ]);
+      expect(h.calls.filter(c => c.startsWith('detach:' + copy))).toEqual([`detach:${copy}:gT`]);
+      const child = h.w.kids.get(copy)![0];
+      expect(h.calls.filter(c => c.startsWith('detach:' + child)).sort()).toEqual([`detach:${child}:gM`, `detach:${child}:gT`]);
       expect(h.w.nodes.get('P')!.color).toBe(AFP);
+    });
+
+    it('a role group at the wrong share role: nothing written for it, hand-fix line, colour withheld', async () => {
+      const w = richWorld();
+      w.acl!.get('P')!.forEach(r => { if (r.groupId === 'gM') r.role = 'reader'; });
+      const h = harness(w);
+      const o = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.remaining).toContain('« Boîte » : rôle du groupe companymentor à ajuster à la main sur « Boîte »');
+      expect(o.remaining.some(r => r.startsWith('accès non confirmé sur « Boîte » —'))).toBe(false);
+      const [copy] = copiesOf(h.w);
+      expect(h.w.acl!.get(copy)!.filter(r => r.groupId === 'gM').map(r => r.role)).toEqual(['reader', 'reader']);
+      expect(h.calls.some(c => c === `detach:${copy}:gM`)).toBe(false);
+      expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
     });
 
     it('a non-empty profile description gets the widget appended', async () => {
@@ -767,6 +794,7 @@ describe('runLevelChange', () => {
       expect(o.remaining).toContain(
         'accès non confirmé sur « Boîte » (élément « Fiche ») — à corriger à la main (une nouvelle exécution ne le refait pas)');
       expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+      expect(h.calls.some(c => c.startsWith('detach'))).toBe(false); // R12: no detach without the student
       expect(copiesOf(h.w)).toHaveLength(1);
     });
 
@@ -810,7 +838,7 @@ describe('runLevelChange', () => {
       h.w.nodes.set('ta3', { ...late, parentId: 'TA' }); h.w.kids.set('TA', [...h.w.kids.get('TA')!, 'ta3']);
       const o = await runLevelChange(input({ decisions: d }), h.deps);
       expect(h.calls).not.toContain('create:ta3');
-      expect(o.ignored).toEqual(['« Nouveau » : copie — non vu à l\'aperçu — ignoré']);
+      expect(o.ignored).toEqual(['« Nouveau » : copie — non coché ou non vu à l\'aperçu — ignoré']);
       expect(o.success).toBe(true);
     });
 
@@ -833,6 +861,14 @@ describe('runLevelChange', () => {
         'widget : décision sans objet — ignorée',
       ]));
       expect(o.success).toBe(true);
+    });
+
+    it('a decision without object is named by the display title when the live plan knows the key', async () => {
+      const h = harness(richWorld());
+      const d: LevelChangeDecisions = { ...(await defaults(h)), deleteSections: [{ sectionKey: OLD_KEY, sectionId: 'autre' }] };
+      const o = await runLevelChange(input({ decisions: d }), h.deps);
+      expect(o.ignored).toContain('« Ancien » : suppression — décision sans objet — ignorée');
+      expect(h.w.nodes.has('p2')).toBe(true);
     });
 
     it('sections not confirmed: no copy, delete or widget is attempted', async () => {

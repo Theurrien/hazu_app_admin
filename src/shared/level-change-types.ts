@@ -47,9 +47,6 @@ export interface LevelChangePlan {
   templates: Array<{ id: string; title: string; role: 'target' | 'source' | 'source-other' }>;
   /** only sections with a change or descriptionKept */
   sections: SectionChange[];
-  /** section titles */
-  profileOnly: string[];
-  templateOnly: string[];
   /** section titles present in profile and target but not in the source v3 — not changed */
   noSourceCounterpart: string[];
   templateOnlyItems: TemplateOnlyItem[];

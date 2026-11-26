@@ -52,7 +52,7 @@ describe('hasApplicableChange', () => {
   });
   const pl = (sections: SectionChange[], colorChange = false, extra: Partial<LevelChangePlan> = {}): LevelChangePlan => ({
     profileId: 'P', fromLevel: 'cfc', toLevel: 'afp', colorFrom: '#1A237E', colorTo: '#9AD9EA', colorChange,
-    templates: [], sections, profileOnly: [], templateOnly: [], noSourceCounterpart: [],
+    templates: [], sections, noSourceCounterpart: [],
     templateOnlyItems: [], profileOnlyItems: [], widget: { needed: false, profileEmpty: false }, ...extra,
   });
   const none = (): LevelChangeDecisions => ({

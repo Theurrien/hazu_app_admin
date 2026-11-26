@@ -14,7 +14,7 @@ import {
   sendApiRequestRemoveChecked,
   sendApiRequestGetAclInfoChecked,
   sendApiRequestSetAclRoleChecked,
-  sendApiRequestRemoveUserChecked,
+  sendApiRequestDetachGroupChecked,
   sendApiRequestListStrictChecked,
 } from './hazu-api/api';
 import { normalizeRow } from './formation/parse';
@@ -149,17 +149,10 @@ function buildDeps(): LevelChangeDeps {
       requirePrincipal(principalId);
       await wrap(() => sendApiRequestSetAclRoleChecked(principalId, itemId, role));
     },
-    removeFromAcl: async (itemId, principalId) => {
-      requirePrincipal(principalId);
-      const r = await sendApiRequestRemoveUserChecked(itemId, principalId);
-      if (!r.ok) {
-        const failure: ApiFailure = {
-          status: r.status,
-          networkOrTimeout: r.networkOrTimeout,
-          message: r.error ?? "échec du retrait de l'accès",
-        };
-        throw failure;
-      }
+    // R12: a role group is detached from the item by its groupId, never removed member by member.
+    detachGroup: async (itemId, groupId) => {
+      requirePrincipal(groupId);
+      await wrap(() => sendApiRequestDetachGroupChecked(itemId, groupId));
     },
     sleep,
   };

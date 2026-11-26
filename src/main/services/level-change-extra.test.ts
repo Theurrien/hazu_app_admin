@@ -26,6 +26,25 @@ describe('countDescendants', () => {
   it("the section's own listing failing gives null", async () => {
     expect(await countDescendants('s', tree({}, ['s']), { remaining: 500 })).toEqual({ total: null, exact: false });
   });
+  it("an empty own listing is re-read once; still empty → null (contenu inconnu), never an exact 0", async () => {
+    const calls: string[] = [];
+    const list = async (id: string) => { calls.push(id); return [] as LcNode[]; };
+    const slept: number[] = [];
+    expect(await countDescendants('s', list, { remaining: 500 }, async (ms) => { slept.push(ms); }))
+      .toEqual({ total: null, exact: false });
+    expect(calls).toEqual(['s', 's']);
+    expect(slept.length).toBeGreaterThan(0);
+  });
+  it('an own listing empty once, then filled: counted from the re-read', async () => {
+    let first = true;
+    const full = tree({ s: ['a'], a: ['a1'] });
+    const list = async (id: string) => { if (id === 's' && first) { first = false; return []; } return full(id); };
+    expect(await countDescendants('s', list, { remaining: 500 })).toEqual({ total: 2, exact: true });
+  });
+  it('a strict listing that throws on an unexpected shape gives null for the section', async () => {
+    const list = async () => { throw new Error('réponse inattendue'); };
+    expect(await countDescendants('s', list, { remaining: 500 })).toEqual({ total: null, exact: false });
+  });
   it('exhausted budget is not exact and is shared', async () => {
     const list = tree({ s: ['a', 'b', 'c', 'd'] });
     const budget = { remaining: 2 };

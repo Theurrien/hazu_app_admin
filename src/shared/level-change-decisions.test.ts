@@ -10,7 +10,7 @@ const section = (over: Partial<SectionChange>): SectionChange => ({
 function plan(over: Partial<LevelChangePlan> = {}): LevelChangePlan {
   return {
     profileId: 'P', fromLevel: 'cfc', toLevel: 'afp', colorFrom: '#1A237E', colorTo: '#9AD9EA', colorChange: true,
-    templates: [], sections: [], profileOnly: [], templateOnly: [], noSourceCounterpart: [],
+    templates: [], sections: [], noSourceCounterpart: [],
     templateOnlyItems: [], profileOnlyItems: [], widget: { needed: false, profileEmpty: false },
     ...over,
   };

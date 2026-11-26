@@ -161,8 +161,6 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
   const others = input.sourceOthers.map(t => sectionMap(t.children));
 
   const sections: SectionChange[] = [];
-  const templateOnly: string[] = [];
-  const profileOnly: string[] = [];
   const templateOnlyItems: LevelChangePlan['templateOnlyItems'] = [];
   const profileOnlyItems: LevelChangePlan['profileOnlyItems'] = [];
   const noSourceCounterpart: string[] = [];
@@ -170,7 +168,6 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
   for (const [key, T] of tgt) {
     const P = prof.get(key);
     if (!P) {
-      templateOnly.push(stripTitle(T.title));
       templateOnlyItems.push({ sectionKey: key, title: stripTitle(T.title), templateSectionId: T.id });
       continue;
     }
@@ -206,7 +203,6 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
   }
   for (const [key, P] of prof) {
     if (tgt.has(key)) continue;
-    profileOnly.push(stripTitle(P.title));
     // descendants are counted by a later step
     profileOnlyItems.push({ sectionKey: key, title: stripTitle(P.title), sectionId: P.id, descendants: null, descendantsExact: false });
   }
@@ -223,7 +219,7 @@ export function buildPlan(input: PlanInput): LevelChangePlan {
       { id: input.source.ref.id, title: stripTitle(input.source.ref.title), role: 'source' },
       ...input.sourceOthers.map(t => ({ id: t.ref.id, title: stripTitle(t.ref.title), role: 'source-other' as const })),
     ],
-    sections, profileOnly, templateOnly, noSourceCounterpart,
+    sections, noSourceCounterpart,
     templateOnlyItems, profileOnlyItems,
     widget: {
       needed: isWidgetPresent(input.target.ref.description) && !isWidgetPresent(profile.description),
@@ -277,8 +273,18 @@ function sectionConfirmation(c: Write, live: LcNode | undefined): { tags: boolea
   return { tags, description };
 }
 
-/** The title part of a section key (lower-cased, as in the key), for a decision without its item. */
-function keyTitle(key: string): string {
+/** Shown for an item the operator did not tick, or that the preview never showed. */
+export const NOT_TICKED = "non coché ou non vu à l'aperçu — ignoré";
+
+/**
+ * A section's display title for a report line: from the live plan when it still knows the key,
+ * else the title part of the key (lower-cased, as in the key).
+ */
+function titleOf(plan: LevelChangePlan, key: string): string {
+  const known = plan.sections.find(s => s.sectionKey === key)
+    ?? plan.templateOnlyItems.find(s => s.sectionKey === key)
+    ?? plan.profileOnlyItems.find(s => s.sectionKey === key);
+  if (known) return known.title;
   const i = key.indexOf('|');
   return i < 0 ? key : key.slice(0, i);
 }
@@ -300,7 +306,7 @@ function applyDecisions(plan: LevelChangePlan, d: LevelChangeDecisions): { write
       const k = `${c.sectionKey}\u0000${t}`;
       seenTags.add(k);
       if (accepted.has(k)) addTags.push(t);
-      else ignored.push(`« ${c.title} » : étiquette ${t} — non vu à l'aperçu — ignoré`);
+      else ignored.push(`« ${c.title} » : étiquette ${t} — ${NOT_TICKED}`);
     }
     let descriptionTo: string | null = c.description ? c.description.to : null;
     if (c.descriptionKept && c.keptTargetDescription !== null) {
@@ -312,10 +318,10 @@ function applyDecisions(plan: LevelChangePlan, d: LevelChangeDecisions): { write
     }
   }
   for (const a of d.acceptedTagAdds) {
-    if (!seenTags.has(`${a.sectionKey}\u0000${a.tag}`)) ignored.push(`« ${keyTitle(a.sectionKey)} » : étiquette ${a.tag} — décision sans objet — ignorée`);
+    if (!seenTags.has(`${a.sectionKey}\u0000${a.tag}`)) ignored.push(`« ${titleOf(plan, a.sectionKey)} » : étiquette ${a.tag} — décision sans objet — ignorée`);
   }
   for (const k of d.forcedDescriptions) {
-    if (!seenForceable.has(k)) ignored.push(`« ${keyTitle(k)} » : description — décision sans objet — ignorée`);
+    if (!seenForceable.has(k)) ignored.push(`« ${titleOf(plan, k)} » : description — décision sans objet — ignorée`);
   }
   return { writes, ignored };
 }
@@ -333,23 +339,23 @@ function selectActions(plan: LevelChangePlan, d: LevelChangeDecisions): { action
   const tick = new Set(d.copySections);
   const copies = plan.templateOnlyItems.filter(i => tick.has(i.sectionKey));
   for (const i of plan.templateOnlyItems) {
-    if (!tick.has(i.sectionKey)) ignored.push(`« ${i.title} » : copie — non vu à l'aperçu — ignoré`);
+    if (!tick.has(i.sectionKey)) ignored.push(`« ${i.title} » : copie — ${NOT_TICKED}`);
   }
   const live = new Set(plan.templateOnlyItems.map(i => i.sectionKey));
   for (const k of new Set(d.copySections)) {
-    if (!live.has(k)) ignored.push(`« ${keyTitle(k)} » : copie — décision sans objet — ignorée`);
+    if (!live.has(k)) ignored.push(`« ${titleOf(plan, k)} » : copie — décision sans objet — ignorée`);
   }
   // a delete needs both the key and the id of a live profile-only section: never another one
   const deletes: Actions['deletes'] = [];
   for (const x of d.deleteSections) {
     const item = plan.profileOnlyItems.find(i => i.sectionKey === x.sectionKey && i.sectionId === x.sectionId);
-    if (!item) ignored.push(`« ${keyTitle(x.sectionKey)} » : suppression — décision sans objet — ignorée`);
+    if (!item) ignored.push(`« ${titleOf(plan, x.sectionKey)} » : suppression — décision sans objet — ignorée`);
     else if (!deletes.includes(item)) deletes.push(item);
   }
   let widget = false;
   if (plan.widget.needed) {
     if (d.addWidget) widget = true;
-    else ignored.push("widget : non vu à l'aperçu — ignoré");
+    else ignored.push(`widget : ${NOT_TICKED}`);
   } else if (d.addWidget) {
     ignored.push('widget : décision sans objet — ignorée');
   }
@@ -479,7 +485,8 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     // Shown before a delete is ticked: one budget for all sections, never smaller than the truth.
     const budget = { remaining: 500 };
     for (const item of plan.profileOnlyItems) {
-      const r = await countDescendants(item.sectionId, deps.list, budget, deps.sleep);
+      // strict listing: an unexpected response shape throws instead of counting as « 0 »
+      const r = await countDescendants(item.sectionId, deps.listFull, budget, deps.sleep);
       item.descendants = r.total;
       item.descendantsExact = r.exact;
     }

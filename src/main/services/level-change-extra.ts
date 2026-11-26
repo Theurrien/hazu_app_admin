@@ -9,39 +9,52 @@ const VERIFY_DELAY_MS = 750;
 
 /**
  * Descendants of `id` (the section itself not counted), depth 6, nodes drawn from a budget shared
- * across calls. Never under-reports silently: a failing sub-listing, an exhausted budget or a tree
- * deeper than the limit gives exact:false (« au moins N »). The section's OWN listing failing gives
- * total null — nothing is known.
+ * across calls. `list` must be STRICT (an unexpected response shape throws, never reads as empty).
+ * Never under-reports silently: a failing sub-listing, an exhausted budget or a tree deeper than
+ * the limit gives exact:false (« au moins N »). The section's OWN listing failing gives total null —
+ * nothing is known — and so does an own listing that is still empty after one re-read: an empty
+ * listing is never proof of absence, and an irreversible delete must never show an exact « 0 ».
  */
 export async function countDescendants(
   id: string,
-  list: (id: string) => Promise<LcNode[]>,
+  list: (id: string) => Promise<{ id: string }[]>,
   budget: { remaining: number },
   sleep?: (ms: number) => Promise<void>,
 ): Promise<{ total: number | null; exact: boolean }> {
   let total = 0;
   let exact = true;
   const seen = new Set<string>([id]);
+  const listOnce = (parent: string) => (sleep ? withRetry({ sleep }, () => list(parent)) : list(parent));
 
-  async function walk(parent: string, depth: number): Promise<boolean> {
-    let kids: LcNode[];
-    try { kids = sleep ? await withRetry({ sleep }, () => list(parent)) : await list(parent); } catch { exact = false; return false; }
-    if (depth > MAX_DEPTH) { if (kids.length > 0) exact = false; return true; }
+  async function walk(parent: string, depth: number, kids: { id: string }[] | null): Promise<void> {
+    if (kids === null) {
+      try { kids = await listOnce(parent); } catch { exact = false; return; }
+    }
+    if (depth > MAX_DEPTH) { if (kids.length > 0) exact = false; return; }
     for (const k of kids) {
       if (seen.has(k.id)) continue;
       seen.add(k.id);
-      if (budget.remaining <= 0) { exact = false; return true; }
+      if (budget.remaining <= 0) { exact = false; return; }
       budget.remaining--;
       total++;
-      await walk(k.id, depth + 1);
+      await walk(k.id, depth + 1, null);
     }
-    return true;
   }
 
-  if (!(await walk(id, 1))) return { total: null, exact: false };
+  let own: { id: string }[];
+  try {
+    own = await listOnce(id);
+    if (own.length === 0) {
+      if (sleep) await sleep(VERIFY_DELAY_MS);
+      own = await listOnce(id);
+    }
+  } catch {
+    return { total: null, exact: false };
+  }
+  if (own.length === 0) return { total: null, exact: false };
+  await walk(id, 1, own);
   return { total, exact };
 }
-
 
 /**
  * Remove a node, then confirm it is gone: the parent's listing no longer holds it AND a read of the

@@ -31,12 +31,15 @@ export interface CopyDeps {
   create(parentId: string, from: CopyNode): Promise<string>;
   remove(id: string): Promise<void>;
   acl(id: string): Promise<AclRow[]>;
+  /** PUT /acl — used only to grant / raise the student directly. */
   setRole(itemId: string, principalId: string, role: string): Promise<void>;
-  removeFromAcl(itemId: string, principalId: string): Promise<void>;
+  /** Detach a group from this item only (DELETE /api-v2-hazus/{itemId}/groups); throws on failure. */
+  detachGroup(itemId: string, groupId: string): Promise<void>;
   sleep(ms: number): Promise<void>;
 }
 
 export const ROLE_RANK: Record<string, number> = { reader: 1, editor: 2, admin: 3, owner: 4 };
+const RANK_ROLE = ['', 'reader', 'editor', 'admin', 'owner'];
 const MAX_DEPTH = 20;
 const MAX_ATTEMPTS = 3;
 const VERIFY_READS = 3;
@@ -64,10 +67,29 @@ export function shareRoles(tags: string[]): Map<string, string> {
   return out;
 }
 
+/**
+ * Ruling R12. An item's ACL lists one row per group MEMBER (authorId = the member, groupId = the
+ * granting group). A role group is therefore handled as a whole, by its groupId:
+ * - no share tag for its role → detached from the node (one call per distinct groupId, never a
+ *   per-member DELETE /acl, which could take a member's other access with it);
+ * - a share tag whose aclRole differs from the group's current rows → NOT written (no known
+ *   endpoint sets a group's role on an item): reported for a hand fix;
+ * - a share tag that matches → untouched.
+ * The student is only ever granted or raised directly (PUT /acl), never lowered or removed: when
+ * every row of the student on the node comes from a group being detached, the student is granted
+ * max(reader, invite role) directly first. Student unresolved → no detach at all (blocked).
+ */
 export interface AclFix {
+  /** role to grant the student directly, before any detach */
   raiseStudent: string | null;
-  setGroups: Array<{ principalId: string; role: string }>;
-  removeGroups: string[];
+  /** distinct groupIds of role groups to detach */
+  detachGroups: string[];
+  /** role groups at the wrong share role: never written, reported */
+  mismatchedGroups: Array<{ groupId: string; role: string }>;
+  /** a detach or an invite grant is needed but the student is unresolved: nothing detached */
+  blocked: boolean;
+  /** the rank the student must hold once the fix is applied */
+  studentRequired: number;
 }
 
 function isRoleGroup(r: AclRow, roleGroups: Map<string, string>): boolean {
@@ -75,41 +97,111 @@ function isRoleGroup(r: AclRow, roleGroups: Map<string, string>): boolean {
   return !!r.groupId && roleGroups.has(r.groupId);
 }
 
-function studentRank(rows: AclRow[], studentId: string): number {
+function studentRank(rows: AclRow[], studentId: string, skipGroups: Set<string> = new Set()): number {
   let best = 0;
   for (const r of rows) {
-    if (r.authorId === studentId) best = Math.max(best, ROLE_RANK[r.role] ?? 0);
+    if (r.authorId !== studentId) continue;
+    if (r.groupId && skipGroups.has(r.groupId)) continue;
+    best = Math.max(best, ROLE_RANK[r.role] ?? 0);
   }
   return best;
 }
 
+/** `minStudentRank`: the rank the student held a right to before the first write (the baseline). */
 export function planAclFix(
   rows: AclRow[], tags: string[], roleGroups: Map<string, string>, studentId: string | null,
+  minStudentRank = 0,
 ): AclFix {
-  const fix: AclFix = { raiseStudent: null, setGroups: [], removeGroups: [] };
-  const invite = inviteRole(tags);
-  if (invite && studentId && studentRank(rows, studentId) < (ROLE_RANK[invite] ?? 0)) {
-    fix.raiseStudent = invite;
-  }
   const shares = shareRoles(tags);
+  const byGroup = new Map<string, AclRow[]>();
   for (const r of rows) {
     if (!isRoleGroup(r, roleGroups)) continue;
-    // Never a write without a principal, and never the student through the group path: the
-    // student is only ever raised (raiseStudent), never lowered or removed.
-    if (!r.authorId || (studentId !== null && r.authorId === studentId)) continue;
-    const want = shares.get(roleGroups.get(r.groupId as string) as string);
-    if (want === undefined) fix.removeGroups.push(r.authorId);
-    else if (r.role !== want) fix.setGroups.push({ principalId: r.authorId, role: want });
+    const g = r.groupId as string;
+    byGroup.set(g, [...(byGroup.get(g) ?? []), r]);
   }
-  return fix;
+  const wantDetach: string[] = [];
+  const mismatchedGroups: AclFix['mismatchedGroups'] = [];
+  for (const [g, gRows] of byGroup) {
+    const role = roleGroups.get(g) as string;
+    const want = shares.get(role);
+    if (want === undefined) wantDetach.push(g);
+    else if (gRows.some(r => r.role !== want)) mismatchedGroups.push({ groupId: g, role });
+  }
+
+  const invite = inviteRole(tags);
+  if (studentId === null) {
+    return {
+      raiseStudent: null, detachGroups: [], mismatchedGroups,
+      blocked: wantDetach.length > 0 || invite !== null, studentRequired: 0,
+    };
+  }
+  const detach = new Set(wantDetach);
+  const had = rows.some(r => r.authorId === studentId);
+  const studentRequired = Math.max(
+    minStudentRank, ROLE_RANK[invite ?? ''] ?? 0, had ? ROLE_RANK.reader : 0);
+  const after = studentRank(rows, studentId, detach);
+  const raiseStudent = after < studentRequired ? RANK_ROLE[studentRequired] : null;
+  return { raiseStudent, detachGroups: wantDetach, mismatchedGroups, blocked: false, studentRequired };
+}
+
+const rowKey = (r: AclRow) => `${r.authorId}\u0000${r.groupId ?? ''}\u0000${r.role}`;
+
+/** What the read-back is compared with: taken from the read before the first write. */
+export interface AclBaseline {
+  detach: Set<string>;
+  /** every row that is neither the student's nor a detached group's */
+  others: Set<string>;
+  studentRequired: number;
+}
+
+function othersOf(rows: AclRow[], studentId: string | null, detach: Set<string>): Set<string> {
+  return new Set(rows
+    .filter(r => !(studentId !== null && r.authorId === studentId))
+    .filter(r => !(r.groupId && detach.has(r.groupId)))
+    .map(rowKey));
+}
+
+export function baselineOf(
+  rows: AclRow[], tags: string[], roleGroups: Map<string, string>, studentId: string | null,
+): AclBaseline {
+  const fix = planAclFix(rows, tags, roleGroups, studentId);
+  const detach = new Set(fix.detachGroups);
+  return { detach, others: othersOf(rows, studentId, detach), studentRequired: fix.studentRequired };
+}
+
+/**
+ * `confirmed`: everything the run is responsible for holds — no detached group's row remains, the
+ * student holds at least the required role, every other row is unchanged against the baseline.
+ * `mismatched`: role groups left at the wrong share role (never written; a hand fix).
+ */
+export function accessState(
+  rows: AclRow[], tags: string[], roleGroups: Map<string, string>, studentId: string | null,
+  baseline: AclBaseline = baselineOf(rows, tags, roleGroups, studentId),
+): { confirmed: boolean; mismatched: string[] } {
+  const fix = planAclFix(rows, tags, roleGroups, studentId, baseline.studentRequired);
+  const mismatched = fix.mismatchedGroups.map(m => m.role);
+  const fail = { confirmed: false, mismatched };
+  // defence in depth: a role-group row without a principal is never taken as settled
+  if (rows.some(r => isRoleGroup(r, roleGroups) && !r.authorId)) return fail;
+  if (fix.blocked || fix.raiseStudent !== null || fix.detachGroups.length > 0) return fail;
+  if (rows.some(r => r.groupId && baseline.detach.has(r.groupId))) return fail;
+  if (studentId !== null && studentRank(rows, studentId) < baseline.studentRequired) return fail;
+  const now = othersOf(rows, studentId, baseline.detach);
+  if (now.size !== baseline.others.size || [...now].some(k => !baseline.others.has(k))) return fail;
+  return { confirmed: true, mismatched };
 }
 
 export function aclMatches(
   rows: AclRow[], tags: string[], roleGroups: Map<string, string>, studentId: string | null,
+  baseline?: AclBaseline,
 ): boolean {
-  if (inviteRole(tags) && !studentId) return false;
-  const f = planAclFix(rows, tags, roleGroups, studentId);
-  return f.raiseStudent === null && f.setGroups.length === 0 && f.removeGroups.length === 0;
+  const s = accessState(rows, tags, roleGroups, studentId, baseline);
+  return s.confirmed && s.mismatched.length === 0;
+}
+
+/** A role group at the wrong share role on a copied node: never written, a hand fix. */
+export function groupRoleProblem(role: string, nodeTitle: string): string {
+  return `rôle du groupe ${role} à ajuster à la main sur « ${nodeTitle} »`;
 }
 
 export interface CopyResult { ok: boolean; newId: string | null; problems: string[] }
@@ -208,31 +300,44 @@ async function removeVerified(deps: CopyDeps, parentId: string, id: string): Pro
     { sleep: deps.sleep, remove: deps.remove, list: deps.listFull, read: deps.readFull }, parentId, id);
 }
 
+/**
+ * Align one copied node's access (R12). The baseline is the first ACL read, before any write; every
+ * later read is compared with it. Order: student grant first, then the detaches. A step that fails
+ * is decided by the next read; the final read decides.
+ */
 async function alignAcl(
   deps: CopyDeps, c: Copied, roleGroups: Map<string, string>, studentId: string | null,
-): Promise<boolean> {
+): Promise<{ confirmed: boolean; mismatched: string[] }> {
   const tags = c.node.tags;
+  let baseline: AclBaseline | null = null;
+  let last: { confirmed: boolean; mismatched: string[] } = { confirmed: false, mismatched: [] };
   for (let i = 0; i < VERIFY_READS; i++) {
     if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
     try {
       const rows = await withRetry(deps, () => deps.acl(c.id));
-      if (aclMatches(rows, tags, roleGroups, studentId)) return true;
-      const fix = planAclFix(rows, tags, roleGroups, studentId);
+      if (!baseline) baseline = baselineOf(rows, tags, roleGroups, studentId);
+      last = accessState(rows, tags, roleGroups, studentId, baseline);
+      if (last.confirmed) return last; // a mismatch is never written: nothing more to do
+      const fix = planAclFix(rows, tags, roleGroups, studentId, baseline.studentRequired);
+      if (fix.blocked) return last; // student unresolved: no detach, ever
       if (fix.raiseStudent && studentId) {
         const role = fix.raiseStudent;
         await withRetry(deps, () => deps.setRole(c.id, studentId, role));
       }
-      for (const g of fix.setGroups) await withRetry(deps, () => deps.setRole(c.id, g.principalId, g.role));
-      for (const p of fix.removeGroups) await withRetry(deps, () => deps.removeFromAcl(c.id, p));
+      // only groups of the baseline's detach set, one call per distinct groupId
+      for (const g of fix.detachGroups.filter(x => baseline!.detach.has(x))) {
+        await withRetry(deps, () => deps.detachGroup(c.id, g));
+      }
     } catch {
       // an unreadable or failed step is decided by the next read
     }
   }
+  if (!baseline) return { confirmed: false, mismatched: [] };
   try {
     const rows = await withRetry(deps, () => deps.acl(c.id));
-    return aclMatches(rows, tags, roleGroups, studentId);
+    return accessState(rows, tags, roleGroups, studentId, baseline);
   } catch {
-    return false;
+    return { confirmed: false, mismatched: last.mismatched };
   }
 }
 
@@ -298,9 +403,9 @@ export async function copySection(
 
   const problems: string[] = [];
   for (const c of copies) {
-    if (!(await alignAcl(deps, c, roleGroups, studentId))) {
-      problems.push(`accès non confirmés : « ${c.node.title} »`);
-    }
+    const a = await alignAcl(deps, c, roleGroups, studentId);
+    for (const role of a.mismatched) problems.push(groupRoleProblem(role, c.node.title));
+    if (!a.confirmed) problems.push(`accès non confirmés : « ${c.node.title} »`);
   }
   return { ok: problems.length === 0 && !extrasStuck, newId: topId, problems: [...notes, ...problems] };
 }

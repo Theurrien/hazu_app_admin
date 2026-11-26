@@ -459,6 +459,23 @@ export const sendApiRequestRemoveGroup = async (hazuId: string, groupIdentifier:
   }
 };
 
+// Checked variant of sendApiRequestRemoveGroup for the level change: the same DELETE
+// /api-v2-hazus/{id}/groups {groupIdentifier}, which detaches the group from that item ONLY (its
+// entries stay on the item's children — docs/archive-move-probe-findings.md « Groups »). Rethrows
+// the axios error; the caller's ACL read-back decides success.
+export const sendApiRequestDetachGroupChecked = async (itemId: string, groupId: string): Promise<void> => {
+  await axios({
+    method: "DELETE",
+    url: `https://${getApiEndpoint()}/api-v2-hazus/${itemId}/groups`,
+    headers: {
+      "x-api-key": getApiKey(),
+      "Content-Type": "application/json",
+    },
+    data: { groupIdentifier: groupId },
+    timeout: 60_000,
+  });
+};
+
 // USER OPERATIONS
 
 export const sendApiRequestCreateUser = async (

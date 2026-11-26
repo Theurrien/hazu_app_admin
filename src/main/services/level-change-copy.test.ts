@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  inviteRole, shareRoles, planAclFix, aclMatches, copySection,
+  inviteRole, shareRoles, planAclFix, aclMatches, accessState, baselineOf, copySection,
   type CopyNode, type CopyDeps, type AclRow,
 } from './level-change-copy';
 
@@ -20,6 +20,8 @@ describe('tags', () => {
   });
 });
 
+const NOFIX = { raiseStudent: null, detachGroups: [], mismatchedGroups: [], blocked: false };
+
 describe('planAclFix — rows classified by groupId, not isGroup', () => {
   it('student stored with isGroup:true is seen: raised when lower', () => {
     const rows = [row(S, 'reader', true, null)];
@@ -27,20 +29,20 @@ describe('planAclFix — rows classified by groupId, not isGroup', () => {
   });
   it('student stored with isGroup:true at admin: no write, matches', () => {
     const rows = [row(S, 'admin', true, null)];
-    expect(planAclFix(rows, ['hz-invite-self-admin'], groups, S)).toEqual({ raiseStudent: null, setGroups: [], removeGroups: [] });
+    expect(planAclFix(rows, ['hz-invite-self-admin'], groups, S)).toMatchObject(NOFIX);
     expect(aclMatches(rows, ['hz-invite-self-admin'], groups, S)).toBe(true);
   });
-  it('person row with isGroup:true and no groupId is never removed', () => {
+  it('person row with isGroup:true and no groupId is never detached', () => {
     const rows = [row('other', 'reader', true, null)];
-    expect(planAclFix(rows, [], groups, S).removeGroups).toEqual([]);
+    expect(planAclFix(rows, [], groups, S).detachGroups).toEqual([]);
     expect(aclMatches(rows, [], groups, S)).toBe(true);
   });
   it('a role group is recognised by groupId even with isGroup:false', () => {
-    expect(planAclFix([row('a-st', 'reader', false, 'g-st')], [], groups, S).removeGroups).toEqual(['a-st']);
+    expect(planAclFix([row('a-st', 'reader', false, 'g-st')], [], groups, S).detachGroups).toEqual(['g-st']);
   });
 });
 
-describe('planAclFix', () => {
+describe('planAclFix (R12: whole groups by groupId)', () => {
   it('raises a lower student', () => {
     const f = planAclFix([row(S, 'reader')], ['hz-invite-self-admin'], groups, S);
     expect(f.raiseStudent).toBe('admin');
@@ -53,23 +55,76 @@ describe('planAclFix', () => {
     expect(planAclFix(rows, ['hz-invite-self-admin'], groups, null).raiseStudent).toBeNull();
     expect(aclMatches(rows, ['hz-invite-self-admin'], groups, null)).toBe(false);
   });
-  it('removes a role group without share tag', () => {
-    const f = planAclFix([row('a-st', 'reader', true, 'g-st')], [], groups, S);
-    expect(f.removeGroups).toEqual(['a-st']);
+  it('per-member rows of a role group without share tag → one detach of that groupId', () => {
+    const rows = [row('a1', 'reader', true, 'g-st'), row('a2', 'reader', true, 'g-st'), row('a3', 'editor', true, 'g-st')];
+    expect(planAclFix(rows, [], groups, S).detachGroups).toEqual(['g-st']);
   });
-  it('sets a group to the share role; no write when already right', () => {
+  it('a group at the wrong share role: never written, reported as mismatched', () => {
     const tags = ['hz-share-companymentor-editor'];
-    expect(planAclFix([row('a-cm', 'reader', true, 'g-cm')], tags, groups, S).setGroups)
-      .toEqual([{ principalId: 'a-cm', role: 'editor' }]);
+    const f = planAclFix([row('a-cm', 'reader', true, 'g-cm'), row('b-cm', 'editor', true, 'g-cm')], tags, groups, S);
+    expect(f.detachGroups).toEqual([]);
+    expect(f.raiseStudent).toBeNull();
+    expect(f.mismatchedGroups).toEqual([{ groupId: 'g-cm', role: 'companymentor' }]);
     const ok = planAclFix([row('a-cm', 'editor', true, 'g-cm')], tags, groups, S);
-    expect(ok.setGroups).toEqual([]);
-    expect(ok.removeGroups).toEqual([]);
+    expect(ok).toMatchObject(NOFIX);
   });
   it('leaves owner groups and other persons alone', () => {
     const rows = [row('own', 'owner', true, 'g-owner'), row('other', 'reader')];
-    const f = planAclFix(rows, [], groups, S);
-    expect(f).toEqual({ raiseStudent: null, setGroups: [], removeGroups: [] });
+    expect(planAclFix(rows, [], groups, S)).toMatchObject(NOFIX);
     expect(aclMatches(rows, [], groups, S)).toBe(true);
+  });
+  it('student only reached through a group being detached → granted reader directly first', () => {
+    const f = planAclFix([row(S, 'editor', true, 'g-st'), row('a1', 'editor', true, 'g-st')], [], groups, S);
+    expect(f.detachGroups).toEqual(['g-st']);
+    expect(f.raiseStudent).toBe('reader');
+  });
+  it('student only through a detached group, invite admin → granted admin', () => {
+    const f = planAclFix([row(S, 'reader', true, 'g-st')], ['hz-invite-self-admin'], groups, S);
+    expect(f.raiseStudent).toBe('admin');
+  });
+  it('student also holding a direct row: no grant needed', () => {
+    const f = planAclFix([row(S, 'reader', true, 'g-st'), row(S, 'reader')], [], groups, S);
+    expect(f.raiseStudent).toBeNull();
+    expect(f.detachGroups).toEqual(['g-st']);
+  });
+  it('studentId null → no detach at all, blocked, unconfirmed', () => {
+    const rows = [row('a1', 'reader', true, 'g-st')];
+    const f = planAclFix(rows, [], groups, null);
+    expect(f.detachGroups).toEqual([]);
+    expect(f.blocked).toBe(true);
+    expect(aclMatches(rows, [], groups, null)).toBe(false);
+  });
+  it('studentId null with nothing to detach and no invite: confirmed', () => {
+    expect(aclMatches([row('own', 'owner', true, 'g-owner')], [], groups, null)).toBe(true);
+  });
+});
+
+describe('accessState — read-back against the baseline', () => {
+  const tags: string[] = [];
+  const before = [row(S, 'reader'), row('a1', 'reader', true, 'g-st'), row('a1', 'owner', true, 'g-owner'), row('x', 'editor')];
+  const base = baselineOf(before, tags, groups, S);
+  it('the detached group gone, every other row unchanged → confirmed', () => {
+    const after = [row(S, 'reader'), row('a1', 'owner', true, 'g-owner'), row('x', 'editor')];
+    expect(accessState(after, tags, groups, S, base)).toEqual({ confirmed: true, mismatched: [] });
+  });
+  it('a member also in an owner group must keep that row', () => {
+    const after = [row(S, 'reader'), row('x', 'editor')];
+    expect(accessState(after, tags, groups, S, base).confirmed).toBe(false);
+  });
+  it('another person changed → unconfirmed', () => {
+    const after = [row(S, 'reader'), row('a1', 'owner', true, 'g-owner'), row('x', 'reader')];
+    expect(accessState(after, tags, groups, S, base).confirmed).toBe(false);
+  });
+  it('a row of the detached group still there → unconfirmed', () => {
+    expect(accessState(before, tags, groups, S, base).confirmed).toBe(false);
+  });
+  it('the student lost every row → unconfirmed (required reader from the baseline)', () => {
+    const after = [row('a1', 'owner', true, 'g-owner'), row('x', 'editor')];
+    expect(accessState(after, tags, groups, S, base).confirmed).toBe(false);
+  });
+  it('a role-group row with an empty authorId is never settled', () => {
+    const rows = [row('', 'editor', true, 'g-cm')];
+    expect(aclMatches(rows, ['hz-share-companymentor-editor'], groups, S)).toBe(false);
   });
 });
 
@@ -84,9 +139,10 @@ function world() {
   const nodes = new Map<string, CopyNode>();
   const acls = new Map<string, AclRow[]>();
   let n = 0;
-  const log = { creates: 0, setRole: [] as string[], removeAcl: [] as string[], removed: [] as string[] };
+  const log = { creates: 0, setRole: [] as string[], detach: [] as string[], removed: [] as string[] };
   const fail: { createTitle?: string; mode?: '4xx' | 'timeout-landed'; once: Set<string>; alwaysTimeout?: string; lag: number } = { once: new Set(), lag: 0 };
   const ignoreAcl = { on: false };
+  let initialAcl = (): AclRow[] => [row(S, 'reader'), row('a-st', 'reader', true, 'g-st'), row('b-st', 'editor', true, 'g-st'), row('own', 'owner', true, 'g-owner')];
   const deps: CopyDeps = {
     async readFull(id) { return nodes.get(id) ?? null; },
     async listFull(p) {
@@ -98,7 +154,7 @@ function world() {
       const doCreate = () => {
         const id = `new-${++n}`;
         nodes.set(id, { ...from, id, parentId });
-        acls.set(id, [row(S, 'reader'), row('a-st', 'reader', true, 'g-st'), row('own', 'owner', true, 'g-owner')]);
+        acls.set(id, initialAcl());
         return id;
       };
       if (fail.alwaysTimeout === from.title) {
@@ -123,13 +179,13 @@ function world() {
       log.setRole.push(`${id}:${p}:${role}`);
       if (ignoreAcl.on) return;
       const rows = acls.get(id)!;
-      const r = rows.find(x => x.authorId === p);
+      const r = rows.find(x => x.authorId === p && x.groupId === null);
       if (r) r.role = role; else rows.push(row(p, role));
     },
-    async removeFromAcl(id, p) {
-      log.removeAcl.push(`${id}:${p}`);
+    async detachGroup(id, g) {
+      log.detach.push(`${id}:${g}`);
       if (ignoreAcl.on) return;
-      acls.set(id, acls.get(id)!.filter(x => x.authorId !== p));
+      acls.set(id, acls.get(id)!.filter(x => x.groupId !== g));
     },
     async sleep() {},
   };
@@ -139,7 +195,7 @@ function world() {
   }));
   nodes.set('t-c1', node('t-c1', 't-sec', 'Child', { tags: ['hz-share-companymentor-editor'] }));
   nodes.set('t-c2', node('t-c2', 't-c1', 'Grandchild'));
-  return { nodes, acls, deps, log, fail, ignoreAcl };
+  return { nodes, acls, deps, log, fail, ignoreAcl, setInitialAcl: (f: () => AclRow[]) => { initialAcl = f; } };
 }
 
 describe('copySection', () => {
@@ -156,12 +212,14 @@ describe('copySection', () => {
     expect(kids.map(k => k.title)).toEqual(['Child']);
     const gk = [...w.nodes.values()].filter(x => x.parentId === kids[0].id);
     expect(gk.map(k => k.title)).toEqual(['Grandchild']);
-    // student raised on the top node; reader group removed (no share tag); owner untouched
+    // student raised on the top node; schoolteacher group (no share tag) detached ONCE by its
+    // groupId although it has two member rows; owner untouched
     expect(w.acls.get(r.newId!)!.find(x => x.authorId === S)!.role).toBe('admin');
-    expect(w.acls.get(r.newId!)!.some(x => x.authorId === 'a-st')).toBe(false);
+    expect(w.acls.get(r.newId!)!.some(x => x.groupId === 'g-st')).toBe(false);
     expect(w.acls.get(r.newId!)!.some(x => x.authorId === 'own')).toBe(true);
-    // Child: share tag companymentor-editor, schoolteacher reader removed
-    expect(w.acls.get(kids[0].id)!.some(x => x.authorId === 'a-st')).toBe(false);
+    expect(w.log.detach.filter(d => d.startsWith(r.newId! + ':'))).toEqual([`${r.newId}:g-st`]);
+    // Child: share tag companymentor-editor, schoolteacher group detached
+    expect(w.acls.get(kids[0].id)!.some(x => x.groupId === 'g-st')).toBe(false);
   });
 
   it('does not write when the access is already right', async () => {
@@ -175,7 +233,7 @@ describe('copySection', () => {
     const r = await copySection('t-sec', 'prof', w.deps, groups, S);
     expect(r.ok).toBe(true);
     expect(w.log.setRole).toEqual([]);
-    expect(w.log.removeAcl).toEqual([]);
+    expect(w.log.detach).toEqual([]);
   });
 
   it('a failing child create removes the fresh copy', async () => {
@@ -304,14 +362,62 @@ describe('copySection', () => {
   });
 });
 
-describe('planAclFix — principal guards', () => {
-  it('never removes or re-roles the student through a role group without a share tag', () => {
-    const f = planAclFix([row(S, 'reader', true, 'g-st')], [], groups, S);
-    expect(f.removeGroups).toEqual([]);
-    expect(f.setGroups).toEqual([]);
+describe('copySection — R12 access cases', () => {
+  it('a group at a wrong share role: no write for it, hand-fix line, not ok', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('m1', 'reader', true, 'g-cm'), row('own', 'owner', true, 'g-owner')]);
+    // only the child carries hz-share-companymentor-editor; the grandchild detaches g-cm
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(false);
+    const child = [...w.nodes.values()].find(x => x.parentId === r.newId)!;
+    expect(r.problems).toContain('rôle du groupe companymentor à ajuster à la main sur « Child »');
+    expect(r.problems).not.toContain('accès non confirmés : « Child »');
+    expect(w.acls.get(child.id)!.filter(x => x.groupId === 'g-cm').map(x => x.role)).toEqual(['reader']);
+    expect(w.log.detach.some(d => d === `${child.id}:g-cm`)).toBe(false);
+    expect(w.log.setRole.some(s => s.includes(':m1:'))).toBe(false);
   });
-  it('never emits an empty principal', () => {
-    const f = planAclFix([row('', 'reader', true, 'g-st'), row('', 'reader', true, 'g-cm')], ['hz-share-companymentor-editor'], groups, S);
-    expect(f).toEqual({ raiseStudent: null, setGroups: [], removeGroups: [] });
+  it('a member also in an owner group keeps that row; no DELETE per member', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('a-st', 'reader', true, 'g-st'), row('a-st', 'owner', true, 'g-owner')]);
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(true);
+    for (const id of [...w.acls.keys()]) {
+      expect(w.acls.get(id)!.some(x => x.authorId === 'a-st' && x.groupId === 'g-owner')).toBe(true);
+    }
+  });
+  it('a detach that also strips another row is caught by the baseline check', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('a-st', 'reader', true, 'g-st'), row('a-st', 'owner', true, 'g-owner')]);
+    // a Hazu that removes every row of each member of the detached group (the feared behaviour)
+    w.deps.detachGroup = async (id, g) => {
+      w.log.detach.push(`${id}:${g}`);
+      const members = new Set(w.acls.get(id)!.filter(x => x.groupId === g).map(x => x.authorId));
+      w.acls.set(id, w.acls.get(id)!.filter(x => !members.has(x.authorId)));
+    };
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(false);
+    expect(r.problems.some(p => p.startsWith('accès non confirmés'))).toBe(true);
+  });
+  it('student reached only via a group being detached → granted directly BEFORE the detach', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'editor', true, 'g-st'), row('own', 'owner', true, 'g-owner')]);
+    const order: string[] = [];
+    const setRole = w.deps.setRole; const detach = w.deps.detachGroup;
+    w.deps.setRole = async (id, p, role) => { order.push(`set:${id}:${p}:${role}`); return setRole(id, p, role); };
+    w.deps.detachGroup = async (id, g) => { order.push(`detach:${id}:${g}`); return detach(id, g); };
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(true);
+    const grandchild = [...w.nodes.values()].find(x => x.title === 'Grandchild' && x.id.startsWith('new-'))!;
+    const gi = order.indexOf(`set:${grandchild.id}:${S}:reader`);
+    expect(gi).toBeGreaterThanOrEqual(0);
+    expect(gi).toBeLessThan(order.indexOf(`detach:${grandchild.id}:g-st`));
+    expect(w.acls.get(grandchild.id)).toEqual([row('own', 'owner', true, 'g-owner'), row(S, 'reader')]);
+  });
+  it('studentId null → no detach on any node, unconfirmed', async () => {
+    const w = world();
+    const r = await copySection('t-sec', 'prof', w.deps, groups, null);
+    expect(r.ok).toBe(false);
+    expect(w.log.detach).toEqual([]);
+    expect(w.log.setRole).toEqual([]);
   });
 });

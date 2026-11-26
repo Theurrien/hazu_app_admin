@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { toAclRows, toCopyNode, aclEntries, studentIdFromAcl, copiesRefusal, NO_ROLE_GROUPS, PRINCIPAL_MISSING } from './level-change-wire';
 import { buildCreateFullBody, createdIdOf, newIdFromCreate, strictListRows } from './hazu-api/create-full';
 import { sendApiRequestRemoveUserChecked } from './hazu-api/api';
-import { resolveSelfUid } from './formation/read';
 
 describe('toCopyNode', () => {
   it('keeps type, privacy, tags and event.rolesSettings from the snapshot envelope', () => {
