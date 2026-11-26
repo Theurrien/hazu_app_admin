@@ -100,6 +100,8 @@ hazu-admin/
 │   │       │   # Group-truth stages. Each splits into a PURE CORE with all IO
 │   │       │   # injected (vitest-runnable, no native module) + a thin *.service.ts
 │   │       │   # IO layer. Tests live beside the core as *.test.ts.
+│   │       ├── level-change.ts         # Outils — level change CFC ↔ AFP, pure core (+ tests)
+│   │       ├── level-change.service.ts # Outils — level change, IO layer, local reconcile
 │   │       ├── group-membership.ts     # S1 — resolve group members to profiles
 │   │       ├── discrepancy.ts          # S2 — groups vs. tags report; owns parseClassTag
 │   │       │                           #      and collectUnmatchedClassIds (S7)
@@ -127,6 +129,7 @@ hazu-admin/
 │   │   │   ├── MatrixPage.tsx
 │   │   │   ├── FormationPage.tsx      # Missions tab: school overview → formation drill-down
 │   │   │   ├── ArchivePage.tsx        # Archive tab: « Salles | Personnes », archive / restore (complete mode)
+│   │   │   ├── ToolsPage.tsx          # Outils tab: helper tools as sections (complete mode); level change CFC ↔ AFP
 │   │   │   ├── BulkImportPage.tsx
 │   │   │   ├── DiscrepanciesPage.tsx  # Groups-vs-tags report + heal/revoke/prune
 │   │   │   └── SettingsPage.tsx
@@ -144,6 +147,7 @@ hazu-admin/
 │   │   │   │   ├── StackedBar.tsx         # bar colours/labels used everywhere in the tab
 │   │   │   │   └── sync-logic.ts, detail-logic.ts  # pure display decisions (+ tests)
 │   │   │   ├── archive/             # Archive tab: confirm modals (room + PersonArchiveConfirmModal), archive-logic.ts (+ tests)
+│   │   │   ├── tools/               # Outils tab: LevelChangeSection.tsx, level-change-logic.ts (+ tests)
 │   │   │   ├── bulk-import/         # Bulk Import workflow components (uploader, mapping, matching, preview, verify)
 │   │   │   │                        #   Verify: VerifyAssignmentsTab, PersonCheckResults (À vérifier,
 │   │   │   │                        #   unmatched rows, leaver list), verify-logic.ts (+ tests)
@@ -167,6 +171,7 @@ hazu-admin/
 │   │
 │   └── shared/                 # Shared between main & renderer
 │       ├── app-mode.ts        # S9 — pure mode decisions (pages/workflows/roles)
+│       ├── level-change-types.ts # Outils level change: plan, outcome, candidates, student
 │       ├── archive-types.ts   # Room + person archive outcomes, plans, ArchivableRoom, ArchivedPerson
 │       ├── person-match.ts    # Verify: spreadsheet row ↔ Hazu person matcher, leaver list (pure, + tests)
 │       ├── formation-types.ts # Missions formation overview types (Row, StudentRaw, SchoolOverview…)
@@ -794,6 +799,89 @@ only has rows for students. Restore changes nothing locally.
 - Like Missions and the room archive, **develop and test against a scratch userData copy**, never the
   real DB: archive and restore write to the live Hazu.
 
+## Outils — level change
+
+The Outils tab ([ToolsPage.tsx](src/renderer/pages/ToolsPage.tsx)) collects small helper tools, one
+section each; the first is **Changement de niveau**: an apprentice who switches between **CFC and
+AFP** (same formation) gets the other level's profile sections, and the profile colour — the level
+marker the app reads — changes with them. **Complete mode only** (registered in
+[app-mode.ts](src/shared/app-mode.ts) as page `tools`, task `levelChange`; not in the CIE lists).
+Spec: [docs/specs/2026-11-26-level-change-design.md](docs/specs/2026-11-26-level-change-design.md).
+Further helpers from the Maintenance project are meant to be added here as sections, when needed.
+
+### Templates
+The student templates are the children of the `template_id` setting tagged
+`hz-config-profile-student`. Formation = icon, level = colour (CFC `#1A237E`, AFP `#9AD9EA`), the
+same maps Missions reads. Each formation × level has several templates; the **target** is the
+`v3` one (title holds `v3` as a word, `/\bv3\b/i`), preselected in a dropdown listing every match.
+If none or several match, nothing is preselected. The **source** is the current level's `v3` of the
+same formation, chosen by the same rule; the source level's other versions are read too, for the
+removal set. A failed or empty listing of the profile or of any template **aborts before any
+write** — an empty list is never proof of absence.
+
+### Only the level delta is applied
+Never « make the profile equal the template »: the profile may carry its own tags and edited
+descriptions. Sections are matched as direct children on title + icon + colour (case-insensitive,
+HTML stripped). Per matched section:
+- **Tags.** A tag's *family* is the tag minus its trailing 20-character id. A template tag whose id
+  differs between the levels is **swapped** (source removed, target added) only when the profile
+  carries the source's tag. Unpaired source tags are removed only when they sit on the **source v3**
+  and not on the target; a target tag whose family has no source counterpart is added only when the
+  profile holds no tag of that family. **A tag that is not on the template is never touched** — this
+  keeps the per-student `hz-config-carnet-{id}` intact (the target's carnet id is never added beside
+  it).
+- **Description.** Replaced only when source and target differ **and** the profile's equals a
+  current-level template version (HTML whitespace normalised). Otherwise it was edited for this
+  student: reported « modifiée à la main — non changée » and left alone.
+- Sections found on one side only are listed in the preview and left alone (no copy, no delete);
+  title, description, tags and icon of the profile itself stay as they are.
+
+### Guards
+Only a **local `persons` student row** is accepted; a node tagged as a student template is refused
+(`TEMPLATE_REFUSAL`). The **live** profile colour decides the current level (a difference from the
+local colour is shown in the preview); neither CFC nor AFP refuses, nothing written. A live colour
+already at the target level is a finishing run.
+
+### Order and success rule
+Section writes (tags, then description; transient 5xx / network / timeout retried with `backoffMs`,
+4xx fails fast) → **verify by re-listing** the profile's children (3 reads, 750 ms apart) →
+**colour last** → verify. **The live read decides, not the status code**: a write whose status
+failed but whose change shows counts as done, a 2xx that does not show does not. If the sections
+are not confirmed the colour is **not written** and `remaining` says so; otherwise `remaining`
+names what is left (including an unconfirmed colour). A stopped run leaves the old level showing;
+**re-running finishes it** — every step reads live first and skips what is done.
+
+### Lock and local reconcile
+`executeLevelChange` holds [archive-lock.ts](src/main/services/archive-lock.ts)
+(`withArchiveLock`) and is refused while a sync runs (« synchronisation en cours — réessayez
+ensuite »); a sync cannot start during it. On **full success only**, in its own try/catch (skipped
+while a sync runs), `persons.color` is updated so Missions, Matrix and Persons show the new level
+without a sync. Nothing else changes locally.
+
+### Non-goals
+No class or role move (the result says: move the student in Matrix by hand), no copy, no delete,
+no formation change (CUI ↔ RES ↔ DHI — the icon stays).
+
+### Files
+- [level-change.ts](src/main/services/level-change.ts) — **pure core**, all IO injected (`read`,
+  `list`, `updateDescription`, `updateColor`, `addTags`, `removeTags`, `sleep`): template choice
+  (`pickV3`), section matching, tag diff, plan, `runLevelChange` (dry run = the plan). Tests in
+  `level-change.test.ts`.
+- [level-change.service.ts](src/main/services/level-change.service.ts) — **thin IO layer**:
+  `listLevelChangeStudents` (local), `levelChangeCandidates`, `planLevelChange`,
+  `executeLevelChange`, the reconcile above. Logs carry profile ids only.
+- [hazu-api/api.ts](src/main/services/hazu-api/api.ts) — `sendApiRequestUpdateChecked` (the
+  original update swallows errors).
+- [shared/level-change-types.ts](src/shared/level-change-types.ts) — plan, outcome, candidates.
+- IPC `LEVEL_CHANGE_STUDENTS`, `LEVEL_CHANGE_CANDIDATES`, `LEVEL_CHANGE_PLAN`,
+  `LEVEL_CHANGE_EXECUTE`; the apply is one Task Queue task (`levelChange`, in
+  [TaskQueueContext.tsx](src/renderer/contexts/TaskQueueContext.tsx)).
+- [LevelChangeSection.tsx](src/renderer/components/tools/LevelChangeSection.tsx) and
+  `level-change-logic.ts` (+ test) — student search (two letters minimum; not-eligible students
+  greyed with the reason), target level and template dropdown, « Aperçu », « Appliquer ».
+- Like Missions and the archives, **develop and test against a scratch userData copy**, never the
+  real DB: the change writes to the live Hazu.
+
 ## Matrix
 
 The Matrix tab ([MatrixPage.tsx](src/renderer/pages/MatrixPage.tsx)) is a spreadsheet-style grid
@@ -854,9 +942,9 @@ Writes are never called directly — each workflow **enqueues** tasks into the T
 sequentially**, each tracked `queued → processing → success/error` with individual retry. Bulk
 Import queues `createRoom`, `createPerson`, `roleUpdate`; the Discrepancies page queues `healTag`
 (S3) and `revokeOrphanAccess` (S6) — Verify's leaver list queues `archivePerson`, and the Archive tab queues `archiveRoom` / `restoreRoom` /
-`archivePerson` / `restorePerson` — the full `TaskType` union is ten: `roleUpdate`, `createRoom`,
+`archivePerson` / `restorePerson` — the full `TaskType` union is eleven: `roleUpdate`, `createRoom`,
 `createPerson`, `healTag`, `revokeOrphanAccess`, `pruneDeadTags`, `archiveRoom`, `restoreRoom`,
-`archivePerson`, `restorePerson`. The footer buttons only
+`archivePerson`, `restorePerson`, `levelChange` (the Outils tab). The footer buttons only
 queue tasks; nothing hits the API until the queue processes them. Modals (create room/person) call
 the API directly and push a completed `addNotification` into the same panel.
 
@@ -1490,6 +1578,10 @@ installer, run the acceptance run again on Windows before calling it working.
     Archive → Personnes (record tags on the folder), the student is in no role group, holds no class
     tag → Restaurer → profile back under its category, folder gone → Dashboard sync → the student is
     back, with no rooms.
+7e. Outils → Changement de niveau (scratch userData copy): pick a test student in CFC, target AFP →
+    Aperçu → Appliquer → compare the profile's sections with « M- Apprenti CUI AFP v3 » in Hazu
+    (tags, the three Mandats descriptions, the student's own carnet tag intact, colour) → Missions
+    shows AFP → switch back to CFC the same way.
 8. Go to Bulk Import → upload a CSV → try Room/Person/Assignment/Verify (writes run through the Task Queue panel).
    Verify: with a file missing one student, map a name column, choose the class → that student is
    listed as a leaver; misspell a name in the file → the row lands in « À vérifier », not on the
