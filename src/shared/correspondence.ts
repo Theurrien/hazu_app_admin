@@ -57,11 +57,18 @@ export function studentKeys(p: SheetPerson): string[] {
   return keys;
 }
 
-function linkMap(saved: SavedLink[], category: CorrCategory): Map<string, SavedLink> {
-  const m = new Map<string, SavedLink>();
+/** One link per key. Links sharing a key: agreeing → the newest; disagreeing → null (conflict, treated as stale). */
+function linkMap(saved: SavedLink[], category: CorrCategory): Map<string, SavedLink | null> {
+  const m = new Map<string, SavedLink | null>();
   for (const l of saved) {
     if (l.category !== category) continue;
-    m.set(category === 'student' ? l.fileKey : roomKey(l.fileKey), l);
+    const key = category === 'student' ? l.fileKey : roomKey(l.fileKey);
+    if (!m.has(key)) m.set(key, l);
+    else {
+      const prev = m.get(key);
+      if (prev === null || prev === undefined || prev.hazuId !== l.hazuId) m.set(key, null);
+      else if (l.decidedAt > prev.decidedAt) m.set(key, l);
+    }
   }
   return m;
 }
@@ -88,6 +95,10 @@ export function resolveRoomValues(
     const key = roomKey(value);
     if (key === '' || out.has(key)) continue;
 
+    if (links.get(key) === null) {
+      out.set(key, { kind: 'stale', suggestionId: suggestionFor(value) });
+      continue;
+    }
     const link = links.get(key);
     if (link) {
       if (link.hazuId === null) out.set(key, { kind: 'ignored' });
@@ -131,7 +142,8 @@ export function resolveStudents(
     const hitKey = keys.find((k) => links.has(k));
     const link = hitKey === undefined ? undefined : links.get(hitKey);
     let res: StudentResolution | null = null;
-    if (link) {
+    if (hitKey !== undefined && link === null) res = { kind: 'stale' };
+    else if (link) {
       if (link.hazuId === null) res = { kind: 'ignored' };
       else if (!known.has(link.hazuId)) res = { kind: 'stale' };
       else {
@@ -152,7 +164,13 @@ export function resolveStudents(
     if (res === null) {
       const m = matches.get(row.rowIndex);
       if (m === undefined || m.kind === 'unknown') res = { kind: 'unknown' };
-      else if (m.kind === 'matched') res = { kind: 'matched', personId: m.personId };
+      else if (m.kind === 'matched') {
+        // A guess by a shared name must not auto-resolve: the operator decides.
+        res =
+          m.by === 'name' && collides
+            ? { kind: 'check', candidateIds: [m.personId], reason: 'ambiguous' }
+            : { kind: 'matched', personId: m.personId };
+      }
       else res = { kind: 'check', candidateIds: m.candidateIds, reason: m.reason };
     }
     out.set(row.rowIndex, { res, saveKey });

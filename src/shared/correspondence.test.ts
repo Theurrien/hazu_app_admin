@@ -174,6 +174,43 @@ describe('tightened saved-link matching', () => {
   });
 });
 
+describe('conservative collisions', () => {
+  it('a colliding name matched by name is not auto-resolved; by e-mail it is', () => {
+    const students = [person('p1', 'Ana Bé', 'ana@example.invalid')];
+    const rows = [
+      { rowIndex: 0, email: 'ana@example.invalid', fullName: 'Ana Bé' },
+      { rowIndex: 1, fullName: 'Ana Bé' },
+    ];
+    const m = resolveStudents(rows, students, []);
+    expect(m.get(0)?.res).toEqual({ kind: 'matched', personId: 'p1' });
+    expect(m.get(1)?.res).toEqual({ kind: 'check', candidateIds: ['p1'], reason: 'ambiguous' });
+  });
+  it('a non-colliding name match stays matched', () => {
+    const m = resolveStudents([{ rowIndex: 0, fullName: 'Ana Bé' }], [person('p1', 'Ana Bé')], []);
+    expect(m.get(0)?.res).toEqual({ kind: 'matched', personId: 'p1' });
+  });
+  const rooms = [room('r1', 'A'), room('r2', 'B')];
+  it('room links normalising to one key: agreeing → newest; disagreeing → stale', () => {
+    const agree = resolveRoomValues('class', ['x y'], rooms, [
+      { ...link('class', 'X Y', null), decidedAt: 1 },
+      { ...link('class', 'x  y', null), decidedAt: 5 },
+    ], none);
+    expect(agree.get('x y')).toEqual({ kind: 'ignored' });
+    const same = resolveRoomValues('class', ['x y'], rooms, [link('class', 'X Y', 'r1'), link('class', 'x  y', 'r1')], none);
+    expect(same.get('x y')).toEqual({ kind: 'saved', hazuId: 'r1' });
+    const clash = resolveRoomValues('class', ['x y'], rooms, [link('class', 'X Y', 'r1'), link('class', 'x  y', null)], () => 'B');
+    expect(clash.get('x y')).toEqual({ kind: 'stale', suggestionId: 'r2' });
+    const clash2 = resolveRoomValues('class', ['x y'], rooms, [link('class', 'X Y', 'r1'), link('class', 'x  y', 'r2')], none);
+    expect(clash2.get('x y')).toEqual({ kind: 'stale', suggestionId: null });
+  });
+  it('student links with an identical key and different persons → stale', () => {
+    const students = [person('p1', 'Ana Bé'), person('p2', 'Carl D')];
+    const k = `name:${nameKey('Ana Bé')}`;
+    const m = resolveStudents([{ rowIndex: 0, fullName: 'Ana Bé' }], students, [link('student', k, 'p1'), link('student', k, 'p2')]);
+    expect(m.get(0)?.res).toEqual({ kind: 'stale' });
+  });
+});
+
 describe('isResolved / resolvedId', () => {
   it('classifies kinds', () => {
     expect(isResolved({ kind: 'saved', hazuId: 'a' })).toBe(true);
