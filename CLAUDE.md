@@ -841,8 +841,9 @@ HTML stripped). Per matched section:
   and does not enable « Appliquer » (`hasApplicableChange`).
 
 ### Guards
-Only a **local `persons` student row** is accepted; a node tagged as a student template is refused
-(`TEMPLATE_REFUSAL`). The **live** profile colour decides the current level (a difference from the
+Only a **local `persons` student row** is accepted; a node sitting in the templates folder (parent =
+`template_id`) is refused (`TEMPLATE_REFUSAL`, `isTemplateNode`). The tag cannot decide this: every
+student profile is a copy of a template and carries `hz-config-profile-student` too. The **live** profile colour decides the current level (a difference from the
 local colour is shown in the preview); neither CFC nor AFP refuses, nothing written. A live colour
 already at the target level is a finishing run.
 

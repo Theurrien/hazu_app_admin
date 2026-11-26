@@ -32,6 +32,11 @@ export interface PlanInput {
 export const LEVEL_COLORS: Record<Level, string> = { cfc: '#1A237E', afp: '#9AD9EA' };
 export const STUDENT_TEMPLATE_TAG = 'hz-config-profile-student';
 export const TEMPLATE_REFUSAL = 'ce nœud est un modèle — refusé';
+
+/** A node is a template when it sits in the templates folder (or is that folder itself). */
+export function isTemplateNode(node: Pick<LcNode, 'id' | 'parentId'>, templateRootId: string): boolean {
+  return node.id === templateRootId || node.parentId === templateRootId;
+}
 export const EMPTY_DESCRIPTION = '<p><br></p>';
 
 export function otherLevel(l: Level): Level {
@@ -46,7 +51,7 @@ export function levelOfColor(color: string | null): Level | null {
   return null;
 }
 
-function stripTitle(s: string): string {
+export function stripTitle(s: string): string {
   return (s ?? '').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -241,7 +246,9 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
   try {
     const profile = await withRetry(deps, () => deps.read(input.profileId));
     if (!profile) return refuse('profil introuvable');
-    if (profile.tags.includes(STUDENT_TEMPLATE_TAG)) return refuse(TEMPLATE_REFUSAL);
+    // A template is recognised by where it sits, not by its tag: every student profile is a copy
+    // of a template and carries hz-config-profile-student too (measured: all synced students).
+    if (isTemplateNode(profile, input.templateRootId)) return refuse(TEMPLATE_REFUSAL);
     const current = levelOfColor(profile.color);
     if (!current) return refuse('niveau du profil non reconnu (couleur inattendue)');
 

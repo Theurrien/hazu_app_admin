@@ -20,7 +20,8 @@ import {
   LEVEL_COLORS,
   LcNode,
   LevelChangeDeps,
-  STUDENT_TEMPLATE_TAG,
+  isTemplateNode,
+  stripTitle,
   TEMPLATE_REFUSAL,
   levelOfColor,
   otherLevel,
@@ -158,7 +159,7 @@ export async function levelChangeCandidates(personId: string): Promise<LevelChan
     const deps = buildDeps();
     const profile = await deps.read(personId);
     if (!profile) throw new Error('profil introuvable');
-    if (profile.tags.includes(STUDENT_TEMPLATE_TAG)) throw new Error(TEMPLATE_REFUSAL);
+    if (isTemplateNode(profile, rootId)) throw new Error(TEMPLATE_REFUSAL);
     const currentLevel = levelOfColor(profile.color);
     if (!currentLevel) throw new Error('niveau ni CFC ni AFP');
     const toLevel = otherLevel(currentLevel);
@@ -166,7 +167,7 @@ export async function levelChangeCandidates(personId: string): Promise<LevelChan
     return {
       currentLevel,
       toLevel,
-      templates: matches.map((t) => ({ id: t.id, title: t.title, icon: t.icon, color: t.color })),
+      templates: matches.map((t) => ({ id: t.id, title: stripTitle(t.title), icon: t.icon, color: t.color })),
       preselectedId: pickV3(matches),
     };
   } catch (e) {

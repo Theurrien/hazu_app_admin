@@ -223,6 +223,9 @@ function LevelChangeSection() {
                   Appliquer
                 </button>
               </div>
+              {!previewCurrent && !previewing && !applyFailed && (
+                <p className="text-sm text-gray-500">Faites d'abord un aperçu — « Appliquer » s'active ensuite.</p>
+              )}
               {applyFailed && (
                 <p className="text-sm text-red-600">Échec — voir la file des tâches, puis refaire l'aperçu.</p>
               )}
