@@ -31,6 +31,7 @@ export interface PlanInput {
 
 export const LEVEL_COLORS: Record<Level, string> = { cfc: '#1A237E', afp: '#9AD9EA' };
 export const STUDENT_TEMPLATE_TAG = 'hz-config-profile-student';
+export const TEMPLATE_REFUSAL = 'ce nœud est un modèle — refusé';
 export const EMPTY_DESCRIPTION = '<p><br></p>';
 
 export function otherLevel(l: Level): Level {
@@ -232,6 +233,7 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
   try {
     const profile = await withRetry(deps, () => deps.read(input.profileId));
     if (!profile) return refuse('profil introuvable');
+    if (profile.tags.includes(STUDENT_TEMPLATE_TAG)) return refuse(TEMPLATE_REFUSAL);
     const current = levelOfColor(profile.color);
     if (!current) return refuse('niveau du profil non reconnu (couleur inattendue)');
 

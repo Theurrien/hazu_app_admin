@@ -294,8 +294,8 @@ export function registerIpcHandlers(): void {
     return restorePerson(folderId);
   });
 
-  // Level change: students / candidates / plan rethrow so the page shows the error;
-  // execute returns its outcome (it runs inside the page's confirm flow and reports `error`).
+  // Level change: students / candidates rethrow so the page shows the error;
+  // plan and execute return an outcome (failures in `error`).
   ipcMain.handle(IPC_CHANNELS.LEVEL_CHANGE_STUDENTS, async () => {
     try {
       return listLevelChangeStudents();
@@ -316,14 +316,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.LEVEL_CHANGE_PLAN,
-    async (_event, personId: string, toLevel: Level, targetTemplateId: string) => {
-      try {
-        return await planLevelChange(personId, toLevel, targetTemplateId);
-      } catch (error) {
-        console.error('Level change plan error:', describeError(error));
-        throw error;
-      }
-    },
+    // planLevelChange never rejects: failures come back as outcome.error.
+    async (_event, personId: string, toLevel: Level, targetTemplateId: string) =>
+      planLevelChange(personId, toLevel, targetTemplateId),
   );
 
   ipcMain.handle(

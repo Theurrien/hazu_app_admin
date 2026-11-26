@@ -277,6 +277,14 @@ describe('runLevelChange', () => {
   const input = (over: Record<string, unknown> = {}) =>
     ({ profileId: 'P', toLevel: 'afp' as const, targetTemplateId: 'TA', templateRootId: ROOT, dryRun: false, ...over });
 
+  it('refuses a template node as profile, writing nothing', async () => {
+    const h = harness(); h.w.nodes.get('P')!.tags.push(STUDENT_TEMPLATE_TAG);
+    const out = await runLevelChange(input(), h.deps);
+    expect(out.success).toBe(false);
+    expect(out.error).toContain('modèle');
+    expect(h.calls).toEqual([]);
+  });
+
   it('refuses without writing', async () => {
     let h = harness();
     expect((await runLevelChange(input({ profileId: 'nope' }), h.deps)).error).toBe('profil introuvable');

@@ -20,6 +20,8 @@ import {
   LEVEL_COLORS,
   LcNode,
   LevelChangeDeps,
+  STUDENT_TEMPLATE_TAG,
+  TEMPLATE_REFUSAL,
   levelOfColor,
   otherLevel,
   pickV3,
@@ -112,6 +114,15 @@ function buildDeps(): LevelChangeDeps {
   };
 }
 
+/** The target must be a synced student; a template or any other node is never touched. */
+function isLocalStudent(personId: string): boolean {
+  return !!getDb().prepare("SELECT id FROM persons WHERE id = ? AND person_type = 'student'").get(personId);
+}
+
+function refusal(dryRun: boolean, error: string): LevelChangeOutcome {
+  return { success: false, dryRun, plan: null, applied: 0, remaining: [], error };
+}
+
 function templateRootId(): string {
   const id = setting('template_id');
   if (!id) throw new Error("modèles introuvables — synchronisez d'abord");
@@ -142,10 +153,12 @@ export function listLevelChangeStudents(): LevelChangeStudent[] {
 
 export async function levelChangeCandidates(personId: string): Promise<LevelChangeCandidates> {
   try {
+    if (!isLocalStudent(personId)) throw new Error('profil introuvable');
     const rootId = templateRootId();
     const deps = buildDeps();
     const profile = await deps.read(personId);
     if (!profile) throw new Error('profil introuvable');
+    if (profile.tags.includes(STUDENT_TEMPLATE_TAG)) throw new Error(TEMPLATE_REFUSAL);
     const currentLevel = levelOfColor(profile.color);
     if (!currentLevel) throw new Error('niveau ni CFC ni AFP');
     const toLevel = otherLevel(currentLevel);
@@ -170,20 +183,14 @@ async function run(
   targetTemplateId: string,
   dryRun: boolean,
 ): Promise<LevelChangeOutcome> {
+  if (!isLocalStudent(personId)) return refusal(dryRun, 'profil introuvable');
   try {
     return await runLevelChange(
       { profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun },
       buildDeps(),
     );
   } catch (e) {
-    return {
-      success: false,
-      dryRun,
-      plan: null,
-      applied: 0,
-      remaining: [],
-      error: toFailure(e).message,
-    };
+    return refusal(dryRun, toFailure(e).message);
   }
 }
 
@@ -200,15 +207,9 @@ export async function executeLevelChange(
   toLevel: Level,
   targetTemplateId: string,
 ): Promise<LevelChangeOutcome> {
+  if (!isLocalStudent(personId)) return refusal(false, 'profil introuvable');
   if (getSyncProgress().status === 'syncing') {
-    return {
-      success: false,
-      dryRun: false,
-      plan: null,
-      applied: 0,
-      remaining: [],
-      error: 'synchronisation en cours — réessayez ensuite',
-    };
+    return refusal(false, 'synchronisation en cours — réessayez ensuite');
   }
   const outcome = await withArchiveLock(() => run(personId, toLevel, targetTemplateId, false));
 
