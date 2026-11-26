@@ -368,9 +368,13 @@ const ACCESS_PROBLEM = /^accès non confirmés : « (.*) »$/;
  * The copy is kept with its access unconfirmed. A re-run does not repair it: the section then
  * exists in the profile, is no longer template-only, and existing sections' access is out of scope.
  */
-function accessLine(sectionTitle: string, nodeTitle: string): string {
+function accessLine(sectionTitle: string, nodeTitle: string, studentFound: boolean): string {
   const node = nodeTitle !== sectionTitle ? ` (élément « ${nodeTitle} »)` : '';
-  return `accès non confirmé sur « ${sectionTitle} »${node} — à corriger à la main (une nouvelle exécution ne le refait pas)`;
+  // without the student's account nothing was changed on the copy (R12): say so, and what to do
+  const why = studentFound
+    ? 'à corriger à la main'
+    : "élève introuvable dans l'accès du profil : ajoutez l'élève au profil, puis réglez l'accès à la main";
+  return `accès non confirmé sur « ${sectionTitle} »${node} — ${why} (une nouvelle exécution ne le refait pas)`;
 }
 
 const hasActions = (a: Actions) => a.copies.length > 0 || a.deletes.length > 0 || a.widget;
@@ -397,7 +401,7 @@ async function runActions(
       const access = ACCESS_PROBLEM.exec(p);
       if (p === DUPLICATE_REMOVED_NOTE) notes.push(`« ${c.title} » : ${p}`); // informational, never a failure
       else if (r.ok) notes.push(`« ${c.title} » : ${p}`);
-      else if (access) failures.push(accessLine(c.title, access[1]));
+      else if (access) failures.push(accessLine(c.title, access[1], ctx.studentId !== null));
       else failures.push(`« ${c.title} » : ${p}`);
     }
     if (r.ok) { applied++; continue; }

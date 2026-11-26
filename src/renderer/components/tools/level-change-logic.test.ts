@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   searchStudents, eligibility, levelLabel, hasApplicableChange, toggleTagAdd, toggleForced, toggleCopy, setDelete,
-  descendantsLabel, certainAdds, resultView, taskCountsSuffix, hintFor, GROUP_ROLE_HINT,
+  descendantsLabel, certainAdds, resultView, taskCountsSuffix, hintFor, GROUP_ROLE_HINT, studentWarning, STUDENT_NOT_FOUND,
 } from './level-change-logic';
 import type { LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import type { LevelChangePlan, LevelChangeStudent, SectionChange } from '../../../shared/level-change-types';
@@ -163,5 +163,24 @@ describe('resultView and taskCountsSuffix', () => {
     expect(taskCountsSuffix(0, 0)).toBe('');
     expect(taskCountsSuffix(1, 0)).toBe(' — 1 ignoré (voir Outils)');
     expect(taskCountsSuffix(2, 1)).toBe(' — 2 ignorés, 1 note (voir Outils)');
+  });
+});
+
+describe('studentWarning', () => {
+  const plan = (over: Partial<LevelChangePlan>): LevelChangePlan => ({
+    profileId: 'P', fromLevel: 'cfc', toLevel: 'afp', colorFrom: '#1A237E', colorTo: '#9AD9EA', colorChange: true,
+    templates: [], sections: [], noSourceCounterpart: [], templateOnlyItems: [], profileOnlyItems: [],
+    widget: { needed: false, profileEmpty: false }, ...over,
+  });
+  const copy = [{ sectionKey: 'k', title: 'Boîte', templateSectionId: 't' }];
+  it('warns when copies are proposed and the student is not on the profile access list', () => {
+    expect(studentWarning(plan({ templateOnlyItems: copy, studentFound: false }))).toBe(STUDENT_NOT_FOUND);
+    expect(STUDENT_NOT_FOUND).toBe(
+      "Élève introuvable dans l'accès du profil — les accès des sections copiées ne pourront pas être réglés (à faire à la main).");
+  });
+  it('no warning when the student is found, unknown, or nothing is copied', () => {
+    expect(studentWarning(plan({ templateOnlyItems: copy, studentFound: true }))).toBeNull();
+    expect(studentWarning(plan({ templateOnlyItems: copy }))).toBeNull();
+    expect(studentWarning(plan({ studentFound: false }))).toBeNull();
   });
 });

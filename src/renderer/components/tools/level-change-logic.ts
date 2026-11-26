@@ -121,3 +121,11 @@ export function taskCountsSuffix(ignored: number, notes: number): string {
   if (notes > 0) parts.push(`${notes} note${notes === 1 ? '' : 's'}`);
   return parts.length ? ` — ${parts.join(', ')} (voir Outils)` : '';
 }
+
+/** Without the student's account the run changes no access on a copy (R12): warn before applying. */
+export const STUDENT_NOT_FOUND =
+  "Élève introuvable dans l'accès du profil — les accès des sections copiées ne pourront pas être réglés (à faire à la main).";
+
+export function studentWarning(plan: LevelChangePlan): string | null {
+  return plan.templateOnlyItems.length > 0 && plan.studentFound === false ? STUDENT_NOT_FOUND : null;
+}

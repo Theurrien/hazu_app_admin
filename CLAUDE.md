@@ -899,7 +899,11 @@ lines and the notes reach the operator: after the task settles, success or not, 
 shows the result (« Reste à faire », « Ignoré », « Notes ») until the next pick or preview, and the
 Task Queue line carries the counts. A **failed** run of the student still on screen is reported right
 under « Aperçu / Appliquer » (« Changement non terminé — {élève} »), where the operator is looking; a
-group-role line carries the hint that a retry cannot fix it. Both reports have « Ouvrir le profil dans
+group-role line names the role to set (« mettre editor (actuellement reader) ») and carries the hint that
+a retry cannot fix it. When copies are proposed, the preview checks whether the student's account is on
+the profile's access list (`plan.studentFound`); if not it warns « Élève introuvable dans l'accès du
+profil — … », and the run's access lines name that reason (nothing is changed on a copy without the
+student, R12). Both reports have « Ouvrir le profil dans
 Hazu » (environment-aware link, `utils/hazu-url.ts`, shared with the Task Queue). While the task is queued every box is locked (the task holds a
 snapshot of the decisions).
 A delete happens only if the node, re-read at execute, is **still a direct child of the profile, its
