@@ -356,6 +356,17 @@ function selectActions(plan: LevelChangePlan, d: LevelChangeDecisions): { action
   return { actions: { copies, deletes, widget }, ignored };
 }
 
+const DUPLICATE_REMOVED_NOTE = 'doublon de la copie supprimé';
+const ACCESS_PROBLEM = /^accès non confirmés : « (.*) »$/;
+/**
+ * The copy is kept with its access unconfirmed. A re-run does not repair it: the section then
+ * exists in the profile, is no longer template-only, and existing sections' access is out of scope.
+ */
+function accessLine(sectionTitle: string, nodeTitle: string): string {
+  const node = nodeTitle !== sectionTitle ? ` (élément « ${nodeTitle} »)` : '';
+  return `accès non confirmé sur « ${sectionTitle} »${node} — à corriger à la main (une nouvelle exécution ne le refait pas)`;
+}
+
 const hasActions = (a: Actions) => a.copies.length > 0 || a.deletes.length > 0 || a.widget;
 
 /**
@@ -375,10 +386,16 @@ async function runActions(
 
   for (const c of a.copies) {
     const r = await copySection(c.templateSectionId, profileId, deps, ctx.roleGroups, ctx.studentId);
-    // with ok:true, problems are notes (e.g. « doublon de la copie supprimé »)
-    if (r.ok) { applied++; notes.push(...r.problems.map(p => `« ${c.title} » : ${p}`)); continue; }
-    if (r.problems.length === 0) remaining.push(`« ${c.title} » : copie non confirmée`);
-    for (const p of r.problems) remaining.push(`« ${c.title} » : ${p}`);
+    const failures: string[] = [];
+    for (const p of r.problems) {
+      const access = ACCESS_PROBLEM.exec(p);
+      if (p === DUPLICATE_REMOVED_NOTE) notes.push(`« ${c.title} » : ${p}`); // informational, never a failure
+      else if (r.ok) notes.push(`« ${c.title} » : ${p}`);
+      else if (access) failures.push(accessLine(c.title, access[1]));
+      else failures.push(`« ${c.title} » : ${p}`);
+    }
+    if (r.ok) { applied++; continue; }
+    remaining.push(...(failures.length ? failures : [`« ${c.title} » : copie non confirmée`]));
   }
 
   for (const x of a.deletes) {
@@ -388,6 +405,7 @@ async function runActions(
   }
 
   if (a.widget) {
+    // Built from the plan-time profile description: valid because no earlier step writes the profile's own description.
     const html = widgetDescription(ctx.profile.description, ctx.targetRootDescription);
     try { await withRetry(deps, () => deps.updateDescription(profileId, html)); } catch { /* verified below */ }
     let ok = false;

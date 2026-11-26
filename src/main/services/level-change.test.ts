@@ -762,8 +762,44 @@ describe('runLevelChange', () => {
       const d = await defaults(h);
       const o = await runLevelChange(input({ decisions: d, studentId: null }), h.deps);
       expect(o.success).toBe(false);
-      expect(o.remaining.some(r => r.includes('accès non confirmés'))).toBe(true);
+      expect(o.remaining).toContain(
+        'accès non confirmé sur « Boîte » — à corriger à la main (une nouvelle exécution ne le refait pas)');
+      expect(o.remaining).toContain(
+        'accès non confirmé sur « Boîte » (élément « Fiche ») — à corriger à la main (une nouvelle exécution ne le refait pas)');
       expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+      expect(copiesOf(h.w)).toHaveLength(1);
+    });
+
+    it('KNOWN LIMITATION: a copy kept with unconfirmed access is not re-checked — the re-run writes the colour and succeeds', async () => {
+      const h = harness(richWorld());
+      const o1 = await runLevelChange(input({ decisions: await defaults(h), studentId: null }), h.deps);
+      expect(o1.success).toBe(false);
+      expect(o1.remaining.some(r => r.startsWith('accès non confirmé sur « Boîte »') && r.includes('une nouvelle exécution ne le refait pas'))).toBe(true);
+      expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+      h.calls.length = 0;
+      // run 2: the copy now exists, so it is no longer template-only and its ACL is not revisited
+      const o2 = await runLevelChange(input({ decisions: await defaults(h), studentId: null }), h.deps);
+      expect(o2.plan?.templateOnlyItems).toEqual([]);
+      expect(h.calls.some(c => c.startsWith('acl') || c.startsWith('create'))).toBe(false);
+      expect(h.calls).toContain('color:P');
+      expect(o2.success).toBe(true);
+    });
+
+    it('a duplicate removed by a copy that fails on access is a note, not a failure line', async () => {
+      const h = harness(richWorld());
+      const d = await defaults(h);
+      // the top create lands twice (as after a create that timed out): the copy removes the extra
+      const create = h.deps.create.bind(h.deps);
+      let first = true;
+      h.deps.create = async (pid, from) => {
+        if (from.id === 'ta2' && first) { first = false; await create(pid, from); }
+        return create(pid, from);
+      };
+      const o = await runLevelChange(input({ decisions: d, studentId: null }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.notes).toContain('« Boîte » : doublon de la copie supprimé');
+      expect(o.remaining.some(r => r.includes('doublon'))).toBe(false);
+      expect(o.remaining.some(r => r.startsWith('accès non confirmé sur « Boîte »'))).toBe(true);
       expect(copiesOf(h.w)).toHaveLength(1);
     });
 
