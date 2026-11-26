@@ -2,7 +2,7 @@
  * Correspondence core for Contrôle — pure, no IO. Resolves the values of a spreadsheet (room
  * names, students) to Hazu rooms and persons, using links the operator saved earlier.
  */
-import { matchRows, nameKey } from './person-match';
+import { cleanEmail, matchRows, nameKey, rowName } from './person-match';
 import type { HazuPerson, SheetPerson } from './person-match';
 
 export type CorrCategory = 'student' | 'class' | 'enterprise' | 'state';
@@ -43,14 +43,8 @@ export function roomKey(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function cleanEmail(e: string | null | undefined): string {
-  const t = (e ?? '').trim().toLowerCase();
-  return t.includes('@') ? t : '';
-}
-
 function rowNameKey(p: SheetPerson): string {
-  const full = (p.fullName ?? '').trim();
-  return nameKey(full !== '' ? full : `${p.firstName ?? ''} ${p.lastName ?? ''}`);
+  return nameKey(rowName(p));
 }
 
 /** Keys of a row, e-mail first, only those that exist. */
@@ -83,7 +77,8 @@ export function resolveRoomValues(
   const suggestionFor = (value: string): string | null => {
     const title = suggest(value, rooms.map((r) => r.title));
     if (title === null) return null;
-    return rooms.find((r) => r.title === title)?.id ?? null;
+    const hits = rooms.filter((r) => r.title === title);
+    return hits.length === 1 ? hits[0].id : null; // never preselect one twin silently
   };
 
   for (const value of values) {
@@ -130,6 +125,7 @@ export function resolveStudents(
     const keys = studentKeys(row).filter((k) => !(collides && k.startsWith('name:')));
     const saveKey = keys[0] ?? null;
 
+    // The first defined link in key order wins, even when it is stale.
     const link = keys.map((k) => links.get(k)).find((l) => l !== undefined);
     let res: StudentResolution | null = null;
     if (link) {

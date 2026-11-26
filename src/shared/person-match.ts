@@ -91,13 +91,13 @@ function isNear(a: string[], b: string[]): boolean {
   return false;
 }
 
-function rowName(r: SheetPerson): string {
+export function rowName(r: SheetPerson): string {
   const full = (r.fullName ?? '').trim();
   if (full !== '') return full;
   return `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim();
 }
 
-function cleanEmail(e: string | null | undefined): string {
+export function cleanEmail(e: string | null | undefined): string {
   const t = (e ?? '').trim().toLowerCase();
   return t.includes('@') ? t : '';
 }

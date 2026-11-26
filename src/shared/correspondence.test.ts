@@ -74,6 +74,14 @@ describe('resolveRoomValues', () => {
       twins: ['a', 'b'],
     });
   });
+  it('a suggestion matching twin titles is not preselected', () => {
+    const twins = [room('a', 'CUI 2A'), room('b', 'CUI 2A')];
+    expect(resolveRoomValues('class', ['CUI 2X'], twins, [], () => 'CUI 2A').get('cui 2x')).toEqual({
+      kind: 'open',
+      suggestionId: null,
+      twins: [],
+    });
+  });
   it('no match → open with the suggestion', () => {
     expect(resolveRoomValues('class', ['CUI 2C'], rooms, [], () => 'CUI 2B').get('cui 2c')).toEqual({
       kind: 'open',
@@ -90,6 +98,11 @@ describe('resolveStudents', () => {
   ];
   it('saved link → saved', () => {
     const rows = [{ rowIndex: 0, fullName: 'Zed Qux' }];
+    const m = resolveStudents(rows, students, [link('student', `name:${nameKey('Zed Qux')}`, 'p2')]);
+    expect(m.get(0)?.res).toEqual({ kind: 'saved', personId: 'p2' });
+  });
+  it('a row with e-mail and name resolves through the name link alone', () => {
+    const rows = [{ rowIndex: 0, email: 'new@example.invalid', fullName: 'Zed Qux' }];
     const m = resolveStudents(rows, students, [link('student', `name:${nameKey('Zed Qux')}`, 'p2')]);
     expect(m.get(0)?.res).toEqual({ kind: 'saved', personId: 'p2' });
   });
