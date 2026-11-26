@@ -739,7 +739,7 @@ describe('runLevelChange', () => {
       const h = harness(w);
       const o = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
       expect(o.success).toBe(false);
-      expect(o.remaining).toContain('« Boîte » : rôle du groupe companymentor à ajuster à la main sur « Boîte »');
+      expect(o.remaining).toContain('« Boîte » : rôle du groupe companymentor à ajuster à la main sur « Boîte » : mettre editor (actuellement reader)');
       expect(o.remaining.some(r => r.startsWith('accès non confirmé sur « Boîte » —'))).toBe(false);
       const [copy] = copiesOf(h.w);
       expect(h.w.acl!.get(copy)!.filter(r => r.groupId === 'gM').map(r => r.role)).toEqual(['reader', 'reader']);
@@ -789,10 +789,11 @@ describe('runLevelChange', () => {
       const d = await defaults(h);
       const o = await runLevelChange(input({ decisions: d, studentId: null }), h.deps);
       expect(o.success).toBe(false);
+      // the reason is named: without the student's account no access was changed on the copy
       expect(o.remaining).toContain(
-        'accès non confirmé sur « Boîte » — à corriger à la main (une nouvelle exécution ne le refait pas)');
+        "accès non confirmé sur « Boîte » — élève introuvable dans l'accès du profil : ajoutez l'élève au profil, puis réglez l'accès à la main (une nouvelle exécution ne le refait pas)");
       expect(o.remaining).toContain(
-        'accès non confirmé sur « Boîte » (élément « Fiche ») — à corriger à la main (une nouvelle exécution ne le refait pas)');
+        "accès non confirmé sur « Boîte » (élément « Fiche ») — élève introuvable dans l'accès du profil : ajoutez l'élève au profil, puis réglez l'accès à la main (une nouvelle exécution ne le refait pas)");
       expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
       expect(h.calls.some(c => c.startsWith('detach'))).toBe(false); // R12: no detach without the student
       expect(copiesOf(h.w)).toHaveLength(1);

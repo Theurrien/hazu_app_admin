@@ -288,7 +288,12 @@ export async function planLevelChange(
   toLevel: Level,
   targetTemplateId: string,
 ): Promise<LevelChangeOutcome> {
-  return run(personId, toLevel, targetTemplateId, true);
+  const outcome = await run(personId, toLevel, targetTemplateId, true);
+  // copies proposed: tell the preview whether their access can be set (the student must be found)
+  if (outcome.plan && outcome.plan.templateOnlyItems.length > 0) {
+    outcome.plan.studentFound = (await liveStudentId(personId)) !== null;
+  }
+  return outcome;
 }
 
 export async function executeLevelChange(

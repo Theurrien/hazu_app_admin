@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { LevelChangePlan, ProfileOnlyItem } from '../../../shared/level-change-types';
 import type { LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import { DeleteSectionsConfirmModal } from './DeleteSectionsConfirmModal';
-import { descendantsLabel, setDelete, toggleCopy } from './level-change-logic';
+import { descendantsLabel, setDelete, studentWarning, toggleCopy } from './level-change-logic';
 
 interface Props {
   plan: LevelChangePlan;
@@ -25,6 +25,7 @@ export function LevelChangeActions({ plan, decisions, onChange, disabled = false
       {templateOnlyItems.length > 0 && (
         <div className="ml-2">
           <p className="text-gray-600">Copier les sections manquantes</p>
+          {studentWarning(plan) && <p className="text-amber-700 ml-3">{studentWarning(plan)}</p>}
           {templateOnlyItems.map((i) => (
             <label key={i.sectionKey} className="flex items-center gap-2 ml-3">
               <input

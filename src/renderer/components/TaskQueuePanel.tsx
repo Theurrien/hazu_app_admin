@@ -3,6 +3,7 @@ import { useTaskQueue, Task } from '../contexts/TaskQueueContext';
 import { useAppMode } from '../contexts/AppModeContext';
 import { allowedTaskTypes } from '../../shared/app-mode';
 import { taskCountsSuffix } from './tools/level-change-logic';
+import { hazuItemUrl } from '../utils/hazu-url';
 
 interface TaskItemProps {
   task: Task;
@@ -154,10 +155,7 @@ export function TaskQueuePanel() {
 
   const handleOpen = async (entityId: string) => {
     const config = await window.electronAPI.getApiConfig();
-    const env = config.environment || 'swiss';
-    const baseUrl = env === 'swiss' ? 'https://hazu.swiss' : env === 'io' ? 'https://hazu.io' : 'https://dev.hazu.swiss';
-    const url = `${baseUrl}/${entityId}`;
-    window.electronAPI.openExternal(url);
+    window.electronAPI.openExternal(hazuItemUrl(config.environment, entityId));
   };
 
   return (

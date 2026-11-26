@@ -85,20 +85,33 @@ export function descendantsLabel(n: number | null, exact: boolean): string {
 export interface LevelChangeResultView {
   ok: boolean;
   headline: string;
+  /** the profile the run was about (for « Ouvrir le profil dans Hazu ») */
+  personId: string;
   remaining: string[];
   ignored: string[];
   notes: string[];
 }
 
-export function resultView(outcome: LevelChangeOutcome | null, failure?: string): LevelChangeResultView {
+export function resultView(
+  outcome: LevelChangeOutcome | null, personId: string, failure?: string,
+): LevelChangeResultView {
+  const failed = (why?: string) => `Changement non terminé${why ? ` — ${why}` : ''}`;
   if (!outcome) {
-    return { ok: false, headline: `Échec — ${failure ?? 'erreur inconnue'}`, remaining: [], ignored: [], notes: [] };
+    return { ok: false, headline: failed(failure ?? 'erreur inconnue'), personId, remaining: [], ignored: [], notes: [] };
   }
   const ok = outcome.success;
   const headline = ok
     ? `Changement appliqué (${outcome.applied} étape${outcome.applied === 1 ? '' : 's'} confirmée${outcome.applied === 1 ? '' : 's'})`
-    : `Échec${outcome.error ? ` — ${outcome.error}` : ''}`;
-  return { ok, headline, remaining: outcome.remaining, ignored: outcome.ignored, notes: outcome.notes ?? [] };
+    : failed(outcome.error);
+  return { ok, headline, personId, remaining: outcome.remaining, ignored: outcome.ignored, notes: outcome.notes ?? [] };
+}
+
+/** A role group left at the wrong share role is never written: a retry cannot fix it. */
+export const GROUP_ROLE_HINT =
+  'Réessayer ne corrige pas ceci : réglez le rôle dans Hazu, puis Réessayer pour écrire la couleur.';
+
+export function hintFor(line: string): string | null {
+  return line.includes('rôle du groupe') && line.includes('à ajuster à la main') ? GROUP_ROLE_HINT : null;
 }
 
 /** Appended to the Task Queue line: counts only, the lines themselves are in the Outils section. */
@@ -107,4 +120,12 @@ export function taskCountsSuffix(ignored: number, notes: number): string {
   if (ignored > 0) parts.push(`${ignored} ignoré${ignored === 1 ? '' : 's'}`);
   if (notes > 0) parts.push(`${notes} note${notes === 1 ? '' : 's'}`);
   return parts.length ? ` — ${parts.join(', ')} (voir Outils)` : '';
+}
+
+/** Without the student's account the run changes no access on a copy (R12): warn before applying. */
+export const STUDENT_NOT_FOUND =
+  "Élève introuvable dans l'accès du profil — les accès des sections copiées ne pourront pas être réglés (à faire à la main).";
+
+export function studentWarning(plan: LevelChangePlan): string | null {
+  return plan.templateOnlyItems.length > 0 && plan.studentFound === false ? STUDENT_NOT_FOUND : null;
 }

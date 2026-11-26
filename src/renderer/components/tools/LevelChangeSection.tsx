@@ -7,9 +7,10 @@ import type {
 import { defaultDecisions, type LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import { useTaskQueue } from '../../contexts/TaskQueueContext';
 import {
-  certainAdds, eligibility, hasApplicableChange, levelLabel, resultView, searchStudents, toggleForced, toggleTagAdd,
-  type LevelChangeResultView,
+  certainAdds, eligibility, hasApplicableChange, hintFor, levelLabel, resultView, searchStudents, toggleForced,
+  toggleTagAdd, type LevelChangeResultView,
 } from './level-change-logic';
+import { hazuItemUrl } from '../../utils/hazu-url';
 import { LevelChangeActions } from './LevelChangeActions';
 
 const panel = { border: '1px solid var(--hazu-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
@@ -26,14 +27,39 @@ function LevelChangeResult({ displayName, view }: { displayName: string; view: L
   const list = (items: string[], cls: string) =>
     items.length > 0 && (
       <ul className={`list-disc ml-5 ${cls}`}>
-        {items.map((m, i) => <li key={i}>{m}</li>)}
+        {items.map((m, i) => {
+          const hint = hintFor(m);
+          return (
+            <li key={i}>
+              {m}
+              {hint && <p className="text-gray-700 mt-0.5">{hint}</p>}
+            </li>
+          );
+        })}
       </ul>
     );
+  const openProfile = async () => {
+    const config = await window.electronAPI.getApiConfig();
+    void window.electronAPI.openExternal(hazuItemUrl(config.environment, view.personId));
+  };
   return (
     <div className={`rounded-lg p-4 text-sm space-y-2 ${view.ok ? 'bg-green-50' : 'bg-red-50'}`}>
-      <p className="font-medium">
-        {displayName} — <span className={view.ok ? 'text-green-700' : 'text-red-700'}>{view.headline}</span>
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-medium">
+          {view.ok ? `${displayName} — ` : ''}
+          <span className={view.ok ? 'text-green-700' : 'text-red-700'}>
+            {view.headline}{view.ok ? '' : ` — ${displayName}`}
+          </span>
+        </p>
+        <button
+          type="button"
+          onClick={() => void openProfile()}
+          className="shrink-0 px-3 py-1 rounded-lg text-xs border bg-white"
+          style={{ borderColor: 'var(--hazu-border)' }}
+        >
+          Ouvrir le profil dans Hazu
+        </button>
+      </div>
       {view.remaining.length > 0 && <p className="font-medium">Reste à faire</p>}
       {list(view.remaining, 'text-red-700')}
       {view.ignored.length > 0 && <p className="font-medium">Ignoré</p>}
@@ -151,7 +177,7 @@ function LevelChangeSection() {
       onDone: (outcome) => {
         void loadStudents();
         // shown even when another student was picked meanwhile: the lines exist nowhere else
-        setResult({ displayName: selected.displayName, view: resultView(outcome) });
+        setResult({ displayName: selected.displayName, view: resultView(outcome, selected.id) });
         if (selectedRef.current === selected.id) {
           selectedRef.current = null;
           setSelected(null);
@@ -163,7 +189,7 @@ function LevelChangeSection() {
         }
       },
       onError: (outcome, message) => {
-        setResult({ displayName: selected.displayName, view: resultView(outcome, message) });
+        setResult({ displayName: selected.displayName, view: resultView(outcome, selected.id, message) });
         if (selectedRef.current === selected.id) {
           setQueued(false);
           setApplyFailed(true);
@@ -171,6 +197,9 @@ function LevelChangeSection() {
       },
     });
   };
+
+  // a failed run of the student on screen is reported where the operator is looking, under the buttons
+  const resultUnderButtons = !!result && !result.view.ok && !!selected && result.view.personId === selected.id;
 
   const localColourDiffers =
     !!plan && !!selected?.color && selected.color.toUpperCase() !== plan.colorFrom.toUpperCase();
@@ -220,7 +249,7 @@ function LevelChangeSection() {
         )}
       </div>
 
-      {result && <LevelChangeResult displayName={result.displayName} view={result.view} />}
+      {result && !resultUnderButtons && <LevelChangeResult displayName={result.displayName} view={result.view} />}
 
       {selected && (
         <div className="space-y-3 pt-2" style={{ borderTop: '1px solid var(--hazu-border)' }}>
@@ -271,7 +300,10 @@ function LevelChangeSection() {
               {!previewCurrent && !previewing && !applyFailed && (
                 <p className="text-sm text-gray-500">Faites d'abord un aperçu — « Appliquer » s'active ensuite.</p>
               )}
-              {applyFailed && (
+              {resultUnderButtons && result && (
+                <LevelChangeResult displayName={result.displayName} view={result.view} />
+              )}
+              {applyFailed && !resultUnderButtons && (
                 <p className="text-sm text-red-600">Échec — voir la file des tâches, puis refaire l'aperçu.</p>
               )}
             </>

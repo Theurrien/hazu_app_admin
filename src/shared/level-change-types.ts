@@ -53,6 +53,9 @@ export interface LevelChangePlan {
   profileOnlyItems: ProfileOnlyItem[];
   /** needed: the template carries the widget and the profile does not; profileEmpty: its description is empty */
   widget: { needed: boolean; profileEmpty: boolean };
+  /** preview only, when copies are proposed: the student's account is on the profile's access list.
+   *  false → the copies' access cannot be set (no detach, no grant); absent → not checked. */
+  studentFound?: boolean;
 }
 
 export interface LevelChangeOutcome {
