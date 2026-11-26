@@ -739,7 +739,7 @@ describe('runLevelChange', () => {
       const h = harness(w);
       const o = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
       expect(o.success).toBe(false);
-      expect(o.remaining).toContain('« Boîte » : rôle du groupe companymentor à ajuster à la main sur « Boîte »');
+      expect(o.remaining).toContain('« Boîte » : rôle du groupe companymentor à ajuster à la main sur « Boîte » : mettre editor (actuellement reader)');
       expect(o.remaining.some(r => r.startsWith('accès non confirmé sur « Boîte » —'))).toBe(false);
       const [copy] = copiesOf(h.w);
       expect(h.w.acl!.get(copy)!.filter(r => r.groupId === 'gM').map(r => r.role)).toEqual(['reader', 'reader']);

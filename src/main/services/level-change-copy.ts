@@ -79,13 +79,16 @@ export function shareRoles(tags: string[]): Map<string, string> {
  * every row of the student on the node comes from a group being detached, the student is granted
  * max(reader, invite role) directly first. Student unresolved → no detach at all (blocked).
  */
+/** `current`: the group's roles on the node that differ from `want` (the share tag's aclRole). */
+export interface MismatchedGroup { groupId: string; role: string; current: string; want: string }
+
 export interface AclFix {
   /** role to grant the student directly, before any detach */
   raiseStudent: string | null;
   /** distinct groupIds of role groups to detach */
   detachGroups: string[];
-  /** role groups at the wrong share role: never written, reported */
-  mismatchedGroups: Array<{ groupId: string; role: string }>;
+  /** role groups at the wrong share role: never written, reported with the role to set */
+  mismatchedGroups: MismatchedGroup[];
   /** a detach or an invite grant is needed but the student is unresolved: nothing detached */
   blocked: boolean;
   /** the rank the student must hold once the fix is applied */
@@ -125,7 +128,10 @@ export function planAclFix(
     const role = roleGroups.get(g) as string;
     const want = shares.get(role);
     if (want === undefined) wantDetach.push(g);
-    else if (gRows.some(r => r.role !== want)) mismatchedGroups.push({ groupId: g, role });
+    else if (gRows.some(r => r.role !== want)) {
+      const current = [...new Set(gRows.map(r => r.role).filter(x => x !== want))].join(' / ');
+      mismatchedGroups.push({ groupId: g, role, current, want });
+    }
   }
 
   const invite = inviteRole(tags);
@@ -177,9 +183,9 @@ export function baselineOf(
 export function accessState(
   rows: AclRow[], tags: string[], roleGroups: Map<string, string>, studentId: string | null,
   baseline: AclBaseline = baselineOf(rows, tags, roleGroups, studentId),
-): { confirmed: boolean; mismatched: string[] } {
+): { confirmed: boolean; mismatched: MismatchedGroup[] } {
   const fix = planAclFix(rows, tags, roleGroups, studentId, baseline.studentRequired);
-  const mismatched = fix.mismatchedGroups.map(m => m.role);
+  const mismatched = fix.mismatchedGroups;
   const fail = { confirmed: false, mismatched };
   // defence in depth: a role-group row without a principal is never taken as settled
   if (rows.some(r => isRoleGroup(r, roleGroups) && !r.authorId)) return fail;
@@ -200,8 +206,8 @@ export function aclMatches(
 }
 
 /** A role group at the wrong share role on a copied node: never written, a hand fix. */
-export function groupRoleProblem(role: string, nodeTitle: string): string {
-  return `rôle du groupe ${role} à ajuster à la main sur « ${nodeTitle} »`;
+export function groupRoleProblem(m: Pick<MismatchedGroup, 'role' | 'current' | 'want'>, nodeTitle: string): string {
+  return `rôle du groupe ${m.role} à ajuster à la main sur « ${nodeTitle} » : mettre ${m.want} (actuellement ${m.current})`;
 }
 
 export interface CopyResult { ok: boolean; newId: string | null; problems: string[] }
@@ -307,10 +313,10 @@ async function removeVerified(deps: CopyDeps, parentId: string, id: string): Pro
  */
 async function alignAcl(
   deps: CopyDeps, c: Copied, roleGroups: Map<string, string>, studentId: string | null,
-): Promise<{ confirmed: boolean; mismatched: string[] }> {
+): Promise<{ confirmed: boolean; mismatched: MismatchedGroup[] }> {
   const tags = c.node.tags;
   let baseline: AclBaseline | null = null;
-  let last: { confirmed: boolean; mismatched: string[] } = { confirmed: false, mismatched: [] };
+  let last: { confirmed: boolean; mismatched: MismatchedGroup[] } = { confirmed: false, mismatched: [] };
   for (let i = 0; i < VERIFY_READS; i++) {
     if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
     try {
@@ -415,7 +421,7 @@ export async function copySection(
   const problems: string[] = [];
   for (const c of copies) {
     const a = await alignAcl(deps, c, roleGroups, studentId);
-    for (const role of a.mismatched) problems.push(groupRoleProblem(role, c.node.title));
+    for (const m of a.mismatched) problems.push(groupRoleProblem(m, c.node.title));
     if (!a.confirmed) problems.push(`accès non confirmés : « ${c.node.title} »`);
   }
   return { ok: problems.length === 0 && !extrasStuck, newId: topId, problems: [...notes, ...problems] };

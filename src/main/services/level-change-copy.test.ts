@@ -64,7 +64,7 @@ describe('planAclFix (R12: whole groups by groupId)', () => {
     const f = planAclFix([row('a-cm', 'reader', true, 'g-cm'), row('b-cm', 'editor', true, 'g-cm')], tags, groups, S);
     expect(f.detachGroups).toEqual([]);
     expect(f.raiseStudent).toBeNull();
-    expect(f.mismatchedGroups).toEqual([{ groupId: 'g-cm', role: 'companymentor' }]);
+    expect(f.mismatchedGroups).toEqual([{ groupId: 'g-cm', role: 'companymentor', current: 'reader', want: 'editor' }]);
     const ok = planAclFix([row('a-cm', 'editor', true, 'g-cm')], tags, groups, S);
     expect(ok).toMatchObject(NOFIX);
   });
@@ -370,7 +370,7 @@ describe('copySection — R12 access cases', () => {
     const r = await copySection('t-sec', 'prof', w.deps, groups, S);
     expect(r.ok).toBe(false);
     const child = [...w.nodes.values()].find(x => x.parentId === r.newId)!;
-    expect(r.problems).toContain('rôle du groupe companymentor à ajuster à la main sur « Child »');
+    expect(r.problems).toContain('rôle du groupe companymentor à ajuster à la main sur « Child » : mettre editor (actuellement reader)');
     expect(r.problems).not.toContain('accès non confirmés : « Child »');
     expect(w.acls.get(child.id)!.filter(x => x.groupId === 'g-cm').map(x => x.role)).toEqual(['reader']);
     expect(w.log.detach.some(d => d === `${child.id}:g-cm`)).toBe(false);
