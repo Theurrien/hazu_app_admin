@@ -7,6 +7,7 @@ import {
 } from './level-change';
 import { defaultDecisions, type LevelChangeDecisions } from '../../shared/level-change-decisions';
 import type { LevelChangePlan } from '../../shared/level-change-types';
+import type { AclRow, CopyNode } from './level-change-copy';
 
 const CFC = '#1A237E';
 const AFP = '#9AD9EA';
@@ -322,13 +323,58 @@ describe('runLevelChange', () => {
     return { nodes, kids };
   }
 
-  function harness(w = world(), opts: {
+  type World = ReturnType<typeof world> & { acl?: Map<string, AclRow[]> };
+  const toCopy = (n: LcNode): CopyNode => ({ ...n, tags: [...n.tags], type: 'hazu', privacy: null, rolesSettings: null });
+  let seq = 0;
+  /** CopyDeps + remove on the same fake world. A created node inherits the profile's ACL. */
+  function copyDeps(w: World, calls: string[], opts: { failCreate?: string; failRemove?: boolean }) {
+    const acl = (w.acl ??= new Map<string, AclRow[]>());
+    const drop = (id: string) => {
+      for (const k of w.kids.get(id) ?? []) drop(k);
+      const n = w.nodes.get(id);
+      if (n?.parentId) w.kids.set(n.parentId, (w.kids.get(n.parentId) ?? []).filter(x => x !== id));
+      w.nodes.delete(id);
+    };
+    return {
+      async readFull(id: string) { const n = w.nodes.get(id); return n ? toCopy(n) : null; },
+      async listFull(pid: string) { return (w.kids.get(pid) ?? []).map(i => toCopy(w.nodes.get(i)!)); },
+      async create(pid: string, from: CopyNode) {
+        calls.push('create:' + from.id);
+        if (opts.failCreate === from.id) throw { status: 400, networkOrTimeout: false, message: 'refusé' };
+        const id = 'c' + ++seq;
+        w.nodes.set(id, { id, parentId: pid, title: from.title, description: from.description, tags: [...from.tags], icon: from.icon, color: from.color });
+        w.kids.set(pid, [...(w.kids.get(pid) ?? []), id]);
+        acl.set(id, (acl.get('P') ?? []).map(r => ({ ...r })));
+        return id;
+      },
+      async remove(id: string) {
+        calls.push('remove:' + id);
+        if (opts.failRemove) throw { status: 400, networkOrTimeout: false, message: 'refusé' };
+        drop(id);
+      },
+      async acl(id: string) { return (acl.get(id) ?? []).map(r => ({ ...r })); },
+      async setRole(item: string, principal: string, role: string) {
+        calls.push('acl:' + item);
+        const rows = acl.get(item) ?? [];
+        const r = rows.find(x => x.authorId === principal);
+        if (r) r.role = role; else rows.push({ authorId: principal, groupId: null, isGroup: false, role });
+        acl.set(item, rows);
+      },
+      async removeFromAcl(item: string, principal: string) {
+        calls.push('acl:' + item);
+        acl.set(item, (acl.get(item) ?? []).filter(x => x.authorId !== principal));
+      },
+    };
+  }
+
+  function harness(w: World = world(), opts: {
     failList?: string; dropWrites?: boolean; failWrites?: boolean; mangleDesc?: boolean; noColor?: boolean;
-    failAdd?: boolean;
+    failAdd?: boolean; failCreate?: string; failRemove?: boolean; dropWidget?: boolean;
   } = {}) {
     const calls: string[] = [];
     const get = (id: string) => w.nodes.get(id)!;
     const deps: LevelChangeDeps = {
+      ...copyDeps(w, calls, opts),
       async read(id) { const n = w.nodes.get(id); return n ? { ...n, tags: [...n.tags] } : null; },
       async list(pid) {
         if (opts.failList === pid) throw { networkOrTimeout: false, status: 403, message: 'interdit' };
@@ -336,6 +382,7 @@ describe('runLevelChange', () => {
       },
       async updateDescription(id, html) {
         calls.push('desc:' + id);
+        if (opts.dropWidget && id === 'P') return;
         if (!opts.dropWrites) get(id).description = opts.mangleDesc ? `\n ${html.replace('><', '>\n<')} \n` : html;
         if (opts.failWrites) throw { status: 500, networkOrTimeout: false, message: 'boom' };
       },
@@ -354,12 +401,13 @@ describe('runLevelChange', () => {
     };
     return { w, deps, calls, opts };
   }
+  const ROLE_GROUPS = new Map([['gM', 'companymentor'], ['gT', 'schoolteacher']]);
   const NO_DECISIONS: LevelChangeDecisions = {
     acceptedTagAdds: [], forcedDescriptions: [], copySections: [], deleteSections: [], addWidget: false,
   };
   const input = (over: Record<string, unknown> = {}) =>
     ({ profileId: 'P', toLevel: 'afp' as const, targetTemplateId: 'TA', templateRootId: ROOT, dryRun: false,
-       decisions: NO_DECISIONS, ...over });
+       decisions: NO_DECISIONS, roleGroups: ROLE_GROUPS, studentId: 'stu' as string | null, ...over });
   /** the decisions the preview would send untouched */
   async function defaults(h: { deps: LevelChangeDeps }, over: Record<string, unknown> = {}) {
     const dry = await runLevelChange(input({ dryRun: true, ...over }), h.deps);
@@ -600,6 +648,175 @@ describe('runLevelChange', () => {
       const o = await runLevelChange(input(), h.deps);
       expect(o.success).toBe(true);
       expect(h.calls).toEqual(['color:P']);
+    });
+  });
+
+  describe('run order: copies, access, deletes, widget, colour', () => {
+    const WIDGET = '<p><a href="x/student_app.html">app</a></p>';
+    const BOX = node({ id: 'ta2', title: 'Boîte', tags: ['hz-invite-self-editor', 'hz-share-companymentor-editor', 'hz-config-legend'] });
+    const BOX_KEY = sectionKey(BOX);
+    const OLD_KEY = 'ancien|fa-x|#111111';
+    /** target gains a template-only section with a child and the widget; the profile has a
+     *  profile-only section with two levels inside, an empty description, and ACL rows */
+    function richWorld(): World {
+      const w: World = world();
+      const put = (n: LcNode, parent: string) => { w.nodes.set(n.id, { ...n, parentId: parent }); w.kids.set(parent, [...(w.kids.get(parent) ?? []), n.id]); };
+      w.nodes.get('TA')!.description = WIDGET;
+      put(BOX, 'TA');
+      put(node({ id: 'ta2a', title: 'Fiche', tags: ['hz-invite-self-editor'] }), 'ta2');
+      put(node({ id: 'p2', title: 'Ancien' }), 'P');
+      put(node({ id: 'p2a', title: 'Travail' }), 'p2');
+      put(node({ id: 'p2b', title: 'Note' }), 'p2a');
+      w.acl = new Map([['P', [
+        { authorId: 'stu', groupId: null, isGroup: false, role: 'reader' },
+        { authorId: 'grpM', groupId: 'gM', isGroup: true, role: 'reader' },
+        { authorId: 'grpT', groupId: 'gT', isGroup: true, role: 'editor' },
+        { authorId: 'own', groupId: 'gO', isGroup: true, role: 'owner' },
+      ]]]);
+      return w;
+    }
+    const withDelete = (d: LevelChangeDecisions): LevelChangeDecisions =>
+      ({ ...d, deleteSections: [{ sectionKey: OLD_KEY, sectionId: 'p2' }] });
+    const copiesOf = (w: World) => (w.kids.get('P') ?? []).filter(i => i.startsWith('c'));
+
+    it('dry run counts the descendants of profile-only sections, writing nothing', async () => {
+      const h = harness(richWorld());
+      const o = await runLevelChange(input({ dryRun: true }), h.deps);
+      expect(o.plan?.profileOnlyItems).toEqual([
+        { sectionKey: OLD_KEY, title: 'Ancien', sectionId: 'p2', descendants: 2, descendantsExact: true },
+      ]);
+      expect(o.plan?.templateOnlyItems.map(i => i.sectionKey)).toEqual([BOX_KEY]);
+      expect(o.plan?.widget.needed).toBe(true);
+      expect(h.calls).toEqual([]);
+    });
+
+    it('full run: sections → creates → access → remove → description → colour', async () => {
+      const h = harness(richWorld());
+      const d = withDelete(await defaults(h));
+      const o = await runLevelChange(input({ decisions: d }), h.deps);
+      expect(o.remaining).toEqual([]);
+      expect(o).toMatchObject({ success: true, applied: 5, ignored: [] });
+      const kinds = h.calls.map(c => c.split(':')[0]);
+      const firstOf = (k: string) => kinds.indexOf(k);
+      const lastOf = (k: string) => kinds.lastIndexOf(k);
+      expect(h.calls.slice(0, 3)).toEqual(['add:p1', 'rm:p1', 'desc:p1']);
+      expect(h.calls.filter(c => c.startsWith('create'))).toEqual(['create:ta2', 'create:ta2a']);
+      expect(lastOf('create')).toBeLessThan(firstOf('acl'));
+      expect(lastOf('acl')).toBeLessThan(firstOf('remove'));
+      expect(h.calls.filter(c => c.startsWith('remove'))).toEqual(['remove:p2']);
+      expect(h.calls.slice(-2)).toEqual(['desc:P', 'color:P']);
+      // copy present, delete gone, widget written into the empty description
+      const [copy] = copiesOf(h.w);
+      expect(h.w.nodes.get(copy)!.tags).toEqual(BOX.tags);
+      expect(h.w.kids.get(copy)).toHaveLength(1);
+      expect(h.w.nodes.has('p2')).toBe(false);
+      expect(h.w.nodes.get('P')!.description).toBe(WIDGET);
+      // access: student raised to editor, mentor group set to editor, teacher group removed, owner kept
+      expect(h.w.acl!.get(copy)).toEqual([
+        { authorId: 'stu', groupId: null, isGroup: false, role: 'editor' },
+        { authorId: 'grpM', groupId: 'gM', isGroup: true, role: 'editor' },
+        { authorId: 'own', groupId: 'gO', isGroup: true, role: 'owner' },
+      ]);
+      expect(h.w.nodes.get('P')!.color).toBe(AFP);
+    });
+
+    it('a non-empty profile description gets the widget appended', async () => {
+      const w = richWorld(); w.nodes.get('P')!.description = '<p>mine</p>';
+      const h = harness(w);
+      const o = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
+      expect(o.success).toBe(true);
+      expect(h.w.nodes.get('P')!.description).toBe('<p>mine</p>' + WIDGET);
+    });
+
+    it('a failed copy: colour not written, remaining names it, other actions still run', async () => {
+      const h = harness(richWorld(), { failCreate: 'ta2a' });
+      const o = await runLevelChange(input({ decisions: withDelete(await defaults(h)) }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.remaining.some(r => r.includes('Boîte') && r.includes('copie incomplète'))).toBe(true);
+      expect(o.remaining).toContain('couleur du profil non modifiée — étapes précédentes non confirmées');
+      expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+      expect(copiesOf(h.w)).toEqual([]); // the partial copy was removed again
+      expect(h.w.nodes.has('p2')).toBe(false);
+      expect(h.calls).toContain('desc:P');
+    });
+
+    it('a failed delete: colour not written, remaining names it', async () => {
+      const h = harness(richWorld(), { failRemove: true });
+      const o = await runLevelChange(input({ decisions: withDelete(await defaults(h)) }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.remaining.some(r => r.includes('Ancien') && r.includes('suppression non confirmée'))).toBe(true);
+      expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+      expect(h.w.nodes.has('p2')).toBe(true);
+    });
+
+    it('a widget the read-back never shows: colour not written', async () => {
+      const h = harness(richWorld(), { dropWidget: true });
+      const o = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.remaining.some(r => r.includes('widget'))).toBe(true);
+      expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+    });
+
+    it('studentId null with an invite-tagged copy: grant unconfirmed, colour withheld, copy kept', async () => {
+      const h = harness(richWorld());
+      const d = await defaults(h);
+      const o = await runLevelChange(input({ decisions: d, studentId: null }), h.deps);
+      expect(o.success).toBe(false);
+      expect(o.remaining.some(r => r.includes('accès non confirmés'))).toBe(true);
+      expect(h.calls.some(c => c.startsWith('color'))).toBe(false);
+      expect(copiesOf(h.w)).toHaveLength(1);
+    });
+
+    it('a template-only section that appeared after the preview is not copied, and is reported', async () => {
+      const h = harness(richWorld());
+      const d = await defaults(h);
+      const late = node({ id: 'ta3', title: 'Nouveau', tags: [] });
+      h.w.nodes.set('ta3', { ...late, parentId: 'TA' }); h.w.kids.set('TA', [...h.w.kids.get('TA')!, 'ta3']);
+      const o = await runLevelChange(input({ decisions: d }), h.deps);
+      expect(h.calls).not.toContain('create:ta3');
+      expect(o.ignored).toEqual(['« Nouveau » : copie — non vu à l\'aperçu — ignoré']);
+      expect(o.success).toBe(true);
+    });
+
+    it('decisions without object: copy, delete and widget are skipped and reported by title', async () => {
+      const w = richWorld();
+      // « Ancien » now exists in the target too: no longer profile-only
+      w.nodes.set('ta4', { ...node({ id: 'ta4', title: 'Ancien' }), parentId: 'TA' }); w.kids.set('TA', [...w.kids.get('TA')!, 'ta4']);
+      w.nodes.get('P')!.description = WIDGET;
+      const h = harness(w);
+      const d: LevelChangeDecisions = {
+        ...withDelete(await defaults(h)), copySections: [BOX_KEY, 'fantôme|fa-x|#111111'], addWidget: true,
+      };
+      const o = await runLevelChange(input({ decisions: d }), h.deps);
+      expect(h.calls.some(c => c.startsWith('remove'))).toBe(false);
+      expect(h.calls).not.toContain('desc:P');
+      expect(h.w.nodes.has('p2')).toBe(true);
+      expect(o.ignored).toEqual(expect.arrayContaining([
+        '« fantôme » : copie — décision sans objet — ignorée',
+        '« ancien » : suppression — décision sans objet — ignorée',
+        'widget : décision sans objet — ignorée',
+      ]));
+      expect(o.success).toBe(true);
+    });
+
+    it('sections not confirmed: no copy, delete or widget is attempted', async () => {
+      const h = harness(richWorld(), { dropWrites: true });
+      const o = await runLevelChange(input({ decisions: withDelete(await defaults(h)) }), h.deps);
+      expect(o.success).toBe(false);
+      expect(h.calls.filter(c => /^(create|remove|acl|color)/.test(c) || c === 'desc:P')).toEqual([]);
+      expect(o.remaining).toContain('actions supplémentaires non faites — sections non confirmées');
+    });
+
+    it('re-run after success writes nothing and succeeds', async () => {
+      const h = harness(richWorld());
+      const d = withDelete(await defaults(h));
+      expect((await runLevelChange(input({ decisions: d }), h.deps)).success).toBe(true);
+      h.calls.length = 0;
+      const again = await runLevelChange(input({ decisions: await defaults(h) }), h.deps);
+      expect(again).toMatchObject({ success: true, applied: 0, remaining: [], ignored: [] });
+      expect(again.plan?.templateOnlyItems).toEqual([]);
+      expect(again.plan?.widget.needed).toBe(false);
+      expect(h.calls).toEqual([]);
     });
   });
 });

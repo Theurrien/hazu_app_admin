@@ -68,6 +68,8 @@ export interface LevelChangeOutcome {
   remaining: string[];
   /** items skipped on purpose: not seen in the preview, or decisions with no matching item */
   ignored: string[];
+  /** informational lines from confirmed steps (e.g. a duplicate copy removed); never a failure */
+  notes?: string[];
   /** refusal / abort reason, nothing written */
   error?: string;
 }

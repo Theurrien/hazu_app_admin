@@ -19,6 +19,7 @@ import { withArchiveLock } from './archive-lock';
 import {
   LEVEL_COLORS,
   LcNode,
+  LevelChangeBaseDeps,
   LevelChangeDeps,
   isTemplateNode,
   stripTitle,
@@ -54,7 +55,7 @@ function toLcNode(raw: unknown): LcNode | null {
     : null;
 }
 
-function buildDeps(): LevelChangeDeps {
+function buildDeps(): LevelChangeBaseDeps {
   return {
     // null ONLY on a 404; anything else throws.
     read: async (id) => {
@@ -149,6 +150,16 @@ export function listLevelChangeStudents(): LevelChangeStudent[] {
   }));
 }
 
+// TODO(Task 5): the real copy/ACL/remove calls. Until then every one of them refuses, so a run that
+// reaches a copy or a delete fails it (the live read then decides: nothing confirmed, colour withheld).
+// Today the service sends no decisions, so an execute is refused before any write anyway.
+function pendingActionDeps(): Omit<LevelChangeDeps, keyof LevelChangeBaseDeps> {
+  const refuse = async (): Promise<never> => {
+    throw { networkOrTimeout: false, message: 'copie / suppression pas encore branchées' };
+  };
+  return { readFull: refuse, listFull: refuse, create: refuse, remove: refuse, acl: refuse, setRole: refuse, removeFromAcl: refuse };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Candidates (live)
 
@@ -187,8 +198,9 @@ async function run(
   if (!isLocalStudent(personId)) return refusal(dryRun, 'profil introuvable');
   try {
     return await runLevelChange(
-      { profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun },
-      buildDeps(),
+      // TODO(Task 5): role groups from distribution_groups, the resolved student id, the decisions
+      { profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun, roleGroups: new Map(), studentId: null },
+      { ...buildDeps(), ...pendingActionDeps() },
     );
   } catch (e) {
     return refusal(dryRun, toFailure(e).message);
