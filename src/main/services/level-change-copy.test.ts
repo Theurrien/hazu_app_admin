@@ -458,3 +458,44 @@ describe('copySection — R12 access cases', () => {
     expect(w.log.setRole).toEqual([]);
   });
 });
+
+describe('copySection — empty role groups (no members, so no ACL entry)', () => {
+  // the student's room groups as the last sync knows them; g-ct and g-sa have no member on the node
+  const room = new Map([['g-cm', 'companymentor'], ['g-ct', 'courseteacher'], ['g-sa', 'stateadvisor']]);
+  const all = new Map([...groups, ['g-ct', 'courseteacher'], ['g-sa', 'stateadvisor']]);
+  it('detaches an empty group no share tag names, and says it cannot be verified', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('own', 'owner', true, 'g-owner')]);
+    const r = await copySection('t-sec', 'prof', w.deps, all, S, room);
+    const top = r.newId!;
+    expect(w.log.detach).toContain(`${top}:g-ct`);
+    expect(w.log.detach).toContain(`${top}:g-sa`);
+    expect(r.notes).toContain(
+      '« Learning FSRS » : groupe courseteacher sans membres détaché — non vérifiable (aucune entrée à relire)');
+  });
+  it('an empty group a share tag names is not detached: its role cannot be read, noted for a check', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('own', 'owner', true, 'g-owner')]);
+    const r = await copySection('t-sec', 'prof', w.deps, all, S, room);
+    const child = [...w.nodes.values()].find(x => x.parentId === r.newId)!; // tagged hz-share-companymentor-editor
+    expect(w.log.detach).not.toContain(`${child.id}:g-cm`);
+    expect(r.notes).toContain(
+      '« Child » : groupe companymentor sans membres — rôle non vérifiable, à contrôler dans Hazu (editor attendu)');
+  });
+  it('a group with members is left to the access check (never touched by this step)', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('m1', 'reader', true, 'g-cm'), row('own', 'owner', true, 'g-owner')]);
+    const r = await copySection('t-sec', 'prof', w.deps, all, S, new Map([['g-cm', 'companymentor']]));
+    expect((r.notes ?? []).some(n => n.includes('sans membres'))).toBe(false);
+  });
+  it('a failed detach of an empty group is a note to check by hand, not a failure', async () => {
+    const w = world();
+    w.setInitialAcl(() => [row(S, 'admin'), row('own', 'owner', true, 'g-owner')]);
+    const detach = w.deps.detachGroup;
+    w.deps.detachGroup = async (id, g) => { if (g === 'g-ct') throw { status: 404, networkOrTimeout: false, message: 'x' }; return detach(id, g); };
+    const r = await copySection('t-sec', 'prof', w.deps, all, S, room);
+    expect(r.ok).toBe(true);
+    expect(r.notes).toContain(
+      '« Learning FSRS » : groupe courseteacher sans membres — détachement non confirmé, à vérifier dans Hazu');
+  });
+});

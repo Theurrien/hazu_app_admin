@@ -2,6 +2,7 @@
 // local SQLite. No planning logic lives here. Spec: docs/specs/2026-11-26-level-change-design.md
 // Logs carry the profile id only — never a name or an e-mail address.
 
+import { parseClassTag } from './discrepancy';
 import axios from 'axios';
 import { getDb } from '../database';
 import {
@@ -165,6 +166,25 @@ export function roleGroupMap(): Map<string, string> {
   return new Map(rows.map((r) => [r.id, r.role]));
 }
 
+/** The role groups of the student's rooms, incl. empty ones no ACL read shows. The rooms are the
+ *  last sync's assignments plus every room named by a class tag on the profile (as the person archive
+ *  does): a student missing from the class's student group still carries the tag. */
+export function studentRoomGroups(personId: string): Map<string, string> {
+  const db = getDb();
+  const row = db.prepare('SELECT tags FROM persons WHERE id = ?').get(personId) as { tags: string | null } | undefined;
+  let tags: string[] = [];
+  try { tags = JSON.parse(row?.tags ?? '[]'); } catch { tags = []; }
+  const classIds = [...new Set(tags.map(t => parseClassTag(String(t))?.classId).filter((c): c is string => !!c))];
+  const byClass = classIds.length
+    ? `OR dg.room_id IN (SELECT id FROM rooms WHERE class_id IN (${classIds.map(() => '?').join(',')}))`
+    : '';
+  const rows = db.prepare(
+    `SELECT DISTINCT dg.id, dg.role FROM distribution_groups dg
+      WHERE dg.room_id IN (SELECT room_id FROM person_room_assignments WHERE person_id = ?) ${byClass}`,
+  ).all(personId, ...classIds) as Array<{ id: string; role: string }>;
+  return new Map(rows.map((r) => [r.id, r.role]));
+}
+
 /** The identity tag value (`hz-config-userid-*`) stored as persons.email; a UID on some profiles, an e-mail on others. */
 function identityTag(personId: string): string | null {
   const row = getDb().prepare('SELECT email FROM persons WHERE id = ?').get(personId) as { email: string | null } | undefined;
@@ -278,6 +298,7 @@ async function run(
       {
         profileId: personId, toLevel, targetTemplateId, templateRootId: templateRootId(), dryRun,
         decisions, roleGroups: roleGroupMap(), studentId, studentUnknown: student.reason,
+        roomGroups: studentRoomGroups(personId),
       },
       buildDeps(),
     );

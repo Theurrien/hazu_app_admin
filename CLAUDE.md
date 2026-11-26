@@ -952,6 +952,17 @@ role-group row without a principal is never taken as settled. Rows are classifie
 **not `isGroup`** (the S6 trap again). The student's id is the `hz-config-userid` UID, or an e-mail
 resolved through the profile ACL (`description` → `authorId`), also without the `isGroup` filter.
 
+**Empty role groups.** A group with no members leaves no entry in an item's ACL (rows are per member),
+so no ACL read — old `/acl` or `GET /api-v2-permissions/acl` — shows it, yet it stays attached and a
+member joining later gets access (measured 2026-11-26: school/course teacher groups of a test company
+had no members). Hazu has no GET for an item's attached groups. So, on every copied node, before the
+access check, the run takes the role groups of the student's rooms (last sync's assignments plus the
+rooms named by the profile's class tags, `studentRoomGroups`) that have **no** entry on the node: no
+share tag for the role → detached (« groupe … sans membres détaché — non vérifiable »); named by a share
+tag → not touched, its role cannot be read (« rôle non vérifiable, à contrôler dans Hazu (editor
+attendu) »). These are **notes**, never failures: nothing can be read back. Setting an empty group's role
+needs the call behind Hazu's « Hazu référencé » role dropdown, not known yet.
+
 **Known limitation:** a copy kept with unconfirmed access is named in `remaining`
 (« … à corriger à la main (une nouvelle exécution ne le refait pas) »). A re-run does not re-check
 it, and will then write the colour.

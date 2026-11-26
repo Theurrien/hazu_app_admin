@@ -260,6 +260,8 @@ export interface LevelChangeInput {
   studentId: string | null;
   /** why studentId is null (named in the report) */
   studentUnknown?: StudentUnknown | null;
+  /** role groups of the student's rooms (last sync): empty ones leave no ACL entry on a copy */
+  roomGroups?: Map<string, string>;
 }
 
 const VERIFY_READS = 3;
@@ -398,6 +400,7 @@ async function runActions(
   a: Actions, ctx: {
     profile: LcNode; targetRootDescription: string; targetKeys: Set<string>;
     roleGroups: Map<string, string>; studentId: string | null; studentUnknown?: StudentUnknown | null;
+    roomGroups?: Map<string, string>;
   }, deps: LevelChangeDeps,
 ): Promise<{ applied: number; remaining: string[]; notes: string[] }> {
   const remaining: string[] = [];
@@ -406,7 +409,8 @@ async function runActions(
   const profileId = ctx.profile.id;
 
   for (const c of a.copies) {
-    const r = await copySection(c.templateSectionId, profileId, deps, ctx.roleGroups, ctx.studentId);
+    const r = await copySection(c.templateSectionId, profileId, deps, ctx.roleGroups, ctx.studentId, ctx.roomGroups);
+    notes.push(...(r.notes ?? [])); // empty role groups: unverifiable by nature, never a failure
     const failures: string[] = [];
     for (const p of r.problems) {
       const access = ACCESS_PROBLEM.exec(p);
@@ -562,6 +566,7 @@ export async function runLevelChange(input: LevelChangeInput, deps: LevelChangeD
     profile: profile!, targetRootDescription: targetRef!.description,
     targetKeys: new Set(targetChildren!.map(sectionKey)),
     roleGroups: input.roleGroups, studentId: input.studentId, studentUnknown: input.studentUnknown,
+    roomGroups: input.roomGroups,
   }, deps);
   applied += acted.applied;
   const notes = acted.notes;
