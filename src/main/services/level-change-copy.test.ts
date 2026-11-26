@@ -20,6 +20,26 @@ describe('tags', () => {
   });
 });
 
+describe('planAclFix — rows classified by groupId, not isGroup', () => {
+  it('student stored with isGroup:true is seen: raised when lower', () => {
+    const rows = [row(S, 'reader', true, null)];
+    expect(planAclFix(rows, ['hz-invite-self-admin'], groups, S).raiseStudent).toBe('admin');
+  });
+  it('student stored with isGroup:true at admin: no write, matches', () => {
+    const rows = [row(S, 'admin', true, null)];
+    expect(planAclFix(rows, ['hz-invite-self-admin'], groups, S)).toEqual({ raiseStudent: null, setGroups: [], removeGroups: [] });
+    expect(aclMatches(rows, ['hz-invite-self-admin'], groups, S)).toBe(true);
+  });
+  it('person row with isGroup:true and no groupId is never removed', () => {
+    const rows = [row('other', 'reader', true, null)];
+    expect(planAclFix(rows, [], groups, S).removeGroups).toEqual([]);
+    expect(aclMatches(rows, [], groups, S)).toBe(true);
+  });
+  it('a role group is recognised by groupId even with isGroup:false', () => {
+    expect(planAclFix([row('a-st', 'reader', false, 'g-st')], [], groups, S).removeGroups).toEqual(['a-st']);
+  });
+});
+
 describe('planAclFix', () => {
   it('raises a lower student', () => {
     const f = planAclFix([row(S, 'reader')], ['hz-invite-self-admin'], groups, S);

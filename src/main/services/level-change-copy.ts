@@ -70,13 +70,14 @@ export interface AclFix {
 }
 
 function isRoleGroup(r: AclRow, roleGroups: Map<string, string>): boolean {
-  return r.isGroup && !!r.groupId && roleGroups.has(r.groupId);
+  // classified by groupId, never by isGroup: a person's direct grant can be stored with isGroup:true
+  return !!r.groupId && roleGroups.has(r.groupId);
 }
 
 function studentRank(rows: AclRow[], studentId: string): number {
   let best = 0;
   for (const r of rows) {
-    if (!r.isGroup && r.authorId === studentId) best = Math.max(best, ROLE_RANK[r.role] ?? 0);
+    if (r.authorId === studentId) best = Math.max(best, ROLE_RANK[r.role] ?? 0);
   }
   return best;
 }
