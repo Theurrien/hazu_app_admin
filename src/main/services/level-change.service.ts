@@ -15,13 +15,13 @@ import {
   sendApiRequestGetAclInfoChecked,
   sendApiRequestSetAclRoleChecked,
   sendApiRequestRemoveUserChecked,
+  sendApiRequestListStrictChecked,
 } from './hazu-api/api';
 import { normalizeRow } from './formation/parse';
-import { resolveSelfUid, type AclEntry } from './formation/read';
-import { toAclRows, toCopyNode } from './level-change-wire';
+import { aclEntries, copiesRefusal, studentIdFromAcl, toAclRows, toCopyNode } from './level-change-wire';
 import type { CopyNode } from './level-change-copy';
 import type { LevelChangeDecisions } from '../../shared/level-change-decisions';
-import { setting, toError, toFailure } from './room-archive.service';
+import { setting, toError, toFailure, wrap } from './room-archive.service';
 import { withRetry, type ApiFailure } from './room-archive';
 import { getSyncProgress } from './sync.service';
 import { withArchiveLock } from './archive-lock';
@@ -63,14 +63,6 @@ function toLcNode(raw: unknown): LcNode | null {
     : null;
 }
 
-async function wrap<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    throw toFailure(e);
-  }
-}
-
 /** A null-only-on-404 read through `map`. */
 async function readMapped<T>(id: string, map: (raw: unknown) => T | null): Promise<T | null> {
   try {
@@ -81,14 +73,28 @@ async function readMapped<T>(id: string, map: (raw: unknown) => T | null): Promi
   }
 }
 
-/** A listing through `map`; the parent echo and rows the mapper rejects are dropped. */
-async function listMapped<T extends { id: string }>(parentId: string, map: (raw: unknown) => T | null): Promise<T[]> {
+/**
+ * A listing through `map`; the parent echo and rows the mapper rejects are dropped. `strict`: an
+ * unexpected response shape throws instead of reading as empty (the copy walk and its checks).
+ */
+async function listMapped<T extends { id: string }>(
+  parentId: string, map: (raw: unknown) => T | null, strict = false,
+): Promise<T[]> {
   const out: T[] = [];
-  for (const raw of await wrap(() => sendApiRequestListChecked(parentId))) {
+  const listCall = strict ? sendApiRequestListStrictChecked : sendApiRequestListChecked;
+  for (const raw of await wrap(() => listCall(parentId))) {
     const n = map(raw);
     if (n && n.id !== parentId) out.push(n);
   }
   return out;
+}
+
+/** Never a PUT / DELETE /acl without a principal: a non-retryable failure instead. */
+function requirePrincipal(principalId: string): void {
+  if (!principalId || !principalId.trim()) {
+    const failure: ApiFailure = { networkOrTimeout: false, message: 'principal ACL vide — refusé' };
+    throw failure;
+  }
 }
 
 function buildDeps(): LevelChangeDeps {
@@ -115,7 +121,7 @@ function buildDeps(): LevelChangeDeps {
     },
     // Copy walk: full nodes (type, privacy, event.rolesSettings kept).
     readFull: (id) => readMapped(id, toCopyNode),
-    listFull: (parentId) => listMapped(parentId, toCopyNode),
+    listFull: (parentId) => listMapped(parentId, toCopyNode, true),
     create: async (parentId: string, from: CopyNode) => {
       if (!authorId) {
         const failure: ApiFailure = { networkOrTimeout: false, message: "compte administrateur inconnu — synchronisez d'abord" };
@@ -139,8 +145,12 @@ function buildDeps(): LevelChangeDeps {
     },
     remove: (id) => wrap(() => sendApiRequestRemoveChecked(id)),
     acl: async (id) => toAclRows(await wrap(() => sendApiRequestGetAclInfoChecked(id))),
-    setRole: (itemId, principalId, role) => wrap(() => sendApiRequestSetAclRoleChecked(principalId, itemId, role)),
+    setRole: async (itemId, principalId, role) => {
+      requirePrincipal(principalId);
+      await wrap(() => sendApiRequestSetAclRoleChecked(principalId, itemId, role));
+    },
     removeFromAcl: async (itemId, principalId) => {
+      requirePrincipal(principalId);
       const r = await sendApiRequestRemoveUserChecked(itemId, principalId);
       if (!r.ok) {
         const failure: ApiFailure = {
@@ -168,9 +178,9 @@ function identityTag(personId: string): string | null {
   return v || null;
 }
 
-/** The student's account id — the Missions rule (resolveSelfUid): a UID as is, an e-mail via the profile ACL. */
-export function resolveStudentId(personId: string, profileAcl: AclEntry[]): string | null {
-  return resolveSelfUid(identityTag(personId), profileAcl);
+/** The student's account id: a UID as is, an e-mail via the profile ACL (studentIdFromAcl, no isGroup filter). */
+export function resolveStudentId(personId: string, profileAcl: unknown[]): string | null {
+  return studentIdFromAcl(identityTag(personId), profileAcl);
 }
 
 /** Reads the profile ACL only when the identity tag holds an e-mail. Unreadable → null (unresolved). */
@@ -180,8 +190,7 @@ async function liveStudentId(personId: string): Promise<string | null> {
   if (!tag.includes('@')) return resolveStudentId(personId, []);
   try {
     const resp = await withRetry({ sleep }, () => wrap(() => sendApiRequestGetAclInfoChecked(personId)));
-    const entries = (resp as { data?: AclEntry[] } | null)?.data;
-    return resolveStudentId(personId, Array.isArray(entries) ? entries : []);
+    return resolveStudentId(personId, aclEntries(resp));
   } catch (e) {
     console.warn(`[level-change] profile=${personId} profile ACL unreadable, student id unresolved:`, toFailure(e).message);
     return null;
@@ -297,6 +306,9 @@ export async function executeLevelChange(
 ): Promise<LevelChangeOutcome> {
   if (!isDecisions(decisions)) return refusal(false, "décisions manquantes — rien n'a été écrit");
   if (!isLocalStudent(personId)) return refusal(false, 'profil introuvable');
+  // Ruling R11: copies align access by the synced role groups; none known → refused before any write.
+  const noGroups = copiesRefusal(decisions.copySections, roleGroupMap().size);
+  if (noGroups) return refusal(false, noGroups);
   if (getSyncProgress().status === 'syncing') {
     return refusal(false, 'synchronisation en cours — réessayez ensuite');
   }

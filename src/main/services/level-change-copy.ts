@@ -94,6 +94,9 @@ export function planAclFix(
   const shares = shareRoles(tags);
   for (const r of rows) {
     if (!isRoleGroup(r, roleGroups)) continue;
+    // Never a write without a principal, and never the student through the group path: the
+    // student is only ever raised (raiseStudent), never lowered or removed.
+    if (!r.authorId || (studentId !== null && r.authorId === studentId)) continue;
     const want = shares.get(roleGroups.get(r.groupId as string) as string);
     if (want === undefined) fix.removeGroups.push(r.authorId);
     else if (r.role !== want) fix.setGroups.push({ principalId: r.authorId, role: want });
@@ -153,6 +156,28 @@ async function createOnce(
 
 interface Copied { id: string; node: CopyNode }
 
+export const FIDELITY_PROBLEM = 'type ou confidentialité différents du modèle';
+
+/**
+ * The created node read back: when the source has a type or a privacy, the copy must carry the same
+ * (a source without them was sent without them, and is not checked). Up to 3 reads for a node not
+ * yet visible; a mismatch or a node never seen throws, which makes the copy partial (removed).
+ */
+async function checkFidelity(deps: CopyDeps, newId: string, from: CopyNode): Promise<void> {
+  if (!from.type && !from.privacy) return;
+  for (let i = 0; i < VERIFY_READS; i++) {
+    if (i > 0) await deps.sleep(VERIFY_DELAY_MS);
+    let got: CopyNode | null;
+    try { got = await withRetry(deps, () => deps.readFull(newId)); } catch { continue; }
+    if (!got) continue;
+    if ((from.type && got.type !== from.type) || (from.privacy && got.privacy !== from.privacy)) {
+      throw new Error(FIDELITY_PROBLEM);
+    }
+    return;
+  }
+  throw new Error('copie créée introuvable à la relecture');
+}
+
 async function copyTree(
   deps: CopyDeps, from: CopyNode, newParentId: string, depth: number,
   exclude: Set<string>, visited: Set<string>, copies: Copied[],
@@ -163,6 +188,7 @@ async function copyTree(
   const newId = await createOnce(deps, newParentId, from, exclude);
   exclude.add(newId);
   copies.push({ id: newId, node: from });
+  await checkFidelity(deps, newId, from);
   const kids = await withRetry(deps, () => deps.listFull(from.id));
   for (const k of kids) await copyTree(deps, k, newId, depth + 1, exclude, visited, copies);
 }

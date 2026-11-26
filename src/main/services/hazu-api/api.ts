@@ -6,7 +6,7 @@ import axios from "axios";
 import { CreateOptions, UpdateOptions, ApiParametersPropagate, HazuEntity } from "./interfaces";
 import { getApiKey, getApiEndpoint } from "./config";
 import { describeError } from "./describe-error";
-import { buildCreateFullBody, createdIdOf, CreateFullOptions } from "./create-full";
+import { buildCreateFullBody, newIdFromCreate, strictListRows, CreateFullOptions } from "./create-full";
 
 /**
  * Hazu accepts two header shapes and picks by key length. Exported so the S10 config probe
@@ -98,6 +98,17 @@ export const sendApiRequestListChecked = async (parentId: string): Promise<unkno
   return Array.isArray(data) ? data : data?.data || [];
 };
 
+// Strict variant for the level change copy walk: the same readChildren request, but a response that
+// is neither an array nor { data: [...] } throws instead of reading as an empty listing.
+export const sendApiRequestListStrictChecked = async (parentId: string): Promise<unknown[]> => {
+  const response = await axios.get(`https://${getApiEndpoint()}/readChildren`, {
+    headers: getAuthHeaders(),
+    params: { parentId },
+    timeout: 60_000,
+  });
+  return strictListRows(response.data);
+};
+
 // WRITE OPERATIONS
 
 // Checked create / remove / move for the room archive: the originals swallow errors and return
@@ -115,15 +126,14 @@ export const sendApiRequestCreateChecked = async (options: {
 
 // Checked full create for the level change copy: every field of the source (type, description,
 // icon, colour, privacy, tags, event.rolesSettings), body built by buildCreateFullBody. Returns the
-// new id; a 2xx without an id rejects (the caller's live re-list decides what landed). Rethrows.
+// new id; a 2xx without an id (or echoing the parent) rejects as networkOrTimeout, so the caller
+// re-lists and decides what landed. Rethrows.
 export const sendApiRequestCreateFullChecked = async (options: CreateFullOptions): Promise<string> => {
   const response = await axios.post(`https://${getApiEndpoint()}/create`, buildCreateFullBody(options), {
     headers: getAuthHeaders(),
     timeout: 60_000,
   });
-  const id = createdIdOf(response.data);
-  if (!id) throw new Error("création sans identifiant dans la réponse");
-  return id;
+  return newIdFromCreate(response.data, options.parentId);
 };
 
 // Checked PUT /update for the level change: only the given keys go into the body, an empty
@@ -578,6 +588,10 @@ export const sendApiRequestRemoveUserChecked = async (
   const body: Record<string, string> = { itemId };
   if (userId) body.userId = userId;
   if (userEmail) body.userEmail = userEmail;
+  // Never a DELETE /acl without a principal.
+  if (!body.userId && !body.userEmail) {
+    return { ok: false, networkOrTimeout: false, error: "aucun principal (userId / userEmail) — refusé" };
+  }
 
   try {
     await axios({

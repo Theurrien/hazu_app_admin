@@ -262,4 +262,56 @@ describe('copySection', () => {
     expect(w.nodes.has('stray')).toBe(false);
     expect(r.problems).toContain('doublon de la copie supprimé');
   });
+
+  it('a created node whose privacy differs from the template is a partial copy, removed', async () => {
+    const w = world();
+    const orig = w.deps.create;
+    w.deps.create = async (p, f) => {
+      const id = await orig(p, f);
+      if (f.id === 't-c1') w.nodes.set(id, { ...w.nodes.get(id)!, privacy: 'public' });
+      return id;
+    };
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(false);
+    expect(r.problems).toEqual(['copie incomplète — supprimée, à refaire']);
+    expect([...w.nodes.values()].filter(x => x.parentId === 'prof')).toEqual([]);
+  });
+
+  it('a created node whose type differs from the template is a partial copy, removed', async () => {
+    const w = world();
+    const orig = w.deps.create;
+    w.deps.create = async (p, f) => {
+      const id = await orig(p, f);
+      w.nodes.set(id, { ...w.nodes.get(id)!, type: 'item' });
+      return id;
+    };
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(false);
+    expect([...w.nodes.values()].filter(x => x.parentId === 'prof')).toEqual([]);
+  });
+
+  it('a source with no type and no privacy is not checked on them', async () => {
+    const w = world();
+    for (const id of ['t-sec', 't-c1', 't-c2']) w.nodes.set(id, { ...w.nodes.get(id)!, type: '', privacy: null });
+    const orig = w.deps.create;
+    w.deps.create = async (p, f) => {
+      const id = await orig(p, f);
+      w.nodes.set(id, { ...w.nodes.get(id)!, type: 'hazu', privacy: 'unlisted' });
+      return id;
+    };
+    const r = await copySection('t-sec', 'prof', w.deps, groups, S);
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe('planAclFix — principal guards', () => {
+  it('never removes or re-roles the student through a role group without a share tag', () => {
+    const f = planAclFix([row(S, 'reader', true, 'g-st')], [], groups, S);
+    expect(f.removeGroups).toEqual([]);
+    expect(f.setGroups).toEqual([]);
+  });
+  it('never emits an empty principal', () => {
+    const f = planAclFix([row('', 'reader', true, 'g-st'), row('', 'reader', true, 'g-cm')], ['hz-share-companymentor-editor'], groups, S);
+    expect(f).toEqual({ raiseStudent: null, setGroups: [], removeGroups: [] });
+  });
 });

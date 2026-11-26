@@ -80,7 +80,7 @@ export function toError(e: unknown): Error {
   return e instanceof Error ? e : new Error(toFailure(e).message);
 }
 
-async function wrap<T>(fn: () => Promise<T>): Promise<T> {
+export async function wrap<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {

@@ -42,3 +42,24 @@ export function createdIdOf(data: unknown): string | null {
   const id = d.key || d.snapshot?.key || d.id || d.data?.key;
   return typeof id === 'string' && id ? id : null;
 }
+
+/**
+ * The new id, or a failure the copy core re-lists on. A 2xx with no id, or with the parent's own id
+ * (an echo), says nothing about whether a node landed: both throw `networkOrTimeout: true`, so
+ * createOnce re-lists and adopts a landed node instead of leaving an unknown one.
+ */
+export function newIdFromCreate(data: unknown, parentId: string): string {
+  const id = createdIdOf(data);
+  if (!id) throw { networkOrTimeout: true, message: 'création sans identifiant dans la réponse' };
+  if (id === parentId) throw { networkOrTimeout: true, message: 'création : la réponse renvoie le parent' };
+  return id;
+}
+
+/** Rows of a /readChildren response: a bare array or `{ data: [...] }`; any other shape throws. */
+export function strictListRows(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data)) {
+    return (data as { data: unknown[] }).data;
+  }
+  throw new Error('réponse de liste inattendue');
+}
