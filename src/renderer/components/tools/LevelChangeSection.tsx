@@ -4,9 +4,10 @@ import type {
   LevelChangeOutcome,
   LevelChangeStudent,
 } from '../../../shared/level-change-types';
-import { defaultDecisions } from '../../../shared/level-change-decisions';
+import { defaultDecisions, type LevelChangeDecisions } from '../../../shared/level-change-decisions';
 import { useTaskQueue } from '../../contexts/TaskQueueContext';
-import { eligibility, hasApplicableChange, levelLabel, searchStudents } from './level-change-logic';
+import { eligibility, hasApplicableChange, levelLabel, searchStudents, toggleForced, toggleTagAdd } from './level-change-logic';
+import { LevelChangeActions } from './LevelChangeActions';
 
 const panel = { border: '1px solid var(--hazu-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -29,6 +30,7 @@ function LevelChangeSection() {
   const [templateId, setTemplateId] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [decisions, setDecisions] = useState<LevelChangeDecisions | null>(null);
   const [queued, setQueued] = useState(false);
   const [applyFailed, setApplyFailed] = useState(false);
   // The student the answers on screen must belong to; late answers for another one are dropped.
@@ -56,6 +58,7 @@ function LevelChangeSection() {
     setCandidatesError(null);
     setTemplateId('');
     setPreview(null);
+    setDecisions(null);
     setQueued(false);
     setApplyFailed(false);
     try {
@@ -72,6 +75,7 @@ function LevelChangeSection() {
   const changeTemplate = (id: string) => {
     setTemplateId(id);
     setPreview(null);
+    setDecisions(null);
   };
 
   const runPreview = async () => {
@@ -80,11 +84,13 @@ function LevelChangeSection() {
     const tpl = templateId;
     setPreviewing(true);
     setPreview(null);
+    setDecisions(null);
     setApplyFailed(false);
     try {
       const outcome = await window.electronAPI.planLevelChange(studentId, candidates.toLevel, tpl);
       if (selectedRef.current !== studentId) return;
       setPreview({ studentId, templateId: tpl, outcome });
+      setDecisions(outcome.plan ? defaultDecisions(outcome.plan) : null);
     } catch (e) {
       if (selectedRef.current !== studentId) return;
       setPreview({
@@ -99,11 +105,11 @@ function LevelChangeSection() {
 
   const plan = preview?.outcome.plan ?? null;
   const previewCurrent = !!preview && !!selected && preview.studentId === selected.id && preview.templateId === templateId;
-  const hasChange = hasApplicableChange(plan);
+  const hasChange = !!decisions && hasApplicableChange(plan, decisions);
   const canApply = previewCurrent && !preview!.outcome.error && hasChange && !queued;
 
   const apply = () => {
-    if (!selected || !candidates || !canApply || !plan) return;
+    if (!selected || !candidates || !canApply || !plan || !decisions) return;
     setQueued(true);
     setApplyFailed(false);
     addLevelChangeTask({
@@ -111,8 +117,7 @@ function LevelChangeSection() {
       displayName: selected.displayName,
       toLevel: candidates.toLevel,
       targetTemplateId: templateId,
-      // TODO(Task 6): the operator's own choices from the preview; until then the defaults.
-      decisions: defaultDecisions(plan),
+      decisions,
       onDone: () => {
         void loadStudents();
         if (selectedRef.current === selected.id) {
@@ -120,6 +125,7 @@ function LevelChangeSection() {
           setSelected(null);
           setCandidates(null);
           setPreview(null);
+          setDecisions(null);
           setTemplateId('');
           setQueued(false);
         }
@@ -238,7 +244,7 @@ function LevelChangeSection() {
           {previewCurrent && preview && (
             <div className="rounded-lg bg-gray-50 p-4 text-sm space-y-3">
               {preview.outcome.error && <p className="text-red-600">{preview.outcome.error}</p>}
-              {plan && (
+              {plan && decisions && (
                 <>
                   <div>
                     <p className="font-medium">Modèles consultés</p>
@@ -263,24 +269,38 @@ function LevelChangeSection() {
                         {s.removeTags.map((t) => (
                           <li key={`-${t}`} className="text-red-700 font-mono text-xs">− {t}</li>
                         ))}
+                        {s.uncertainTags.map((t) => (
+                          <li key={`?${t}`}>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={decisions.acceptedTagAdds.some((a) => a.sectionKey === s.sectionKey && a.tag === t)}
+                                onChange={() => setDecisions(toggleTagAdd(decisions, s.sectionKey, t))}
+                              />
+                              <span className="text-green-700 font-mono text-xs">+ {t}</span>
+                              <span className="text-xs text-gray-600">ajouter (pas de tag de ce type sur le profil)</span>
+                            </label>
+                          </li>
+                        ))}
                         {s.description && <li>description remplacée</li>}
-                        {s.descriptionKept && <li className="text-gray-600">modifiée à la main — non changée</li>}
+                        {s.descriptionKept && (
+                          <li className="text-gray-600">
+                            modifiée à la main — non changée
+                            <label className="flex items-center gap-2 text-gray-800">
+                              <input
+                                type="checkbox"
+                                checked={decisions.forcedDescriptions.includes(s.sectionKey)}
+                                onChange={() => setDecisions(toggleForced(decisions, s.sectionKey))}
+                              />
+                              <span>remplacer quand même</span>
+                            </label>
+                          </li>
+                        )}
                       </ul>
                     </div>
                   ))}
 
-                  {plan.profileOnly.length > 0 && (
-                    <p>
-                      <span className="font-medium">Sections seulement dans le profil : </span>
-                      {plan.profileOnly.join(', ')}
-                    </p>
-                  )}
-                  {plan.templateOnly.length > 0 && (
-                    <p>
-                      <span className="font-medium">Sections seulement dans le modèle : </span>
-                      {plan.templateOnly.join(', ')}
-                    </p>
-                  )}
+                  <LevelChangeActions plan={plan} decisions={decisions} onChange={setDecisions} />
 
                   {plan.noSourceCounterpart.length > 0 && (
                     <p>
@@ -296,6 +316,17 @@ function LevelChangeSection() {
                     </p>
                   )}
                   {localColourDiffers && <p className="text-amber-700">couleur locale différente de Hazu</p>}
+
+                  {preview.outcome.ignored.length > 0 && (
+                    <ul className="list-disc ml-5 text-amber-700">
+                      {preview.outcome.ignored.map((m, i) => <li key={`i${i}`}>{m}</li>)}
+                    </ul>
+                  )}
+                  {(preview.outcome.notes ?? []).length > 0 && (
+                    <ul className="list-disc ml-5 text-gray-600">
+                      {preview.outcome.notes!.map((m, i) => <li key={`n${i}`}>{m}</li>)}
+                    </ul>
+                  )}
 
                   <p className="text-gray-600">
                     Les classes et rôles ne changent pas — déplacez l'élève dans Matrix.
