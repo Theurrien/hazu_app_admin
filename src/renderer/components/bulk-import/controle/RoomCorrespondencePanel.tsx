@@ -59,18 +59,31 @@ export function RoomPicker({ candidates, initialId, firstIds = NO_IDS, busy, onC
         placeholder="Chercher une salle…"
         className="px-2 py-1 border border-gray-300 rounded w-full max-w-md text-sm"
       />
-      <select
-        size={Math.min(6, Math.max(2, options.length))}
-        value={selected ?? ''}
-        onChange={(e) => setSelected(e.target.value || null)}
-        className="block w-full max-w-md border border-gray-300 rounded text-sm"
-      >
-        {options.map((c) => (
-          <option key={c.id} value={c.id}>
-            {roomLabel(c, candidates)}
-          </option>
-        ))}
-      </select>
+      {/* A clickable list, not a <select>: a controlled <select> whose value matches no option shows
+          its first option as selected, and clicking it then fires no change — the first room could
+          not be picked. Every click here sets the selection. */}
+      {options.length > 0 && (
+        <ul
+          role="listbox"
+          aria-label="Salles"
+          className="w-full max-w-md max-h-40 overflow-y-auto border border-gray-300 rounded text-sm bg-white"
+        >
+          {options.map((c) => {
+            const isSel = c.id === selected;
+            return (
+              <li key={c.id} role="option" aria-selected={isSel}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(c.id)}
+                  className={`w-full text-left px-2 py-1 ${isSel ? 'bg-blue-600 text-white' : 'hover:bg-gray-100'}`}
+                >
+                  {roomLabel(c, candidates)}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {options.length === 0 && <p className="text-xs text-gray-500">Aucune salle ne correspond.</p>}
       <div className="flex items-center gap-2">
         <button
