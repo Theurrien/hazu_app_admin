@@ -151,6 +151,32 @@ export function roomCandidates(
     .map((r) => ({ id: r.id, title: r.title, parentTitle: (r.parent_id && titleOf.get(r.parent_id)) || null }));
 }
 
+/**
+ * Where a new room of `type` is created: the category folder of that type directly under root —
+ * the same rule as Room Creation (`findTargetId`). Null when it is not known.
+ */
+export function creationTargetId(
+  rooms: Array<{ id: string; room_type: string; parent_id: string | null }>,
+  type: RoomCategory,
+  rootHazuId: string | null,
+): string | null {
+  if (!rootHazuId) return null;
+  return rooms.find((r) => r.room_type === type && r.parent_id === rootHazuId)?.id ?? null;
+}
+
+/** Why `name` cannot be created among `candidates` (same type), or null when it can. */
+export function createNameProblem(name: string, candidates: RoomCandidate[]): string | null {
+  const key = roomKey(name);
+  if (key === '') return 'nom vide';
+  if (candidates.some((c) => roomKey(c.title) === key)) return 'une salle de ce nom existe déjà';
+  return null;
+}
+
+/** One file value of one room column, for tracking its creation. */
+export function creationKey(category: RoomCategory, valueKey: string): string {
+  return `${category}|${valueKey}`;
+}
+
 /** Title shown in a list: twins (same `roomKey`) carry their parent folder so they can be told apart. */
 export function roomLabel(c: RoomCandidate, all: RoomCandidate[]): string {
   const key = roomKey(c.title);

@@ -18,6 +18,9 @@ import {
   leaverMatches,
   keepTicks,
   tickId,
+  creationTargetId,
+  createNameProblem,
+  creationKey,
   selectedLines,
   confirmCheck,
   plansToEnqueue,
@@ -501,5 +504,38 @@ describe('leaverMatches', () => {
       new Map<number, StudentResolution>([[2, { kind: 'check', candidateIds: ['pA', 'pB'], reason: 'conflict' }]]),
     );
     expect(m).toEqual([{ kind: 'check', rowIndex: 2, candidateIds: ['pA', 'pB'], reason: 'conflict' }]);
+  });
+});
+
+describe('creating a missing room', () => {
+  const rooms = [
+    { id: 'root-ent', title: 'Entreprise formatrice', room_type: 'enterprise', parent_id: 'ROOT' },
+    { id: 'e1', title: 'Hôtel du Lac', room_type: 'enterprise', parent_id: 'root-ent' },
+    { id: 'root-cls', title: 'École', room_type: 'class', parent_id: 'ROOT' },
+  ];
+
+  it('targets the category folder of the type, directly under root', () => {
+    expect(creationTargetId(rooms, 'enterprise', 'ROOT')).toBe('root-ent');
+    expect(creationTargetId(rooms, 'class', 'ROOT')).toBe('root-cls');
+  });
+
+  it('has no target without a category folder or a root id', () => {
+    expect(creationTargetId(rooms, 'state', 'ROOT')).toBeNull();
+    expect(creationTargetId(rooms, 'enterprise', null)).toBeNull();
+  });
+
+  it('refuses an empty name', () => {
+    expect(createNameProblem('   ', [])).toBe('nom vide');
+  });
+
+  it('refuses a name a room of the type already has, spacing and case aside', () => {
+    const candidates = [{ id: 'e1', title: 'Hôtel du Lac', parentTitle: null }];
+    expect(createNameProblem('  hôtel  du LAC ', candidates)).toBe('une salle de ce nom existe déjà');
+    expect(createNameProblem('Hôtel du Port', candidates)).toBeNull();
+  });
+
+  it('keys a creation by category and value', () => {
+    expect(creationKey('enterprise', 'hôtel du lac')).toBe('enterprise|hôtel du lac');
+    expect(creationKey('class', 'hôtel du lac')).not.toBe(creationKey('enterprise', 'hôtel du lac'));
   });
 });

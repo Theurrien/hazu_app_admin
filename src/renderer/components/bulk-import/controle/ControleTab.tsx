@@ -11,6 +11,7 @@ import {
 import type { HazuPerson, SheetPerson } from '../../../../shared/person-match';
 import { categoryIdsOf } from '../../../../shared/app-mode';
 import { findBestMatch } from '../../../utils/fuzzyMatch';
+import { useTaskQueue } from '../../../contexts/TaskQueueContext';
 import type { ColumnMapping } from '../ColumnMappingDropdown';
 import { DataPreviewTable } from '../DataPreviewTable';
 import { sheetLabel } from '../PersonCheckResults';
@@ -19,6 +20,8 @@ import {
   checkRows,
   columnsReady,
   controleColumns,
+  creationKey,
+  creationTargetId,
   distinctRoomValues,
   linkFromDecision,
   mappedCategories,
@@ -29,7 +32,7 @@ import {
   type ResolvedForCheck,
 } from './controle-logic';
 import { ControleResults } from './ControleResults';
-import { RoomCorrespondencePanel } from './RoomCorrespondencePanel';
+import { RoomCorrespondencePanel, type RoomTemplate, type TemplatesState } from './RoomCorrespondencePanel';
 import { SavedCorrespondencesDrawer } from './SavedCorrespondencesDrawer';
 import { StudentCorrespondencePanel } from './StudentCorrespondencePanel';
 
@@ -49,7 +52,30 @@ interface StepData {
   /** Candidates per type, category folders left out. */
   rooms: Record<RoomCategory, RoomCandidate[]>;
   categoryIds: Set<string>;
+  /** Category folder per type, where « Créer dans Hazu » creates; null = unknown. */
+  targets: Record<RoomCategory, string | null>;
   saved: SavedLink[];
+}
+
+/** Rooms of the local DB → candidates, category ids and creation targets. */
+function roomData(
+  rooms: Array<{ id: string; title: string; room_type: string; parent_id: string | null }>,
+  rootHazuId: string | null,
+): Pick<StepData, 'rooms' | 'categoryIds' | 'targets'> {
+  const categoryIds = categoryIdsOf(rooms, rootHazuId);
+  return {
+    rooms: {
+      class: roomCandidates(rooms, 'class', categoryIds),
+      enterprise: roomCandidates(rooms, 'enterprise', categoryIds),
+      state: roomCandidates(rooms, 'state', categoryIds),
+    },
+    categoryIds,
+    targets: {
+      class: creationTargetId(rooms, 'class', rootHazuId),
+      enterprise: creationTargetId(rooms, 'enterprise', rootHazuId),
+      state: creationTargetId(rooms, 'state', rootHazuId),
+    },
+  };
 }
 
 const STEPS: Array<{ n: 1 | 2 | 3; mark: string; label: string }> = [
@@ -102,6 +128,14 @@ export function ControleTab({ fileData }: ControleTabProps) {
   const [overrides, setOverrides] = useState<Map<number, string | null>>(new Map());
   /** Handed to step 3. */
   const [resolved, setResolved] = useState<ResolvedForCheck | null>(null);
+  const { addCreateRoomTask } = useTaskQueue();
+  /** Room templates, read once when a create form first opens. */
+  const [templates, setTemplates] = useState<{ state: TemplatesState; byType: Record<string, RoomTemplate[]> }>({
+    state: { status: 'idle' },
+    byType: {},
+  });
+  /** creationKey → state of the room created for that value. */
+  const [creating, setCreating] = useState<Map<string, 'pending' | 'failed'>>(new Map());
 
   useEffect(() => {
     generationRef.current += 1;
@@ -114,6 +148,7 @@ export function ControleTab({ fileData }: ControleTabProps) {
     setLoading(false);
     setError(null);
     setDrawerOpen(false);
+    setCreating(new Map());
   }, [fileData]);
 
   const columns = useMemo(() => controleColumns(state.mappings), [state.mappings]);
@@ -135,15 +170,9 @@ export function ControleTab({ fileData }: ControleTabProps) {
     ])
       .then(([persons, rooms, saved, rootHazuId]) => {
         if (gen !== generationRef.current) return;
-        const categoryIds = categoryIdsOf(rooms, rootHazuId);
         setData({
           students: persons.map((p: any) => ({ id: p.id, email: p.email ?? null, displayName: p.display_name })),
-          rooms: {
-            class: roomCandidates(rooms, 'class', categoryIds),
-            enterprise: roomCandidates(rooms, 'enterprise', categoryIds),
-            state: roomCandidates(rooms, 'state', categoryIds),
-          },
-          categoryIds,
+          ...roomData(rooms, rootHazuId),
           saved,
         });
       })
@@ -220,6 +249,68 @@ export function ControleTab({ fileData }: ControleTabProps) {
 
   const decideRoom = (category: RoomCategory, key: string, label: string, hazuId: string | null) => {
     void saveLinks([linkFromDecision(category, key, label, hazuId, Date.now())]);
+  };
+
+  const loadTemplates = () => {
+    if (templates.state.status === 'loading' || templates.state.status === 'ok') return;
+    setTemplates((t) => ({ ...t, state: { status: 'loading' } }));
+    window.electronAPI
+      .fetchTemplates()
+      .then((r) => {
+        if (!r.success || !r.templates) throw new Error(r.error || 'lecture impossible');
+        const byType: Record<string, RoomTemplate[]> = {};
+        for (const t of r.templates) (byType[t.roomType] ??= []).push({ id: t.id, title: t.title });
+        for (const list of Object.values(byType)) list.sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+        setTemplates({ state: { status: 'ok', templates: [] }, byType });
+      })
+      .catch((e) => setTemplates((t) => ({ ...t, state: { status: 'error', error: errMsg(e) } })));
+  };
+
+  const templatesFor = (c: RoomCategory): TemplatesState =>
+    templates.state.status === 'ok' ? { status: 'ok', templates: templates.byType[c] ?? [] } : templates.state;
+
+  const setCreation = (k: string, v: 'pending' | 'failed' | null) =>
+    setCreating((prev) => {
+      const next = new Map(prev);
+      if (v === null) next.delete(k);
+      else next.set(k, v);
+      return next;
+    });
+
+  /**
+   * Queue one `createRoom` task. On success the room list is re-read (the create handler stores
+   * the new room locally) and the value is linked to the new room, so it is resolved and stays so.
+   */
+  const createRoom = (category: RoomCategory, key: string, label: string, name: string, templateId: string) => {
+    const targetId = data?.targets[category];
+    if (!targetId) return;
+    const k = creationKey(category, key);
+    if (creating.get(k) === 'pending') return;
+    const gen = generationRef.current;
+    setCreation(k, 'pending');
+    addCreateRoomTask({
+      roomName: name,
+      templateId,
+      targetId,
+      onSuccess: (roomId) => {
+        if (gen !== generationRef.current) return;
+        Promise.all([window.electronAPI.getRooms(), window.electronAPI.getSetting('root_hazu_id')])
+          .then(([rooms, rootHazuId]) => {
+            if (gen !== generationRef.current) return;
+            setData((d) => (d ? { ...d, ...roomData(rooms, rootHazuId) } : d));
+            return saveLinks([linkFromDecision(category, key, label, roomId, Date.now())]);
+          })
+          .catch((e) => {
+            if (gen === generationRef.current) setError(`Lecture impossible : ${errMsg(e)}`);
+          })
+          .finally(() => {
+            if (gen === generationRef.current) setCreation(k, null);
+          });
+      },
+      onError: () => {
+        if (gen === generationRef.current) setCreation(k, 'failed');
+      },
+    });
   };
 
   const setOverride = (rowIndex: number, personId: string | null) =>
@@ -344,6 +435,15 @@ export function ControleTab({ fileData }: ControleTabProps) {
                   open={openRooms(c)}
                   busy={busy}
                   onDecide={(key, label, hazuId) => decideRoom(c, key, label, hazuId)}
+                  creation={{
+                    available: !!data.targets[c],
+                    status: new Map(
+                      [...creating].filter(([k]) => k.startsWith(`${c}|`)).map(([k, v]) => [k.slice(c.length + 1), v]),
+                    ),
+                    templates: templatesFor(c),
+                    loadTemplates,
+                    onCreate: (key, label, name, templateId) => createRoom(c, key, label, name, templateId),
+                  }}
                 />
               ))}
               <StudentCorrespondencePanel

@@ -1171,8 +1171,8 @@ what is **missing** in Hazu and what Hazu has **in excess**, per student and per
 canton, and fixes the ticked lines through the Task Queue. Verify stays as it is. Workflow
 `'controle'` in `ALL_WORKFLOWS` of [app-mode.ts](src/shared/app-mode.ts), **not** in `CIE_WORKFLOWS`.
 Spec: [docs/specs/2026-11-26-controle-design.md](docs/specs/2026-11-26-controle-design.md). It reads
-local SQLite only (sync first); roles other than `student` are neither checked nor fixed; nothing is
-created (a file value with no Hazu room is « ignoré », not created); no CIE column, and CIE rooms
+local SQLite only (sync first); roles other than `student` are neither checked nor fixed; no person is
+created, and a room only on the operator's « Créer dans Hazu » (below); no CIE column, and CIE rooms
 are never candidates for the class column.
 
 **Three steps.**
@@ -1185,6 +1185,18 @@ are never candidates for the class column.
 2. **Correspondances** — one panel per category (students, classes, companies, cantons) with an
    « n à résoudre » counter; « Contrôler » opens when every counter is 0 (an « ignoré » value counts
    as resolved).
+   **« Créer dans Hazu »** sits beside « Confirmer » / « Ignorer » on an open room value (class,
+   company, canton), when the type's category folder (child of root of that type, as Room Creation's
+   `findTargetId` — `creationTargetId`) is known and no room already carries the value's exact title
+   (twins). The inline form takes the name (the file's value, editable; refused when empty or equal,
+   `roomKey`-wise, to a local room of the type — `createNameProblem`) and a template of the type (read
+   once with `fetchTemplates`; one template is preselected). « Créer » queues one `createRoom` task —
+   the existing create handler, which stores the room locally and completes its class id and role
+   groups — and the value reads « création en cours » and cannot be queued again. On success the
+   rooms are re-read and the value is **saved** as linked to the new room id; on failure it reads
+   « création en échec — voir la file » and is open again. A creation whose webhook timed out after
+   the room landed shows as a failure while the room exists; it appears at the next sync — check
+   before creating it again.
 3. **Résultats** — the check, filters, ticks, « Corriger la sélection », and the leaver list.
 
 **Saved correspondences** (`file_correspondence`, local only, never written to Hazu; the sync and the
